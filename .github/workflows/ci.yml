@@ -14,26 +14,49 @@ permissions:
   contents: read
 
 jobs:
-  ci:
+  lint:
+    name: Lint & Typecheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run typecheck
+
+  test:
+    name: Unit & Integration
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+      - run: npm ci
+      # jest: unit + integration tests + whole-project coverage threshold; writes coverage/lcov.info
+      - run: npm test
+
+  patch-coverage:
+    name: Patch Coverage
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0 # full history so diff-cover can diff against the base branch
-
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
           cache: npm
-
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
       - run: npm ci
-
-      # Unit + integration tests + jest coverageThreshold; writes coverage/lcov.info.
-      - name: Test + coverage gate
-        run: npm test
-
-      # Patch coverage: lines changed in this PR must be >= 80% covered.
-      - name: Patch coverage (changed lines >= 80%)
+      - run: npm test
+      - name: Enforce patch coverage on changed lines (>= 80%)
         run: |
           python -m pip install --quiet diff-cover
           BASE="${{ github.base_ref || 'main' }}"
