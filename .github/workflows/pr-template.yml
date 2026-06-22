@@ -1,0 +1,49 @@
+name: PR template
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, edited, reopened, synchronize]
+
+permissions:
+  contents: read
+
+jobs:
+  pr-template:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate PR description
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const body = context.payload.pull_request.body || '';
+            // Strip HTML comments so the template's placeholder hints don't count as content.
+            const clean = body.replace(/<!--[\s\S]*?-->/g, '');
+            const problems = [];
+
+            const section = (name) => {
+              const re = new RegExp('##\\s*' + name + '\\b([\\s\\S]*?)(?=\\n##\\s|$)', 'i');
+              const m = clean.match(re);
+              return m ? m[1].trim() : null;
+            };
+
+            const summary = section('Summary');
+            if (summary === null) problems.push('Missing the "## Summary" section');
+            else if (!summary) problems.push('The "## Summary" section is empty');
+
+            const testing = section('Testing');
+            if (testing === null) problems.push('Missing the "## Testing" section');
+            else if (!testing) problems.push('The "## Testing" section is empty');
+
+            const typeBlock = (body.match(/##\s*Type of change\b([\s\S]*?)(?=\n##\s|$)/i) || [, ''])[1];
+            if (!/-\s*\[x\]/i.test(typeBlock)) problems.push('Check at least one box under "## Type of change"');
+
+            if (problems.length) {
+              core.setFailed(
+                'PR description does not follow .github/pull_request_template.md:\n- ' +
+                  problems.join('\n- ') +
+                  '\n\nEdit the PR description and the check will re-run.'
+              );
+            } else {
+              core.info('PR description follows the template.');
+            }
