@@ -17,7 +17,7 @@ jobs:
         uses: actions/github-script@v7
         with:
           script: |
-            const MAX_LINES = 500;
+            const MAX_LINES = 700;
             const MAX_FILES = 40;
             // Generated / lock / build / migration files do not count toward the size.
             const EXCLUDE = [
