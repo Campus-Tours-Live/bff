@@ -1,0 +1,21 @@
+import type { Me } from "../_shared/index.js";
+import type { Progress } from "./types.js";
+
+/**
+ * Participant onboarding progress — trivial by design (a single-step PATCH, no derived
+ * multi-step state). Completion is simply "holds the PARTICIPANT role" — the
+ * authoritative signal, read from /userinfo (never from activeRole). Same shape as the
+ * guide branch so the single front-end entry can render both uniformly.
+ */
+export function participantProgress(me: Me): Progress {
+  const complete = me.roles?.includes("PARTICIPANT") ?? false;
+  return {
+    role: "participant",
+    started: complete || me.participantType !== null,
+    complete,
+    canSubmit: !complete,
+    applicationStatus: null,
+    verificationStatus: null,
+    steps: [{ key: "profile", label: "Your details", done: complete }],
+  };
+}

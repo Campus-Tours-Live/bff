@@ -1,0 +1,23 @@
+# Dependencies
+node_modules
+
+# Build output
+dist
+*.tsbuildinfo
+
+# Test coverage
+coverage
+
+# Environment / secrets (keep the committed template)
+.env
+.env.*
+!.env.example
+
+# Husky internals (managed; regenerated on `npm install`)
+.husky/_/
+
+# Logs
+*.log
+
+# OS / editor noise
+.DS_Store

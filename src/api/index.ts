@@ -1,0 +1,13 @@
+import { Router } from "express";
+import { dashboardRoutes } from "./dashboard/routes.js";
+import { onboardingRoutes } from "./onboarding/routes.js";
+
+/**
+ * BFF aggregation API — front-end-shaped composites the Core does not expose directly.
+ * Each feature owns a folder (routes + handler + per-role processors), flattened here
+ * into one router. Mounted under /v1 BEFORE the generic coreProxy so these specific
+ * paths win over the catch-all passthrough.
+ */
+export const apiRouter: Router = Router();
+apiRouter.use(dashboardRoutes);
+apiRouter.use(onboardingRoutes);
