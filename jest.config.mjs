@@ -23,7 +23,10 @@ export default {
   setupFiles: ["<rootDir>/tests/setup.ts"],
   setupFilesAfterEnv: ["<rootDir>/tests/setup-after-env.ts"],
   testMatch: ["<rootDir>/tests/**/*.test.ts"],
-  // Coverage (`npm run test:coverage`). index.ts is the bootstrap/listen entry — excluded.
+  // Always collect coverage — so a plain `npm test` prints the terminal report and regenerates
+  // the istanbul HTML report (coverage/lcov-report/index.html), same as `npm run test:coverage`.
+  collectCoverage: true,
+  // index.ts is the bootstrap/listen entry — excluded.
   // Measure ONLY production code under src/ (exclude test files/helpers and the bootstrap entry).
   // Without this, Jest also instruments the test _helpers, which drags the global numbers down.
   collectCoverageFrom: ["src/**/*.ts", "!src/index.ts"],

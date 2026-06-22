@@ -32,38 +32,40 @@ a general-purpose or public API — it exists only to serve this one front-end.
 
 ## Contents
 
-- [Tech stack](#tech-stack)
-- [Prerequisites](#prerequisites)
-- [Google sign-in setup](#google-sign-in-setup)
-- [Getting started](#getting-started)
-- [Configuration (environment variables)](#configuration-environment-variables)
-- [Project layout](#project-layout)
-- [Authentication flow](#authentication-flow)
-- [Session & cookies](#session--cookies)
-- [Endpoints](#endpoints)
-- [Aggregation, proxy & the Core client](#aggregation-proxy--the-core-client)
-- [Contracts (envelope & errors)](#contracts-envelope--errors)
-- [Security](#security)
-- [Testing](#testing)
-- [Code quality](#code-quality)
-- [Git hooks & commit conventions](#git-hooks--commit-conventions)
-- [Build & run in production](#build--run-in-production)
-- [Troubleshooting](#troubleshooting)
+- [CampusToursLive.ai — BFF](#campustoursliveai--bff)
+  - [Contents](#contents)
+  - [Tech stack](#tech-stack)
+  - [Prerequisites](#prerequisites)
+  - [Google sign-in setup](#google-sign-in-setup)
+  - [Getting started](#getting-started)
+  - [Configuration (environment variables)](#configuration-environment-variables)
+  - [Project structure](#project-structure)
+  - [Authentication flow](#authentication-flow)
+  - [Session \& cookies](#session--cookies)
+  - [Endpoints](#endpoints)
+  - [Aggregation, proxy \& the Core client](#aggregation-proxy--the-core-client)
+  - [Contracts (envelope \& errors)](#contracts-envelope--errors)
+  - [Security](#security)
+  - [Testing](#testing)
+  - [Code quality](#code-quality)
+  - [Git hooks \& commit conventions](#git-hooks--commit-conventions)
+  - [Build \& run in production](#build--run-in-production)
+  - [Troubleshooting](#troubleshooting)
 
 ---
 
 ## Tech stack
 
-| Area        | Choice                                                                       |
-| ----------- | ---------------------------------------------------------------------------- |
-| Runtime     | **Node.js 20+** (ESM), **npm**                                               |
-| Language    | **TypeScript** (strict, native ESM — `"type": "module"`)                     |
-| Framework   | **Express 4**                                                                |
-| Auth        | Google OAuth 2.0 / OIDC — **Authorization Code + PKCE** (no SDK; `fetch`)    |
-| Session     | Encrypted cookie — **AES-256-GCM** via Node `crypto` (no external store)     |
-| HTTP client | native `fetch` (to the Core and to Google)                                   |
-| Testing     | **Jest** + **supertest** (Core & Google mocked)                             |
-| Tooling     | **ESLint** + **Prettier** + `tsc --noEmit` typecheck; **husky** git hooks    |
+| Area        | Choice                                                                    |
+| ----------- | ------------------------------------------------------------------------- |
+| Runtime     | **Node.js 20+** (ESM), **npm**                                            |
+| Language    | **TypeScript** (strict, native ESM — `"type": "module"`)                  |
+| Framework   | **Express 4**                                                             |
+| Auth        | Google OAuth 2.0 / OIDC — **Authorization Code + PKCE** (no SDK; `fetch`) |
+| Session     | Encrypted cookie — **AES-256-GCM** via Node `crypto` (no external store)  |
+| HTTP client | native `fetch` (to the Core and to Google)                                |
+| Testing     | **Jest** + **supertest** (Core & Google mocked)                           |
+| Tooling     | **ESLint** + **Prettier** + `tsc --noEmit` typecheck; **husky** git hooks |
 
 There is intentionally **no database, no Redis, and no external session store** — the session is a
 self-contained encrypted cookie.
@@ -130,7 +132,7 @@ resulting `id_token` and needs the **Client ID** alone. Both share **one** OAuth
 **Who uses what — both services must point at the _same_ client:**
 
 | Value             | BFF (this repo)                                                        | Core                                                     |
-| ----------------- | --------------------------------------------------------------------- | -------------------------------------------------------- |
+| ----------------- | ---------------------------------------------------------------------- | -------------------------------------------------------- |
 | **Client ID**     | `GOOGLE_CLIENT_ID` — identifies the app to Google                      | `GOOGLE_CLIENT_ID` — the `id_token` audience it enforces |
 | **Client secret** | `GOOGLE_CLIENT_SECRET` — required to exchange the auth code for tokens | _not used_                                               |
 
@@ -152,14 +154,23 @@ cp .env.example .env       # then fill SESSION_SECRET + GOOGLE_CLIENT_ID + GOOGL
 npm run dev                # tsx watch — hot reload on http://localhost:4000
 ```
 
+`SESSION_SECRET`, `GOOGLE_CLIENT_ID`, and `GOOGLE_CLIENT_SECRET` are **required** — the BFF throws on
+startup if any is missing.
+
+To create `SESSION_SECRET`, **run this in your terminal** and paste the printed value into `.env`:
+
+```bash
+openssl rand -hex 32       # prints a 64-char hex string → SESSION_SECRET=<that value>
+```
+
+(`openssl` ships with macOS and Linux. On Windows use Git Bash / WSL, or run
+`node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"` instead.)
+
 Verify it's up:
 
 ```bash
 curl http://localhost:4000/health      # {"status":"ok","auth":"google"}
 ```
-
-`SESSION_SECRET`, `GOOGLE_CLIENT_ID`, and `GOOGLE_CLIENT_SECRET` are **required** — the BFF throws on
-startup if any is missing. Generate a session secret with `openssl rand -hex 32`.
 
 **Full local stack** (needed to actually log in), in order:
 
@@ -178,24 +189,24 @@ Configuration comes entirely from environment variables. On startup the BFF **au
 in the real environment take precedence over the file. Keep `.env` git-ignored; in production inject
 these from the platform's secrets manager.
 
-| Variable               | Purpose                                                                 | Default                                  | Secret?     |
-| ---------------------- | ----------------------------------------------------------------------- | ---------------------------------------- | ----------- |
-| `PORT`                 | Port the BFF listens on                                                 | `4000`                                   | no          |
-| `WEB_ORIGIN`           | Web app origin — used for **CORS** and the **CSRF** origin check        | `http://localhost:3001`                  | no          |
-| `WEB_BASE_URL`         | Web app base URL — used to build post-login redirect URLs               | `http://localhost:3001`                  | no          |
-| `CORE_API_BASE_URL`    | Downstream Core API base URL                                            | `http://localhost:8080`                  | no          |
-| `SESSION_SECRET`       | Key material for the AES-256-GCM session cookie (`openssl rand -hex 32`) | _(required)_                             | **yes**     |
-| `GOOGLE_CLIENT_ID`     | OAuth client ID (identifies the app to Google; Core's `aud`)            | _(required)_                             | no (public) |
-| `GOOGLE_CLIENT_SECRET` | OAuth client secret (used to exchange the auth code for tokens)         | _(required)_                             | **yes**     |
-| `GOOGLE_REDIRECT_URI`  | OAuth redirect; must match the Google client exactly                   | `http://localhost:3001/auth/callback`    | no          |
-| `NODE_ENV`             | `production` ⇒ session cookie gets the `Secure` flag                    | _(unset)_                                | no          |
+| Variable               | Purpose                                                                  | Default                               | Secret?     |
+| ---------------------- | ------------------------------------------------------------------------ | ------------------------------------- | ----------- |
+| `PORT`                 | Port the BFF listens on                                                  | `4000`                                | no          |
+| `WEB_ORIGIN`           | Web app origin — used for **CORS** and the **CSRF** origin check         | `http://localhost:3001`               | no          |
+| `WEB_BASE_URL`         | Web app base URL — used to build post-login redirect URLs                | `http://localhost:3001`               | no          |
+| `CORE_API_BASE_URL`    | Downstream Core API base URL                                             | `http://localhost:8080`               | no          |
+| `SESSION_SECRET`       | Key material for the AES-256-GCM session cookie (`openssl rand -hex 32`) | _(required)_                          | **yes**     |
+| `GOOGLE_CLIENT_ID`     | OAuth client ID (identifies the app to Google; Core's `aud`)             | _(required)_                          | no (public) |
+| `GOOGLE_CLIENT_SECRET` | OAuth client secret (used to exchange the auth code for tokens)          | _(required)_                          | **yes**     |
+| `GOOGLE_REDIRECT_URI`  | OAuth redirect; must match the Google client exactly                     | `http://localhost:3001/auth/callback` | no          |
+| `NODE_ENV`             | `production` ⇒ session cookie gets the `Secure` flag                     | _(unset)_                             | no          |
 
 > `WEB_ORIGIN`/`WEB_BASE_URL` default to the local web origin (`:3001`, matching `.env.example`). Set
 > them explicitly if your web app runs on a different host or port.
 
 ---
 
-## Project layout
+## Project structure
 
 Rooted at `src/` (ESM TypeScript). `index.ts` boots the server; everything else builds the `app`,
 which `app.ts` exports so tests can drive it via supertest without binding a port.
@@ -281,16 +292,16 @@ If the refresh fails, the request triggers re-authentication (see below).
 
 **Front-facing (called by the web app):**
 
-| Route                     | Purpose                                                                  |
-| ------------------------- | ------------------------------------------------------------------------ |
-| `GET /health`             | Liveness — `{ "status": "ok", "auth": "google" }`                        |
-| `GET /auth/login`         | Start Google sign-in. Query: `returnTo`, `intent`, `login_hint`          |
-| `GET /auth/callback`      | Google redirect target (code → session, then redirect to the web app)    |
-| `GET\|POST /auth/logout`  | Clear the session cookie, return to the web app                          |
-| `GET /auth/session`       | `{ authenticated: boolean }` (no Core call)                              |
-| `GET /v1/dashboard`       | **Aggregation** — role-aware home (discriminated by `kind`)              |
-| `GET /v1/onboarding`      | **Aggregation** — onboarding bootstrap data                             |
-| `ALL /v1/*` (other)       | **Proxy** to the Core API (authenticated passthrough)                    |
+| Route                    | Purpose                                                               |
+| ------------------------ | --------------------------------------------------------------------- |
+| `GET /health`            | Liveness — `{ "status": "ok", "auth": "google" }`                     |
+| `GET /auth/login`        | Start Google sign-in. Query: `returnTo`, `intent`, `login_hint`       |
+| `GET /auth/callback`     | Google redirect target (code → session, then redirect to the web app) |
+| `GET\|POST /auth/logout` | Clear the session cookie, return to the web app                       |
+| `GET /auth/session`      | `{ authenticated: boolean }` (no Core call)                           |
+| `GET /v1/dashboard`      | **Aggregation** — role-aware home (discriminated by `kind`)           |
+| `GET /v1/onboarding`     | **Aggregation** — onboarding bootstrap data                           |
+| `ALL /v1/*` (other)      | **Proxy** to the Core API (authenticated passthrough)                 |
 
 The aggregation routes are mounted under `/v1` **before** the catch-all proxy, so they win over the
 passthrough.
@@ -311,11 +322,11 @@ The BFF talks to exactly one downstream — the Core — and exposes two pattern
 
 **Downstream error mapping** (consistent across proxy and aggregation):
 
-| Core responds          | BFF returns                                                            |
-| ---------------------- | --------------------------------------------------------------------- |
-| `401` (token rejected) | `401` + `Auth-Required: reauthenticate` (`SESSION_EXPIRED`)           |
-| `4xx` (e.g. 404/422)   | the **real** status surfaced as `problem+json` (not mislabelled)     |
-| `5xx` / unreachable    | `502` `CORE_UNAVAILABLE`                                              |
+| Core responds          | BFF returns                                                      |
+| ---------------------- | ---------------------------------------------------------------- |
+| `401` (token rejected) | `401` + `Auth-Required: reauthenticate` (`SESSION_EXPIRED`)      |
+| `4xx` (e.g. 404/422)   | the **real** status surfaced as `problem+json` (not mislabelled) |
+| `5xx` / unreachable    | `502` `CORE_UNAVAILABLE`                                         |
 
 The `CoreClient` uses plain `fetch` with no built-in retry/timeout — failures throw (`CoreAuthError`
 on 401, `CoreError` otherwise) and are mapped centrally.
@@ -354,22 +365,31 @@ for correlation across the web app → BFF → Core chain.
 - **Secrets** — `SESSION_SECRET` and `GOOGLE_CLIENT_SECRET` are real secrets: keep them in a
   git-ignored `.env` locally and a secrets manager in production. Rotating `SESSION_SECRET`
   invalidates all existing session cookies (users must sign in again).
+- **`SESSION_SECRET` must be identical across every BFF instance.** It's the key that encrypts the
+  session cookie, so if you run more than one replica (horizontal scaling, blue/green, etc.) they
+  must all share the **same** value — otherwise a cookie encrypted by one instance can't be decrypted
+  by another and users get logged out at random. It's a BFF-only value: the web app and Core never
+  use it.
 
 ---
 
 ## Testing
 
 ```bash
-npm test                  # all tests (unit + integration)
+npm test                  # all tests (unit + integration) + coverage report + HTML report
 npm run test:unit         # unit tests only
 npm run test:integration  # integration tests (supertest against the real Express app)
-npm run test:coverage     # with coverage report + thresholds
+npm run test:coverage     # explicit coverage alias (same coverage as `npm test`)
 ```
 
 - **Strategy** — integration tests drive the actual Express app with **supertest**; the **Core API
   and Google are mocked** (no real external calls), so the suite is hermetic and fast.
-- **Coverage** — Jest enforces a **90%** threshold (statements / branches / functions / lines),
-  scoped to `src/` (the bootstrap `index.ts` is excluded). The report lands in `coverage/`.
+- **Coverage is collected on every run** (`collectCoverage` is on): each `npm test` prints a terminal
+  summary and writes an **HTML report to `coverage/lcov-report/index.html`** (regenerated each run;
+  `coverage/` is git-ignored), scoped to `src/` (the bootstrap `index.ts` is excluded).
+- **Coverage is 100%** (a few genuinely-unreachable defensive branches are marked
+  `/* istanbul ignore */`); Jest enforces a **90%** gate (statements / branches / functions / lines)
+  to leave headroom.
 - Tests run under `NODE_OPTIONS=--experimental-vm-modules` (ESM + ts-jest), wired into the npm
   scripts already.
 
@@ -395,11 +415,11 @@ Prettier alone.
 Git hooks are managed by **husky** and installed automatically on `npm install` (via the `prepare`
 script). They mirror the Core repo's Maven-managed hooks.
 
-| Hook         | Runs                       | Purpose                                              |
-| ------------ | -------------------------- | ---------------------------------------------------- |
-| `pre-commit` | `lint-staged`              | ESLint `--fix` + Prettier on staged files            |
-| `commit-msg` | `commitlint`               | Enforces the commit convention below                 |
-| `pre-push`   | `npm test`                 | Full test suite must pass before pushing             |
+| Hook         | Runs          | Purpose                                   |
+| ------------ | ------------- | ----------------------------------------- |
+| `pre-commit` | `lint-staged` | ESLint `--fix` + Prettier on staged files |
+| `commit-msg` | `commitlint`  | Enforces the commit convention below      |
+| `pre-push`   | `npm test`    | Full test suite must pass before pushing  |
 
 **Commit message format** (identical to the Core repo):
 
@@ -437,12 +457,12 @@ npm start                 # node dist/index.js
 
 ## Troubleshooting
 
-| Symptom                                                | Cause & fix                                                                                                                  |
-| ------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------- |
-| `Missing required env var: …` on startup               | `SESSION_SECRET` / `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` not set. Copy `.env.example` → `.env` and fill them in.       |
-| Google login fails / `redirect_uri_mismatch`           | The Google client's **Authorized redirect URI** must equal `GOOGLE_REDIRECT_URI` **exactly** (scheme, host, port, path).    |
-| Sign-in returns `access_denied`                        | App is in Testing and you're not a listed **test user** (Google consent screen), or the user cancelled. Add a test user.    |
-| `/v1/*` returns `502 CORE_UNAVAILABLE`                 | The Core isn't reachable. Check it's running and `CORE_API_BASE_URL` is correct.                                            |
-| Stuck in a re-auth loop / `401 SESSION_EXPIRED`        | Session cookie can't be validated — often `SESSION_SECRET` changed (old cookies are now undecryptable). Sign in again.       |
-| Cookie not sent (logged out after redirect)            | Cross-port/site cookie issue. Run the web app and BFF same-origin (Next.js rewrites); locally don't set `NODE_ENV=production`. |
-| `403 CSRF_BLOCKED` on a POST/PATCH                     | The request's `Origin`/`Referer` doesn't match `WEB_ORIGIN`. Ensure the web app calls the BFF same-origin.                   |
+| Symptom                                         | Cause & fix                                                                                                                    |
+| ----------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| `Missing required env var: …` on startup        | `SESSION_SECRET` / `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` not set. Copy `.env.example` → `.env` and fill them in.         |
+| Google login fails / `redirect_uri_mismatch`    | The Google client's **Authorized redirect URI** must equal `GOOGLE_REDIRECT_URI` **exactly** (scheme, host, port, path).       |
+| Sign-in returns `access_denied`                 | App is in Testing and you're not a listed **test user** (Google consent screen), or the user cancelled. Add a test user.       |
+| `/v1/*` returns `502 CORE_UNAVAILABLE`          | The Core isn't reachable. Check it's running and `CORE_API_BASE_URL` is correct.                                               |
+| Stuck in a re-auth loop / `401 SESSION_EXPIRED` | Session cookie can't be validated — often `SESSION_SECRET` changed (old cookies are now undecryptable). Sign in again.         |
+| Cookie not sent (logged out after redirect)     | Cross-port/site cookie issue. Run the web app and BFF same-origin (Next.js rewrites); locally don't set `NODE_ENV=production`. |
+| `403 CSRF_BLOCKED` on a POST/PATCH              | The request's `Origin`/`Referer` doesn't match `WEB_ORIGIN`. Ensure the web app calls the BFF same-origin.                     |
