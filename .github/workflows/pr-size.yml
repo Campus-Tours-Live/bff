@@ -1,0 +1,89 @@
+name: PR size
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened, edited, labeled, unlabeled]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  pr-size:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check PR size
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const MAX_LINES = 500;
+            const MAX_FILES = 40;
+            // Generated / lock / build / migration files do not count toward the size.
+            const EXCLUDE = [
+              '**/package-lock.json',
+              '**/*.snap',
+              '**/__snapshots__/**',
+              '**/dist/**',
+              '**/.next/**',
+              '**/coverage/**',
+              '**/target/**',
+              '**/*.min.js',
+              '**/generated/**',
+              '**/db/migration/**',
+            ];
+
+            const globToRe = (g) =>
+              new RegExp('^' + g
+                .replace(/[.+^${}()|[\]\\]/g, '\\$&')
+                .replace(/\*\*\//g, ' ')
+                .replace(/\*\*/g, '.*')
+                .replace(/\*/g, '[^/]*')
+                .replace(/ /g, '(?:.*/)?') + '$');
+            const excluded = EXCLUDE.map(globToRe);
+            const isExcluded = (f) => excluded.some((re) => re.test(f));
+
+            const pr = context.payload.pull_request;
+            const files = await github.paginate(github.rest.pulls.listFiles, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: pr.number,
+              per_page: 100,
+            });
+
+            let additions = 0;
+            let counted = 0;
+            let skipped = 0;
+            for (const f of files) {
+              if (isExcluded(f.filename)) { skipped += 1; continue; }
+              additions += f.additions;
+              counted += 1;
+            }
+            core.info(`Counted ${counted} files, +${additions} added lines (excluded ${skipped} files).`);
+
+            if (additions <= MAX_LINES && counted <= MAX_FILES) {
+              core.info('PR size is within limits.');
+              return;
+            }
+
+            // Escape hatch: 'oversized-ok' label AND a "Size override:" reason in the body.
+            const labels = (pr.labels || []).map((l) => l.name);
+            const hasLabel = labels.includes('oversized-ok');
+            const hasReason = /Size override:\s*\S+/i.test(pr.body || '');
+            if (hasLabel && hasReason) {
+              core.info('Oversized PR allowed via "oversized-ok" label + "Size override:" reason.');
+              return;
+            }
+
+            const why = [];
+            if (additions > MAX_LINES) why.push(`+${additions} added lines (limit ${MAX_LINES})`);
+            if (counted > MAX_FILES) why.push(`${counted} files changed (limit ${MAX_FILES})`);
+            const missing = [];
+            if (!hasLabel) missing.push('add the `oversized-ok` label');
+            if (!hasReason) missing.push('add a line `Size override: <reason>` to the PR description');
+
+            core.setFailed(
+              `This PR is too large: ${why.join(', ')}.\n` +
+                `Please split it if you can. If it is intentionally large, ${missing.join(' and ')}.\n` +
+                `(Lock files, snapshots, build output, generated code and db/migration are already excluded.)`
+            );
