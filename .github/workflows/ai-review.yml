@@ -78,6 +78,16 @@ jobs:
           gh api -X POST "repos/${{ github.repository }}/issues/comments/${{ github.event.comment.id }}/reactions" \
             -f content=eyes >/dev/null 2>&1 || true
 
+      # The prompt is infrastructure — always read it from main, never from the PR's
+      # checkout (an old PR's merge ref may not contain it, or a PR could delete it).
+      - name: Fetch review prompt from main
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+        run: |
+          gh api "repos/${{ github.repository }}/contents/.github/ai-review-prompt.md?ref=main" \
+            --jq '.content' | base64 -d > /tmp/ai-review-prompt.md
+          echo "Prompt: $(wc -l < /tmp/ai-review-prompt.md) lines"
+
       - name: Install Claude Code
         run: npm install -g @anthropic-ai/claude-code
 
@@ -87,7 +97,7 @@ jobs:
         run: |
           REPO_NAME="${{ github.event.repository.name }}"
           {
-            cat "$REPO_NAME/.github/ai-review-prompt.md"
+            cat /tmp/ai-review-prompt.md
             echo
             echo "---"
             echo "## This run"
