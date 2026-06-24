@@ -23,6 +23,15 @@ export class CoreClient {
   getParticipantProfile<T>(): Promise<T> {
     return this.get<T>("/participant/profile");
   }
+  getNextTour<T>(): Promise<T> {
+    return this.get<T>("/participant/bookings/next-tour");
+  }
+  getUpcomingBookings<T>(): Promise<T> {
+    return this.get<T>("/participant/bookings/upcoming");
+  }
+  getPendingActions<T>(): Promise<T> {
+    return this.get<T>("/participant/bookings/pending-actions");
+  }
 
   async get<T>(path: string): Promise<T> {
     let r: Response;
