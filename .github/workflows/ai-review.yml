@@ -94,6 +94,8 @@ jobs:
       - name: Run multi-round review
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          # Point Claude Code at the API relay (vectorengine). Empty var → official API.
+          ANTHROPIC_BASE_URL: ${{ vars.ANTHROPIC_BASE_URL }}
         run: |
           REPO_NAME="${{ github.event.repository.name }}"
           {
