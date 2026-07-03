@@ -98,6 +98,7 @@ for (const def of Object.values(settings.extraKnownMarketplaces || {})) {
 // Install the missing ones. stdin is ignored + a timeout is set, so this can't hang.
 // In --hook mode, send the child's stdout to OUR stderr (fd 2) so stdout stays clean for
 // the reloadSkills JSON; otherwise inherit it so `npm run dev` etc. show progress.
+let installedCount = 0;
 for (const id of missing) {
   try {
     log(`installing ${id} …`);
@@ -105,20 +106,29 @@ for (const id of missing) {
       stdio: ["ignore", HOOK ? 2 : "inherit", "inherit"],
       timeout: 180_000,
     });
+    installedCount++;
   } catch (err) {
     log(`could not install ${id}: ${err.message}`);
     log(`run manually:  claude plugin install ${id}`);
   }
 }
 
-// SessionStart hook: ask Claude Code to re-scan skills after the hook finishes, so the
-// plugins we just installed are usable in THIS session (from the first prompt) rather than
-// only the next one. Must be the only thing on stdout.
-if (HOOK) {
-  process.stdout.write(
-    JSON.stringify({
-      hookSpecificOutput: { hookEventName: "SessionStart", reloadSkills: true },
-    }) + "\n",
-  );
+if (installedCount > 0) {
+  if (HOOK) {
+    // SessionStart hook: ask Claude Code to re-scan skills after the hook finishes, so the
+    // plugins we just installed are usable in THIS session (from the first prompt) rather
+    // than only the next one. Must be the only thing on stdout.
+    process.stdout.write(
+      JSON.stringify({
+        hookSpecificOutput: { hookEventName: "SessionStart", reloadSkills: true },
+      }) + "\n",
+    );
+  } else {
+    // Outside a Claude session (predev / launcher / manual): we can't reload a running
+    // session from here, so point the user at the one command that picks up new plugins.
+    log(
+      `installed ${installedCount} plugin(s). If a Claude session is open, run  /reload-plugins  to use them now.`,
+    );
+  }
 }
 process.exit(0);
