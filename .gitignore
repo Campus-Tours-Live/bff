@@ -21,3 +21,6 @@ coverage
 
 # OS / editor noise
 .DS_Store
+
+# Claude Code — personal settings (do not commit); share .claude/settings.json
+.claude/settings.local.json

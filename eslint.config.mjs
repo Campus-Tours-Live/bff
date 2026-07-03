@@ -5,7 +5,9 @@ import tseslint from "typescript-eslint";
 import prettier from "eslint-config-prettier";
 
 export default tseslint.config(
-  { ignores: ["dist/", "coverage/", "node_modules/"] },
+  // .claude/ holds Claude Code tooling (e.g. the plugin ensure-hook, a Node .mjs
+  // script) — not app source, so it's outside this app-oriented lint config.
+  { ignores: ["dist/", "coverage/", "node_modules/", ".claude/"] },
   js.configs.recommended,
   ...tseslint.configs.recommended,
   prettier,
