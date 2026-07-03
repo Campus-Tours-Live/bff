@@ -194,6 +194,9 @@ It's a no-op when the `claude` CLI is absent and never blocks dev/build. Which s
 situation — and the cross-repo observation rules (this repo owns the auth/session and
 API-aggregation contracts) — are in `CLAUDE.md`.
 
+> A few skills (`superpowers:*`, `doc-coauthoring`) are **user-level** and are **not**
+> auto-installed here — install them once (see `../campus-tours-live/CLAUDE.md` → "One-time setup").
+
 ---
 
 ## Configuration (environment variables)
