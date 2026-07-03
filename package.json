@@ -4,10 +4,14 @@
   "private": true,
   "description": "Backend-for-frontend (Express + TypeScript) between the Next.js web app and the Spring Boot Core API.",
   "type": "module",
-  "engines": { "node": ">=20" },
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
     "predev": "node .claude/hooks/ensure-plugins.mjs",
     "prebuild": "node .claude/hooks/ensure-plugins.mjs --check",
+    "skills": "node .claude/hooks/ensure-plugins.mjs",
+    "skills:update": "node .claude/hooks/ensure-plugins.mjs --force-update",
     "dev": "tsx watch src/index.ts",
     "build": "tsc",
     "start": "node dist/index.js",

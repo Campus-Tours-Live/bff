@@ -180,22 +180,42 @@ curl http://localhost:4000/health      # {"status":"ok","auth":"google"}
 3. **Web app** — in `frontend/`: `npm run dev` (`:3001`). Its `beforeFiles` rewrites proxy
    `/auth/*` and `/v1/*` to the BFF same-origin, so the session cookie is first-party.
 
-## Claude Code skills
+## Agent skills (Codex & Claude)
 
-This repo commits a `.claude/` config (plugin marketplace + the skills this stack needs — Express/Node,
-API design, auth/security, testing, review) and a self-contained `.claude/hooks/ensure-plugins.mjs`
-that installs any missing Claude Code plugin. No extra command is needed:
+This repo commits a `.claude/settings.json` (plugin marketplace + the skills this stack needs) and
+a self-contained `.claude/hooks/ensure-plugins.mjs` that installs and keeps them updated for
+**whichever agent CLI you have** — `claude` and/or `codex`. The `wshobson/agents` marketplace ships
+dual Codex + Claude plugin manifests, so the same plugin ids work for both.
 
-- **Opening the repo in Claude Code** installs them (a `SessionStart` hook).
-- **`npm run dev`** installs them first (a `predev` step); **`npm run build`** only checks
-  (`prebuild`, CI-safe).
+Auto-install (no extra command):
 
-It's a no-op when the `claude` CLI is absent and never blocks dev/build. Which skill to use per
-situation — and the cross-repo observation rules (this repo owns the auth/session and
-API-aggregation contracts) — are in `CLAUDE.md`.
+- **Claude Code** — opening the repo (a `SessionStart` hook that emits `reloadSkills`, so a
+  first-time install is usable in the same session) and `npm run dev` (a `predev` step);
+  `npm run build` only checks (`prebuild`, CI-safe).
+- **Codex** — running the repo (`npm run dev` / the launcher) or `codex plugin add`.
 
-> A few skills (`superpowers:*`, `doc-coauthoring`) are **user-level** and are **not**
-> auto-installed here — install them once (see `../campus-tours-live/CLAUDE.md` → "One-time setup").
+Manual, **this repo only**: `npm run skills` (install missing) or `npm run skills:update` (update
+to latest). It's a no-op when neither CLI is present and never blocks dev/build.
+
+Skills this repo enables (both agents):
+
+| Skill / plugin              | Used for                                      |
+| --------------------------- | --------------------------------------------- |
+| `javascript-typescript`     | Express / Node / TS ESM patterns              |
+| `backend-development`       | API architecture, aggregation, error envelope |
+| `api-scaffolding`           | REST/GraphQL scaffolding, proxy vs aggregate  |
+| `api-testing-observability` | OpenAPI, mocking, logging / tracing           |
+| `backend-api-security`      | auth, session, OAuth, token forwarding        |
+| `unit-testing`              | Jest + supertest                              |
+| `security-scanning`         | SESSION_SECRET, injection, dependency CVEs    |
+| `comprehensive-review`      | multi-perspective code review                 |
+
+> Process skills — `superpowers:*` (plan / TDD / debug) and `doc-coauthoring` — are **Claude-only**
+> user-level installs (see `../campus-tours-live/README.md`). In Codex, follow the same discipline
+> with its built-in flow.
+
+Which skill for which situation, and the cross-repo rules (this repo owns the auth/session and
+API-aggregation contracts), are in `AGENTS.md` (Codex) and `CLAUDE.md` (Claude).
 
 ---
 
