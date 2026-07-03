@@ -180,6 +180,20 @@ curl http://localhost:4000/health      # {"status":"ok","auth":"google"}
 3. **Web app** — in `frontend/`: `npm run dev` (`:3001`). Its `beforeFiles` rewrites proxy
    `/auth/*` and `/v1/*` to the BFF same-origin, so the session cookie is first-party.
 
+## Claude Code skills
+
+This repo commits a `.claude/` config (plugin marketplace + the skills this stack needs — Express/Node,
+API design, auth/security, testing, review) and a self-contained `.claude/hooks/ensure-plugins.mjs`
+that installs any missing Claude Code plugin. No extra command is needed:
+
+- **Opening the repo in Claude Code** installs them (a `SessionStart` hook).
+- **`npm run dev`** installs them first (a `predev` step); **`npm run build`** only checks
+  (`prebuild`, CI-safe).
+
+It's a no-op when the `claude` CLI is absent and never blocks dev/build. Which skill to use per
+situation — and the cross-repo observation rules (this repo owns the auth/session and
+API-aggregation contracts) — are in `CLAUDE.md`.
+
 ---
 
 ## Configuration (environment variables)

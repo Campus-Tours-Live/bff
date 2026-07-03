@@ -6,6 +6,8 @@
   "type": "module",
   "engines": { "node": ">=20" },
   "scripts": {
+    "predev": "node .claude/hooks/ensure-plugins.mjs",
+    "prebuild": "node .claude/hooks/ensure-plugins.mjs --check",
     "dev": "tsx watch src/index.ts",
     "build": "tsc",
     "start": "node dist/index.js",
