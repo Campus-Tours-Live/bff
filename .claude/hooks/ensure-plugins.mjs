@@ -9,6 +9,11 @@
  * Modes:
  *   (default)   ensure — install any missing enabled plugins
  *   --check     report only — warn about missing plugins, install nothing (build/CI-safe)
+ *   --hook      SessionStart-hook mode — after installing, print a `reloadSkills` JSON to
+ *               stdout so the newly-installed skills load in the CURRENT session (without
+ *               it, skill discovery has already run and they'd only appear next session).
+ *               In this mode stdout is reserved for that JSON: the install command's output
+ *               is redirected to stderr so it can't corrupt the hook payload.
  *
  * Safety: always exits 0 (never blocks a build). No-ops silently when the `claude` CLI is
  * absent (non-Claude users / CI) or when CI=1 is set. Installs run with a timeout and no
@@ -18,15 +23,17 @@
  * Requires Node 18+ (ships with the `claude` CLI, so if claude is present, node is too).
  */
 
-import { readFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
-import { dirname, join } from 'node:path';
-import { execFileSync } from 'node:child_process';
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { dirname, join } from "node:path";
+import { execFileSync } from "node:child_process";
 
-const CHECK_ONLY = process.argv.includes('--check');
+const CHECK_ONLY = process.argv.includes("--check");
+const HOOK = process.argv.includes("--hook");
 const here = dirname(fileURLToPath(import.meta.url));
-const settingsPath = join(here, '..', 'settings.json'); // <repo>/.claude/settings.json
+const settingsPath = join(here, "..", "settings.json"); // <repo>/.claude/settings.json
 
+// Logs always go to stderr — in --hook mode stdout is reserved for the reloadSkills JSON.
 function log(msg) {
   process.stderr.write(`[claude-plugins] ${msg}\n`);
 }
@@ -35,9 +42,9 @@ function log(msg) {
 if (process.env.CI) process.exit(0);
 
 function claude(args, opts = {}) {
-  return execFileSync('claude', args, {
-    encoding: 'utf8',
-    stdio: ['ignore', 'pipe', 'pipe'],
+  return execFileSync("claude", args, {
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "pipe"],
     timeout: 30_000,
     ...opts,
   });
@@ -46,7 +53,7 @@ function claude(args, opts = {}) {
 // Read this repo's committed config.
 let settings;
 try {
-  settings = JSON.parse(readFileSync(settingsPath, 'utf8'));
+  settings = JSON.parse(readFileSync(settingsPath, "utf8"));
 } catch (err) {
   log(`could not read ${settingsPath}: ${err.message}`);
   process.exit(0);
@@ -60,20 +67,20 @@ if (wanted.length === 0) process.exit(0);
 // What's already installed? (This is also our probe for whether the CLI exists.)
 let installed;
 try {
-  const list = JSON.parse(claude(['plugin', 'list', '--json']));
+  const list = JSON.parse(claude(["plugin", "list", "--json"]));
   installed = new Set(list.map((p) => p.id));
 } catch (err) {
-  if (err.code === 'ENOENT') process.exit(0); // no `claude` CLI → nothing to do, stay quiet
+  if (err.code === "ENOENT") process.exit(0); // no `claude` CLI → nothing to do, stay quiet
   log(`could not query installed plugins: ${err.message}`);
   process.exit(0);
 }
 
 const missing = wanted.filter((id) => !installed.has(id));
-if (missing.length === 0) process.exit(0); // steady state: fast + silent
+if (missing.length === 0) process.exit(0); // steady state: fast + silent, no reload needed
 
 if (CHECK_ONLY) {
-  log(`missing ${missing.length} plugin(s): ${missing.join(', ')}`);
-  log('install them with:  node .claude/hooks/ensure-plugins.mjs');
+  log(`missing ${missing.length} plugin(s): ${missing.join(", ")}`);
+  log("install them with:  node .claude/hooks/ensure-plugins.mjs");
   process.exit(0);
 }
 
@@ -82,23 +89,36 @@ for (const def of Object.values(settings.extraKnownMarketplaces || {})) {
   const repo = def?.source?.repo;
   if (!repo) continue;
   try {
-    claude(['plugin', 'marketplace', 'add', repo]);
+    claude(["plugin", "marketplace", "add", repo]);
   } catch {
     /* already added or offline — ignore */
   }
 }
 
 // Install the missing ones. stdin is ignored + a timeout is set, so this can't hang.
+// In --hook mode, send the child's stdout to OUR stderr (fd 2) so stdout stays clean for
+// the reloadSkills JSON; otherwise inherit it so `npm run dev` etc. show progress.
 for (const id of missing) {
   try {
     log(`installing ${id} …`);
-    claude(['plugin', 'install', id, '--scope', 'user'], {
-      stdio: ['ignore', 'inherit', 'inherit'],
+    claude(["plugin", "install", id, "--scope", "user"], {
+      stdio: ["ignore", HOOK ? 2 : "inherit", "inherit"],
       timeout: 180_000,
     });
   } catch (err) {
     log(`could not install ${id}: ${err.message}`);
     log(`run manually:  claude plugin install ${id}`);
   }
+}
+
+// SessionStart hook: ask Claude Code to re-scan skills after the hook finishes, so the
+// plugins we just installed are usable in THIS session (from the first prompt) rather than
+// only the next one. Must be the only thing on stdout.
+if (HOOK) {
+  process.stdout.write(
+    JSON.stringify({
+      hookSpecificOutput: { hookEventName: "SessionStart", reloadSkills: true },
+    }) + "\n",
+  );
 }
 process.exit(0);

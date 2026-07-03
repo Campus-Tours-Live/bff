@@ -46,7 +46,9 @@ command** (e.g. `/code-review`); `/plugin` only installs/manages plugins — it 
 > **Setup is automatic.** This repo's plugins are declared in `.claude/settings.json` and get
 > installed for you on first use: a `SessionStart` hook (every Claude session) and the `predev`
 > step (`npm run dev`) both run `.claude/hooks/ensure-plugins.mjs`. Accept the workspace-trust
-> dialog once so they load.
+> dialog once so they load. The `SessionStart` hook also emits `reloadSkills`, so a first-time
+> install is usable in the **same** session (from the first prompt); `predev`/the launcher run
+> outside a Claude session, so they only prepare the **next** one.
 >
 > **`†` = user-level skill.** Rows marked `†` (`superpowers:*`, `doc-coauthoring`) come from the
 > **user-level** `superpowers` / `example-skills` plugins — this repo does **not** auto-install
@@ -55,25 +57,25 @@ command** (e.g. `/code-review`); `/plugin` only installs/manages plugins — it 
 
 ## Situation → skill
 
-| When you are… | Use this skill |
-| --- | --- |
-| Planning any new route / behavior change | `superpowers:brainstorming` † |
-| Refactoring (no behavior change) | `superpowers:brainstorming` †, then `comprehensive-review` |
-| Express route / middleware / TS ESM patterns | `javascript-typescript`, `backend-development` |
-| Designing / aggregating APIs, deciding proxy vs aggregate | `api-scaffolding`, `backend-development` |
-| **Auth / session / cookie / OAuth** (this repo's core) | `backend-api-security` |
-| API contract docs / mocking / OpenAPI | `api-testing-observability` |
-| Error handling / the response envelope + error contract | `backend-development`, `api-testing-observability` |
-| Logging / observability / request tracing | `api-testing-observability` |
-| Env / config changes (`SESSION_SECRET`, `GOOGLE_CLIENT_ID`, `WEB_ORIGIN`, ports) | ⚠️ cross-repo & startup-critical — bff **throws on missing secrets**; see Cross-repo rules below |
-| Writing / adding tests (Jest + supertest, unit + integration) | `unit-testing`, `superpowers:test-driven-development` † |
-| Dependency upgrades / CVE remediation / `npm audit` | `security-scanning` |
-| Checking security (SESSION_SECRET, token forwarding, injection) | `security-scanning`, `backend-api-security` |
-| Fixing a red CI / failing build | `superpowers:systematic-debugging` † (reproduce locally: `npm run lint && npm run typecheck && npm test`) |
-| Debugging (any bug / test failure / unexpected behavior) | `superpowers:systematic-debugging` † |
-| Writing docs / README / comments | `doc-coauthoring` † |
-| Reviewing your own or someone else's PR, before merging | `comprehensive-review`, `/code-review`; security via `/security-review` |
-| **"Live" real-time tours (WebSocket signaling likely lands here)** | ⚠️ product core, **no skill and no infra yet** — always `superpowers:brainstorming` † and design before coding |
+| When you are…                                                                    | Use this skill                                                                                                 |
+| -------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
+| Planning any new route / behavior change                                         | `superpowers:brainstorming` †                                                                                  |
+| Refactoring (no behavior change)                                                 | `superpowers:brainstorming` †, then `comprehensive-review`                                                     |
+| Express route / middleware / TS ESM patterns                                     | `javascript-typescript`, `backend-development`                                                                 |
+| Designing / aggregating APIs, deciding proxy vs aggregate                        | `api-scaffolding`, `backend-development`                                                                       |
+| **Auth / session / cookie / OAuth** (this repo's core)                           | `backend-api-security`                                                                                         |
+| API contract docs / mocking / OpenAPI                                            | `api-testing-observability`                                                                                    |
+| Error handling / the response envelope + error contract                          | `backend-development`, `api-testing-observability`                                                             |
+| Logging / observability / request tracing                                        | `api-testing-observability`                                                                                    |
+| Env / config changes (`SESSION_SECRET`, `GOOGLE_CLIENT_ID`, `WEB_ORIGIN`, ports) | ⚠️ cross-repo & startup-critical — bff **throws on missing secrets**; see Cross-repo rules below               |
+| Writing / adding tests (Jest + supertest, unit + integration)                    | `unit-testing`, `superpowers:test-driven-development` †                                                        |
+| Dependency upgrades / CVE remediation / `npm audit`                              | `security-scanning`                                                                                            |
+| Checking security (SESSION_SECRET, token forwarding, injection)                  | `security-scanning`, `backend-api-security`                                                                    |
+| Fixing a red CI / failing build                                                  | `superpowers:systematic-debugging` † (reproduce locally: `npm run lint && npm run typecheck && npm test`)      |
+| Debugging (any bug / test failure / unexpected behavior)                         | `superpowers:systematic-debugging` †                                                                           |
+| Writing docs / README / comments                                                 | `doc-coauthoring` †                                                                                            |
+| Reviewing your own or someone else's PR, before merging                          | `comprehensive-review`, `/code-review`; security via `/security-review`                                        |
+| **"Live" real-time tours (WebSocket signaling likely lands here)**               | ⚠️ product core, **no skill and no infra yet** — always `superpowers:brainstorming` † and design before coding |
 
 ## ⚠️ Cross-repo observation rules (read before changing bff)
 
