@@ -197,6 +197,11 @@ Auto-install (no extra command):
 Manual, **this repo only**: `npm run skills` (install missing) or `npm run skills:update` (update
 to latest). It's a no-op when neither CLI is present and never blocks dev/build.
 
+**Cursor (2.5+):** no plugin CLI or auto-install — install once **in the editor** (add the
+`wshobson/agents` marketplace, then `/plugin install <name>` for the skills below). A committed
+`.cursor/rules/agent-skills.mdc` gives Cursor the per-repo guidance automatically; Cursor doesn't
+honor a skill's `tools:` allowlist.
+
 Skills this repo enables (both agents):
 
 | Skill / plugin              | Used for                                      |

@@ -1,0 +1,44 @@
+---
+description: Which agent skill to use per situation for the bff, plus the Cursor install steps and cross-repo rules. Applies to Cursor, Codex, and Claude.
+alwaysApply: true
+---
+
+# Agent skills (bff)
+
+This repo is the **bff / backend-for-frontend** (`:4000`, Express 4 / Node / TS ESM). It owns
+**auth, session, and API aggregation/proxy** and sits in the middle:
+`frontend (:3001) → bff (:4000) → backend (:8080)`.
+
+## Skills this repo uses (from `claude-code-workflows` = `wshobson/agents`)
+
+- `javascript-typescript` — Express / Node / TS ESM patterns
+- `backend-development` — API architecture, aggregation, error envelope
+- `api-scaffolding` — REST/GraphQL scaffolding, proxy vs aggregate
+- `api-testing-observability` — OpenAPI, mocking, logging / tracing
+- `backend-api-security` — auth, session, OAuth, token forwarding
+- `unit-testing` — Jest + supertest
+- `security-scanning` — SESSION_SECRET, injection, dependency CVEs
+- `comprehensive-review` — multi-perspective code review
+
+Planning / TDD / systematic debugging are process disciplines (Claude: `superpowers:*`) — apply
+them regardless of agent.
+
+## Using these in Cursor (2.5+)
+
+Cursor has **no plugin CLI and no auto-install** (unlike Claude Code / Codex), so it's a one-time
+manual step **inside the editor**:
+
+1. Add the marketplace `wshobson/agents`.
+2. `/plugin install <name>` for the skills above (Cursor generates `.cursor/rules/` +
+   `.cursor-plugin/` pointing at the marketplace source).
+
+Notes: Cursor does **not** honor a skill's `tools:` allowlist. The project auto-install
+(`npm run skills`, the SessionStart hook, `predev`) only covers Claude/Codex — Cursor is manual.
+
+## Cross-repo rule (read before changing bff)
+
+bff holds two contracts — **Contract A** (what it returns to frontend) and **Contract B** (what it
+consumes from backend). Touch either and read the other side: a shape change → check frontend
+types; a backend call / token change → check backend's OAuth2 expectations; a session/OAuth change
+is bidirectional (frontend login + backend token). `GOOGLE_CLIENT_ID` must match backend. The full
+Situation → skill table and cross-repo coordination rules are in `AGENTS.md` (Cursor reads it).
