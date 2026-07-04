@@ -1,0 +1,56 @@
+name: PR size label
+
+# Auto-applies one size/* label (size/S · size/M · size/L · size/XL) from the PR's total lines
+# changed, so reviewers see PR size at a glance. Thresholds match the weekly engineering report's
+# buckets (S <50, M <250, L <1000, XL ≥1000). No third-party action; uses the built-in token.
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  pull-requests: write
+
+jobs:
+  size:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/github-script@v7
+        with:
+          script: |
+            const pr = context.payload.pull_request;
+            const { data } = await github.rest.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: pr.number,
+            });
+            const changed = data.additions + data.deletions;
+            const want =
+              changed < 50 ? 'size/S' : changed < 250 ? 'size/M' : changed < 1000 ? 'size/L' : 'size/XL';
+            const sizes = ['size/S', 'size/M', 'size/L', 'size/XL'];
+            const current = (
+              await github.rest.issues.listLabelsOnIssue({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: pr.number,
+              })
+            ).data.map((l) => l.name);
+            for (const s of sizes) {
+              if (s !== want && current.includes(s)) {
+                await github.rest.issues.removeLabel({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: pr.number,
+                  name: s,
+                });
+              }
+            }
+            if (!current.includes(want)) {
+              await github.rest.issues.addLabels({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: pr.number,
+                labels: [want],
+              });
+            }
+            core.info(`${changed} lines changed → ${want}`);
