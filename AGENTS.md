@@ -138,3 +138,23 @@ Put the label on the **fix PR**, not the original. `bug` is for general bug repo
 **Size labels** — `size/S` · `size/M` · `size/L` · `size/XL` are **auto-applied** by the
 `pr-size-label` workflow from the diff size; you don't add them yourself. Smaller PRs review faster
 — aim for `size/S`/`size/M`, and split `size/L`/`size/XL` when you can.
+
+## Jira (Atlassian Remote MCP)
+
+This repo ships an MCP config so an agent can work with the **CTL** Jira board
+(`https://alankuo9721258.atlassian.net`) while you code — read a ticket's description / acceptance
+criteria, create or update issues, transition status (To Do → In Progress → Done), and link PRs.
+It connects the **agent** to Jira, not the repo; **no secrets are committed** — each person
+authenticates once via browser OAuth.
+
+- **Claude Code** — `.mcp.json` (committed). Run `/mcp`, authenticate `atlassian`, and approve the
+  project server when prompted.
+- **Cursor** — `.cursor/mcp.json` (committed). Enable it under Settings → MCP and complete the OAuth login.
+- **Codex** — remote MCP is user-level; add to `~/.codex/config.toml`, then first use opens OAuth:
+
+      [mcp_servers.atlassian]
+      command = "npx"
+      args = ["-y", "mcp-remote", "https://mcp.atlassian.com/v1/sse"]
+
+Headless / cron sessions won't have it — that's expected (the scheduled report uses the GitHub API,
+not Jira).
