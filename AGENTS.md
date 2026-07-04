@@ -138,3 +138,15 @@ Put the label on the **fix PR**, not the original. `bug` is for general bug repo
 **Size labels** — `size/S` · `size/M` · `size/L` · `size/XL` are **auto-applied** by the
 `pr-size-label` workflow from the diff size; you don't add them yourself. Smaller PRs review faster
 — aim for `size/S`/`size/M`, and split `size/L`/`size/XL` when you can.
+
+## Branches
+
+Name branches with the Jira key so **GitHub for Jira** auto-links the branch (and its commits / PR)
+to the ticket, and the "PR merged → Done" automation can fire:
+
+    <type>/CTL-<number>-<short-slug>
+    e.g. feat/CTL-1234-google-oidc-callback
+
+Use the same `<type>` set as commits (`feat`, `fix`, `docs`, `style`, `refactor`, `perf`, `test`,
+`build`, `ci`, `chore`, `revert`). Always include the `CTL-<number>` — it's what ties the branch,
+its commits, and the PR back to the ticket.
