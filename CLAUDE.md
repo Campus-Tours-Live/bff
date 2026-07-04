@@ -108,3 +108,20 @@ in `campus-tours-live/CLAUDE.md`):
 > either one and you must **read** the corresponding code on the other side, and verify
 > end-to-end with the launcher (`npm run start:all`). See the "Cross-repo coordination" section
 > in `campus-tours-live/CLAUDE.md`.
+
+## Labels
+
+**Change-failure labels** — when a PR **fixes something a recent change broke**, label the fix PR so
+the weekly DORA report can compute change-failure rate / MTTR:
+
+- `hotfix` — urgent fix for a broken/failed change
+- `revert` — reverts a bad change
+- `rollback` — rolls back a deployment
+- `incident` — tied to a production incident
+
+Put the label on the **fix PR**, not the original. `bug` is for general bug reports/fixes
+(informational — not counted as a change failure).
+
+**Size labels** — `size/S` · `size/M` · `size/L` · `size/XL` are **auto-applied** by the
+`pr-size-label` workflow from the diff size; you don't add them yourself. Smaller PRs review faster
+— aim for `size/S`/`size/M`, and split `size/L`/`size/XL` when you can.
