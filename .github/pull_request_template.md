@@ -20,6 +20,18 @@
 
 <!-- How was this verified? What should a reviewer run to check it? -->
 
+## Screenshots
+
+<!-- Optional for this repo (not CI-enforced). Attach whatever helps review — API responses, logs, terminal output, or before/after captures for behavior changes. -->
+
+**Before:**
+
+<!-- optional -->
+
+**After:**
+
+<!-- optional -->
+
 ## Checklist
 
 - [ ] Tests added or updated (or explained why not)
