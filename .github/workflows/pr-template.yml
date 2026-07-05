@@ -102,17 +102,20 @@ jobs:
           REPO: ${{ github.repository }}
         run: |
           if [ -z "$ANTHROPIC_API_KEY" ]; then echo "No ANTHROPIC_API_KEY — skipping AI description check."; exit 0; fi
-          gh pr diff "$PR_NUMBER" --repo "$REPO" 2>/dev/null | head -c 12000 > /tmp/diff.txt || true
+          gh pr diff "$PR_NUMBER" --repo "$REPO" 2>/dev/null > /tmp/diff.txt || true
           node - <<'NODE'
           const fs = require('fs');
           const body = process.env.PR_BODY || '';
-          const diff = fs.existsSync('/tmp/diff.txt') ? fs.readFileSync('/tmp/diff.txt', 'utf8') : '';
+          let diff = fs.existsSync('/tmp/diff.txt') ? fs.readFileSync('/tmp/diff.txt', 'utf8') : '';
+          const DIFF_CAP = 600000; // ~150K tokens; only guards against a pathologically huge diff
+          let diffNote = '';
+          if (diff.length > DIFF_CAP) { diff = diff.slice(0, DIFF_CAP); diffNote = ' (truncated at ' + DIFF_CAP + ' chars - very large PR)'; }
           const base = (process.env.ANTHROPIC_BASE_URL || 'https://api.anthropic.com').replace(/\/$/, '');
           const prompt = [
             'You are a LENIENT PR-description gate. Decide whether the PR description genuinely and on-topically describes the change shown in the diff.',
             'Be lenient: short but real descriptions PASS. Only FAIL when the description is clearly meaningless, generic filler ("some changes", "update stuff", "improve things"), copy-paste noise, or plainly contradicts/ignores the diff. When in doubt, PASS.',
             'Reply with exactly one line: "VERDICT: PASS" or "VERDICT: FAIL - <short reason>".',
-            '', '=== PR DESCRIPTION ===', body, '', '=== DIFF (truncated) ===', diff,
+            '', '=== PR DESCRIPTION ===', body, '', '=== DIFF' + diffNote + ' ===', diff,
           ].join('\n');
           (async () => {
             try {
