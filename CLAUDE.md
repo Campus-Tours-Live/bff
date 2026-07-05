@@ -137,3 +137,23 @@ to the ticket, and the "PR merged → Done" automation can fire:
 Use the same `<type>` set as commits (`feat`, `fix`, `docs`, `style`, `refactor`, `perf`, `test`,
 `build`, `ci`, `chore`, `revert`). Always include the `CTL-<number>` — it's what ties the branch,
 its commits, and the PR back to the ticket.
+
+## Jira (Atlassian Remote MCP)
+
+This repo ships an MCP config so an agent can work with the **CTL** Jira board
+(`https://alankuo9721258.atlassian.net`) while you code — read a ticket's description / acceptance
+criteria, create or update issues, transition status (To Do → In Progress → Done), and link PRs.
+It connects the **agent** to Jira, not the repo; **no secrets are committed** — each person
+authenticates once via browser OAuth.
+
+- **Claude Code** — `.mcp.json` (committed). Run `/mcp`, authenticate `atlassian`, and approve the
+  project server when prompted.
+- **Cursor** — `.cursor/mcp.json` (committed). Enable it under Settings → MCP and complete the OAuth login.
+- **Codex** — remote MCP is user-level; add to `~/.codex/config.toml`, then first use opens OAuth:
+
+      [mcp_servers.atlassian]
+      command = "npx"
+      args = ["-y", "mcp-remote", "https://mcp.atlassian.com/v1/sse"]
+
+Headless / cron sessions won't have it — that's expected (the scheduled report uses the GitHub API,
+not Jira).
