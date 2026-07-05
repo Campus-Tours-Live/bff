@@ -10,9 +10,11 @@ permissions:
   pull-requests: read
 
 jobs:
-  # Required, blocking gate — structure + deterministic quality. Frontend PRs that touch UI files
-  # (.tsx/.jsx/.css/...) also need labeled Before/After screenshots; markdown/config/.ts-only
-  # frontend PRs and bff/backend are exempt.
+  # Single required check. Step 1 = deterministic structure/quality (+ frontend Before/After
+  # screenshots on UI-file changes). Step 2 = a best-effort AI check that the description matches
+  # the diff — it blocks on a clear FAIL but skips cleanly if ANTHROPIC_API_KEY is unset or the API
+  # errors. Keeping both in one job means there is exactly one required check ("pr-template"), so a
+  # PR whose branch predates this job never gets stuck on a phantom pending check.
   pr-template:
     runs-on: ubuntu-latest
     steps:
@@ -55,7 +57,6 @@ jobs:
             const typeBlock = (body.match(/##\s*Type of change\b([\s\S]*?)(?=\n##\s|$)/i) || [, ''])[1];
             const checkedLines = typeBlock.split('\n').filter((l) => /-\s*\[x\]/i.test(l));
             if (!checkedLines.length) problems.push('Check at least one box under "## Type of change"');
-            // Frontend: require labeled Before/After screenshots only when the PR touches UI files.
             if (repo === 'frontend') {
               const onlyDocs = checkedLines.length > 0 && checkedLines.every((l) => /docs|chore|config/i.test(l));
               if (!onlyDocs) {
@@ -91,11 +92,6 @@ jobs:
               core.info('PR description structure + quality OK.');
             }
 
-  # Advisory (also in required checks) best-effort AI check — is the description on-topic vs the
-  # diff? Skips cleanly if ANTHROPIC_API_KEY is unset or the API errors (never blocks on infra).
-  pr-description-ai:
-    runs-on: ubuntu-latest
-    steps:
       - name: AI sanity-check the description against the diff
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
@@ -105,7 +101,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
         run: |
-          if [ -z "$ANTHROPIC_API_KEY" ]; then echo "No ANTHROPIC_API_KEY — skipping AI description check (advisory)."; exit 0; fi
+          if [ -z "$ANTHROPIC_API_KEY" ]; then echo "No ANTHROPIC_API_KEY — skipping AI description check."; exit 0; fi
           gh pr diff "$PR_NUMBER" --repo "$REPO" 2>/dev/null | head -c 12000 > /tmp/diff.txt || true
           node - <<'NODE'
           const fs = require('fs');
@@ -125,17 +121,17 @@ jobs:
                 headers: { 'x-api-key': process.env.ANTHROPIC_API_KEY, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
                 body: JSON.stringify({ model: 'claude-opus-4-8', max_tokens: 150, messages: [{ role: 'user', content: prompt }] }),
               });
-              if (!r.ok) { console.log('AI check HTTP ' + r.status + ' — skipping (advisory).'); process.exit(0); }
+              if (!r.ok) { console.log('AI check HTTP ' + r.status + ' — skipping.'); process.exit(0); }
               const j = await r.json();
               const text = (j.content || []).map((c) => c.text || '').join('').trim();
               console.log('AI verdict: ' + text);
               if (/VERDICT:\s*FAIL/i.test(text)) {
                 const reason = (text.split(/FAIL\s*[-–—:]*\s*/i)[1] || 'description not meaningful').trim();
-                console.log('::error::AI description check: ' + reason);
+                console.log('::error::AI description check failed: ' + reason);
                 process.exit(1);
               }
             } catch (e) {
-              console.log('AI check error (' + e.message + ') — skipping (advisory).');
+              console.log('AI check error (' + e.message + ') — skipping.');
             }
             process.exit(0);
           })();
