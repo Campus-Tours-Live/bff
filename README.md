@@ -487,7 +487,7 @@ Commits missing the type or the `<BOARD>-<NUMBER>` ticket are rejected. Bypass i
 
 Open a PR against `main` (direct pushes are blocked by a branch ruleset). The gate requires:
 
-- **A filled-in `.github/pull_request_template.md`** — a real **Summary** (>= 100 characters / 15 words) and **Testing** (>= 40 characters / 7 words), and at least one **Type of change** box checked. Placeholder / junk / gibberish text and an identical Summary and Testing are rejected; a required AI check also verifies the description matches the diff.
+- **A filled-in `.github/pull_request_template.md`** — a real **Summary** (>= 100 characters / 15 words) and **Testing** (>= 40 characters / 7 words), and at least one **Type of change** box checked. Placeholder / junk / gibberish text and an identical Summary and Testing are rejected; an AI step in the same check also verifies the description matches the diff.
 - **Screenshots are optional** for this repo — attach API responses, logs, or before/after captures if they help review.
 - All required checks green + **1 approving review**.
 
