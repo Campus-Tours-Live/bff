@@ -516,3 +516,5 @@ npm start                 # node dist/index.js
 | Stuck in a re-auth loop / `401 SESSION_EXPIRED` | Session cookie can't be validated — often `SESSION_SECRET` changed (old cookies are now undecryptable). Sign in again.         |
 | Cookie not sent (logged out after redirect)     | Cross-port/site cookie issue. Run the web app and BFF same-origin (Next.js rewrites); locally don't set `NODE_ENV=production`. |
 | `403 CSRF_BLOCKED` on a POST/PATCH              | The request's `Origin`/`Referer` doesn't match `WEB_ORIGIN`. Ensure the web app calls the BFF same-origin.                     |
+
+<!-- ci: intentionally-unrelated change for an AI-check discrimination test -->
