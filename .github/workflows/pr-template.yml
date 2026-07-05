@@ -10,7 +10,8 @@ permissions:
   pull-requests: read
 
 jobs:
-  # Required, blocking gate — structure + deterministic quality (length, junk, gibberish, copy-paste).
+  # Required, blocking gate — structure + deterministic quality. Frontend UI changes also need
+  # before/after screenshots (bff/backend are exempt).
   pr-template:
     runs-on: ubuntu-latest
     steps:
@@ -19,6 +20,7 @@ jobs:
         with:
           script: |
             const body = context.payload.pull_request.body || '';
+            const repo = context.repo.repo;
             const clean = body.replace(/<!--[\s\S]*?-->/g, '');
             const problems = [];
             const section = (name) => {
@@ -45,12 +47,22 @@ jobs:
               if (words(s).length < minWords) { problems.push(`The "## ${name}" section needs at least ${minWords} words`); return s; }
               return s;
             };
-            const summary = check('Summary', 15, 3);
-            const testing = check('Testing', 8, 2);
+            const summary = check('Summary', 30, 6);
+            const testing = check('Testing', 15, 3);
             if (summary && testing && summary.trim().toLowerCase() === testing.trim().toLowerCase())
               problems.push('The "## Summary" and "## Testing" sections are identical — describe testing separately');
             const typeBlock = (body.match(/##\s*Type of change\b([\s\S]*?)(?=\n##\s|$)/i) || [, ''])[1];
-            if (!/-\s*\[x\]/i.test(typeBlock)) problems.push('Check at least one box under "## Type of change"');
+            const checkedLines = typeBlock.split('\n').filter((l) => /-\s*\[x\]/i.test(l));
+            if (!checkedLines.length) problems.push('Check at least one box under "## Type of change"');
+            // Frontend UI changes must include before/after screenshots (bff/backend are exempt).
+            if (repo === 'frontend') {
+              const onlyDocs = checkedLines.length > 0 && checkedLines.every((l) => /docs|chore|config/i.test(l));
+              if (!onlyDocs) {
+                const shots = section('Screenshots') || '';
+                const imgs = (shots.match(/!\[[^\]]*\]\([^)]+\)|<img\b|https?:\/\/(?:github\.com\/user-attachments|[^\s)]*githubusercontent\.com)[^\s)]*/gi) || []).length;
+                if (imgs < 2) problems.push('Frontend UI change needs before/after screenshots — attach at least 2 images under "## Screenshots" (or check only "Docs / chore / config" if there is no visual change)');
+              }
+            }
             if (problems.length) {
               core.setFailed('PR description does not follow .github/pull_request_template.md:\n- ' + problems.join('\n- ') + '\n\nEdit the PR description and the check will re-run.');
             } else {
@@ -58,8 +70,7 @@ jobs:
             }
 
   # Advisory, best-effort AI check — is the description on-topic vs the diff? Skips cleanly if
-  # ANTHROPIC_API_KEY is unset or the API errors (never blocks on infra). Not in the required-checks
-  # ruleset by default; add "pr-description-ai" there to make it blocking.
+  # ANTHROPIC_API_KEY is unset or the API errors (never blocks on infra).
   pr-description-ai:
     runs-on: ubuntu-latest
     steps:
