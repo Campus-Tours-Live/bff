@@ -2,7 +2,8 @@ name: PR template
 
 on:
   pull_request:
-    branches: [main]
+    # Include feature branches so stacked PRs run the template gate too (not just PRs into main).
+    branches: [main, "feature/**", "feat/**"]
     types: [opened, edited, reopened, synchronize]
 
 permissions:
