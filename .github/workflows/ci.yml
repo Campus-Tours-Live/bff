@@ -2,7 +2,9 @@ name: CI
 
 on:
   pull_request:
-    branches: [main]
+    # Also run on PRs that target a feature branch (stacked PRs), not just main, so the
+    # test/coverage gate applies to intermediate layers too — see the protect-feature-branches ruleset.
+    branches: [main, "feature/**", "feat/**"]
   push:
     branches: [main]
 
@@ -21,7 +23,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: "20"
           cache: npm
       - run: npm ci
       - run: npm run lint
@@ -34,7 +36,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: "20"
           cache: npm
       - run: npm ci
       # jest: unit + integration tests + whole-project coverage threshold; writes coverage/lcov.info
@@ -49,11 +51,11 @@ jobs:
           fetch-depth: 0 # full history so diff-cover can diff against the base branch
       - uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: "20"
           cache: npm
       - uses: actions/setup-python@v5
         with:
-          python-version: '3.x'
+          python-version: "3.x"
       - run: npm ci
       - run: npm test
       - name: Enforce patch coverage on changed lines (>= 80%)
