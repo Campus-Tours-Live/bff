@@ -2,9 +2,9 @@ name: CI
 
 on:
   pull_request:
-    # Also run on PRs that target a feature branch (stacked PRs), not just main, so the
-    # test/coverage gate applies to intermediate layers too — see the protect-feature-branches ruleset.
-    branches: [main, "feature/**", "feat/**"]
+    # No `branches:` filter on purpose: run on PRs targeting ANY base branch so the gate
+    # can't be skipped by targeting a differently-named branch (stacked PRs, wip/*, etc.).
+    # Merge enforcement still lives in the protect-main ruleset.
   push:
     branches: [main]
 
