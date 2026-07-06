@@ -2,8 +2,8 @@ name: PR size
 
 on:
   pull_request:
-    # Include feature branches so stacked PRs run the size gate too (not just PRs into main).
-    branches: [main, "feature/**", "feat/**"]
+    # No `branches:` filter: run on PRs targeting ANY base branch so the gate can't be
+    # skipped by branch naming.
     types: [opened, synchronize, reopened, edited, labeled, unlabeled]
 
 concurrency:
