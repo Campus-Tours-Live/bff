@@ -1,9 +1,11 @@
 import crypto from "node:crypto";
 import express, { type NextFunction, type Request, type Response } from "express";
+import swaggerUi from "swagger-ui-express";
 import { config } from "./config.js";
 import { authRouter } from "./auth/routes.js";
 import { apiRouter } from "./api/index.js";
 import { coreProxy } from "./proxy/coreProxy.js";
+import { openapiSpec } from "./openapi/index.js";
 import { sendProblem } from "./util/problem.js";
 
 /**
@@ -42,6 +44,10 @@ app.use(express.json({ limit: "1mb" }));
 app.get("/health", (_req, res) => {
   res.json({ status: "ok", auth: "google" });
 });
+
+// --- API docs (Contract A): Swagger UI + raw spec. Mounted before the catch-all 404. ---
+app.get("/openapi.json", (_req, res) => res.json(openapiSpec));
+app.use("/docs", swaggerUi.serve, swaggerUi.setup(openapiSpec));
 
 // --- Auth (Google sign-in session lifecycle) ---
 app.use("/auth", authRouter);

@@ -45,6 +45,7 @@ a general-purpose or public API — it exists only to serve this one front-end.
   - [Endpoints](#endpoints)
   - [Aggregation, proxy \& the Core client](#aggregation-proxy--the-core-client)
   - [Contracts (envelope \& errors)](#contracts-envelope--errors)
+  - [API documentation (OpenAPI / Swagger)](#api-documentation-openapi--swagger)
   - [Security](#security)
   - [Testing](#testing)
   - [Code quality](#code-quality)
@@ -171,6 +172,10 @@ Verify it's up:
 ```bash
 curl http://localhost:4000/health      # {"status":"ok","auth":"google"}
 ```
+
+The interactive **API reference** is served by the BFF itself at **http://localhost:4000/docs**
+(Swagger UI); the raw OpenAPI 3.1 spec is at `/openapi.json`. No separate process — see
+[API documentation](#api-documentation-openapi--swagger).
 
 **Full local stack** (needed to actually log in), in order:
 
@@ -337,6 +342,8 @@ If the refresh fails, the request triggers re-authentication (see below).
 | Route                    | Purpose                                                               |
 | ------------------------ | --------------------------------------------------------------------- |
 | `GET /health`            | Liveness — `{ "status": "ok", "auth": "google" }`                     |
+| `GET /docs`              | Swagger UI — interactive Contract A reference                         |
+| `GET /openapi.json`      | OpenAPI 3.1 spec (Contract A), generated in-code from the zod schemas |
 | `GET /auth/login`        | Start Google sign-in. Query: `returnTo`, `intent`, `login_hint`       |
 | `GET /auth/callback`     | Google redirect target (code → session, then redirect to the web app) |
 | `GET\|POST /auth/logout` | Clear the session cookie, return to the web app                       |
@@ -387,6 +394,46 @@ Whatever endpoint the web app calls, the response shape is consistent:
 
 Every request/response carries an **`X-Request-Id`** (honoured from the inbound header or generated)
 for correlation across the web app → BFF → Core chain.
+
+---
+
+## API documentation (OpenAPI / Swagger)
+
+Contract A is documented as an **OpenAPI 3.1** spec, served by the BFF itself:
+
+- **Swagger UI** — [`/docs`](http://localhost:4000/docs) (interactive; expand an endpoint for field
+  descriptions, allowed enum values, and per-status response examples).
+- **Raw spec** — [`/openapi.json`](http://localhost:4000/openapi.json).
+
+Both come up **with the BFF** (they're routes in `app.ts`, same `:4000` port — no separate process),
+and the spec is **generated in-code from the zod schemas** in `src/openapi/`, so it is a single source
+of truth that can't drift from the running app. Scope is the **BFF-owned** surface (`/auth/*` + the
+`/v1` aggregation composites); every other `/v1/*` path proxies the Core and is documented by the
+Core's own spec (linked via `externalDocs` → `/v3/api-docs`).
+
+> **Trying protected endpoints in Swagger UI:** auth is the httpOnly `ctl_sess` cookie, which _cannot_
+> be pasted into the _Authorize_ box. Sign in first via `GET /auth/login` in the same browser — the
+> cookie is then sent automatically with your `/docs` requests.
+
+### Adding or changing an endpoint
+
+Register every BFF-owned path through the small DSL in `src/openapi/` — `apiRoute()` (requires a
+`summary`, `description`, and ≥1 `tag`; auto-attaches the session-cookie security + 401/502 for `/v1`),
+`enveloped()` for success bodies, and `problem401/502/422/400()` for errors. Give every field a
+`description` + example and use `z.enum([...])` for fixed options. Full guide:
+[`docs/openapi-conventions.md`](./docs/openapi-conventions.md).
+
+### CI enforces it — drift fails the build
+
+```bash
+npm run openapi:lint      # Spectral: export the spec, then lint it against the house ruleset
+npm run openapi:export    # write openapi.json (the static spec)
+```
+
+The **`Lint & Typecheck`** job (Spectral) and the **`Unit & Integration`** job (a contract/drift test)
+are both required checks. A PR fails if you add a route without documenting it, leave an operation
+without a summary/description/tag/example, or **change an existing endpoint's response shape without
+updating its zod schema** — the schemas double as runtime response guards under `NODE_ENV=test`.
 
 ---
 
@@ -445,6 +492,7 @@ npm run lint:fix          # ESLint with autofix
 npm run format            # Prettier (write)
 npm run format:check      # Prettier (check only)
 npm run typecheck         # tsc --noEmit
+npm run openapi:lint      # Spectral — lint the OpenAPI spec (see API documentation)
 ```
 
 ESLint v9 (flat config) + typescript-eslint, with `eslint-config-prettier` so formatting is owned by

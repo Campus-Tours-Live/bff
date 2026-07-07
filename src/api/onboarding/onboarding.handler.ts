@@ -1,5 +1,6 @@
 import { sendProblem } from "../../util/problem.js";
 import { sendData, withSession, type Me } from "../_shared/index.js";
+import { ProgressDataSchema, RoleEnum } from "../../openapi/schemas.js";
 import { guideProgress } from "./guide.js";
 import { participantProgress } from "./participant.js";
 
@@ -12,10 +13,14 @@ import { participantProgress } from "./participant.js";
  * verification-level checklist is deferred (see guide.ts).
  */
 export const getOnboarding = withSession(async (req, res, core) => {
-  const role = String(req.query.role ?? "").toLowerCase();
-  if (role !== "guide" && role !== "participant") {
+  // Validate `role` against the SAME zod enum the OpenAPI spec documents (single source of
+  // truth for the accepted values). Lowercase first to keep the case-insensitive behaviour.
+  const parsed = RoleEnum.safeParse(String(req.query.role ?? "").toLowerCase());
+  if (!parsed.success) {
     return sendProblem(res, 422, "role must be 'guide' or 'participant'", { code: "INVALID_ROLE" });
   }
+  const role = parsed.data;
   const me = await core.getUserinfo<Me>();
-  sendData(res, role === "guide" ? guideProgress(me) : participantProgress(me));
+  const progress = role === "guide" ? guideProgress(me) : participantProgress(me);
+  sendData(res, progress, ProgressDataSchema);
 });

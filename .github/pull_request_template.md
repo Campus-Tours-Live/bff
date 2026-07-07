@@ -37,4 +37,5 @@
 - [ ] Tests added or updated (or explained why not)
 - [ ] No secrets, tokens, or `.env` files committed
 - [ ] `.env.example` and API contract updated if config or request/response changed
+- [ ] If a BFF endpoint changed, `src/openapi/` (schemas + examples via the `apiRoute` DSL) was updated and `npm run openapi:lint` passes (see `docs/openapi-conventions.md`)
 - [ ] Docs / README updated if needed

@@ -1,5 +1,6 @@
 import type { Response } from "express";
 import { type CoreClient, sendData, type Json, type Me } from "../_shared/index.js";
+import { GuideDashboardDataSchema } from "../../openapi/schemas.js";
 
 /**
  * Guide workspace: profile (required — throws → mapped by withSession) + offerings
@@ -12,12 +13,16 @@ export async function guideDashboard(res: Response, core: CoreClient, me: Me): P
     core.getGuideProfile<Json>(),
     core.getOfferings<Json[]>().catch(() => [] as Json[]),
   ]);
-  sendData(res, {
-    kind: "guide",
-    guide,
-    guideStatus: me.guideStatus,
-    canPublish: me.guideStatus === "APPROVED",
-    offerings,
-    createdAt: me.createdAt,
-  });
+  sendData(
+    res,
+    {
+      kind: "guide",
+      guide,
+      guideStatus: me.guideStatus,
+      canPublish: me.guideStatus === "APPROVED",
+      offerings,
+      createdAt: me.createdAt,
+    },
+    GuideDashboardDataSchema,
+  );
 }

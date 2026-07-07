@@ -1,6 +1,7 @@
 import request from "supertest";
 import { app } from "@/app.js";
 import { coreErr, coreOk, mintSessionCookie, mockCoreByPath } from "../_helpers.js";
+import { EnvelopedProgressSchema } from "@/openapi/schemas.js";
 
 describe("GET /v1/onboarding", () => {
   let cookie: string;
@@ -27,6 +28,8 @@ describe("GET /v1/onboarding", () => {
     expect(res.body.data.complete).toBe(true); // PENDING != DRAFT/null → submitted
     expect(res.body.data.applicationStatus).toBe("PENDING");
     expect(res.body.data.verificationStatus).toBeNull();
+    // Response-shape contract: body ↔ documented Progress envelope schema.
+    expect(EnvelopedProgressSchema.safeParse(res.body).success).toBe(true);
   });
 
   it("?role=guide with no guide profile yet → not started", async () => {
@@ -64,6 +67,7 @@ describe("GET /v1/onboarding", () => {
     expect(res.body.data.role).toBe("participant");
     expect(res.body.data.complete).toBe(true);
     expect(res.body.data.canSubmit).toBe(false);
+    expect(EnvelopedProgressSchema.safeParse(res.body).success).toBe(true);
   });
 
   it("?role=participant without the role yet → incomplete", async () => {

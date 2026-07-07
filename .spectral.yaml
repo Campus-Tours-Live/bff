@@ -1,0 +1,62 @@
+# Spectral ruleset for the BFF's hand-written, zod-driven OpenAPI spec (Contract A).
+# Extends the industry `spectral:oas` ruleset and adds a few project conventions as ERRORS
+# so `npm run openapi:lint` fails when a contribution drifts from the house style. Run with
+# `npm run openapi:lint` (which exports the current spec first, then lints openapi.json).
+extends: ["spectral:oas"]
+
+rules:
+  # Disabled: this rule crashes (nimma "Cannot read properties of null") on OAS 3.1 nullable
+  # enums, which zod-to-openapi correctly emits as `type: ["string","null"], enum: [..., null]`.
+  # The `null` entry trips the rule's de-dup traversal. Our enums have no real duplicates.
+  duplicated-entry-in-enum: off
+
+  # spectral:oas ships these as warnings — the BFF treats them as hard requirements so every
+  # operation is self-describing (also enforced at build time by src/openapi/helpers.ts:apiRoute).
+  operation-description: error
+  operation-tags: error
+  operation-tag-defined: error
+
+  # Every operation MUST have a non-empty summary (spectral:oas has no summary rule).
+  bff-operation-summary:
+    description: Every operation must have a non-empty summary.
+    message: "{{path}} — operation is missing a `summary`."
+    severity: error
+    given: "$.paths[*][get,put,post,delete,options,head,patch,trace]"
+    then:
+      field: summary
+      function: truthy
+
+  # Every operation MUST carry at least one tag (truthy catches missing; oas `operation-tags`
+  # above catches the empty-array case).
+  bff-operation-has-tag:
+    description: Every operation must declare at least one tag.
+    message: "{{path}} — operation must declare at least one `tag`."
+    severity: error
+    given: "$.paths[*][get,put,post,delete,options,head,patch,trace]"
+    then:
+      field: tags
+      function: truthy
+
+  # Every response body (any media type that has content) MUST ship an example — exactly one
+  # of `example` / `examples`. Redirect (302) responses carry no content, so they're exempt.
+  bff-response-has-example:
+    description: Every response body must include an example (`example` or `examples`).
+    message: "{{path}} — response body must include an `example` or `examples`."
+    severity: error
+    given: "$.paths[*][*].responses[*].content[*]"
+    then:
+      function: xor
+      functionOptions:
+        properties: ["example", "examples"]
+
+  # Named component schemas that are plain objects MUST describe every own property, so the
+  # generated docs never show an undocumented field. (Ref-valued and composed schemas are not
+  # `type: object` with `properties`, so they're naturally out of scope.)
+  bff-schema-property-description:
+    description: Object-schema properties must have a description.
+    message: "#/components/schemas — a property is missing a `description`."
+    severity: error
+    given: "$.components.schemas[*][?(@.type=='object')].properties[*]"
+    then:
+      field: description
+      function: truthy

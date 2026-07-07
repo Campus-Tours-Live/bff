@@ -1,6 +1,7 @@
 import request from "supertest";
 import { app } from "@/app.js";
 import { coreErr, coreOk, mintSessionCookie, mockCoreByPath } from "../_helpers.js";
+import { EnvelopedDashboardSchema } from "@/openapi/schemas.js";
 
 describe("GET /v1/dashboard", () => {
   let cookie: string;
@@ -29,6 +30,9 @@ describe("GET /v1/dashboard", () => {
     expect(res.body.data.guideStatus).toBe("APPROVED");
     expect(res.body.data.guide).toEqual({ id: "g1", displayName: "Gina Guide" });
     expect(res.body.data.offerings).toEqual([{ id: "o1", title: "Campus Walk" }]);
+    // Response-shape contract: body ↔ documented envelope schema (loose on Core-forwarded
+    // fields, strict on the BFF-owned envelope/kind/canPublish/offerings shape).
+    expect(EnvelopedDashboardSchema.safeParse(res.body).success).toBe(true);
   });
 
   it("guide not yet approved → canPublish false", async () => {
@@ -66,6 +70,7 @@ describe("GET /v1/dashboard", () => {
     expect(res.status).toBe(200);
     expect(res.body.data.kind).toBe("participant");
     expect(res.body.data.participant).toEqual({ id: "p1", displayName: "Pat Participant" });
+    expect(EnvelopedDashboardSchema.safeParse(res.body).success).toBe(true);
   });
 
   it("offerings fetch fails for a guide → degrades to offerings:[] (still 200)", async () => {

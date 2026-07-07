@@ -1,5 +1,6 @@
 import type { Response } from "express";
 import { type CoreClient, sendData, type Json, type Me } from "../_shared/index.js";
+import { ParticipantDashboardDataSchema } from "../../openapi/schemas.js";
 
 /**
  * Participant dashboard. Fans out four Core reads in parallel:
@@ -15,12 +16,16 @@ export async function participantDashboard(res: Response, core: CoreClient, me: 
     core.getUpcomingBookings<Json[]>().catch(() => [] as Json[]),
     core.getPendingActions<Json>().catch(() => null),
   ]);
-  sendData(res, {
-    kind: "participant",
-    participant,
-    nextTour,
-    upcomingBookings,
-    pendingActions,
-    createdAt: me.createdAt,
-  });
+  sendData(
+    res,
+    {
+      kind: "participant",
+      participant,
+      nextTour,
+      upcomingBookings,
+      pendingActions,
+      createdAt: me.createdAt,
+    },
+    ParticipantDashboardDataSchema,
+  );
 }

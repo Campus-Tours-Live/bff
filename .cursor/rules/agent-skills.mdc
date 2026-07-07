@@ -35,6 +35,15 @@ manual step **inside the editor**:
 Notes: Cursor does **not** honor a skill's `tools:` allowlist. The project auto-install
 (`npm run skills`, the SessionStart hook, `predev`) only covers Claude/Codex — Cursor is manual.
 
+## Contract A / OpenAPI (`src/openapi/`)
+
+Adding or changing a BFF-owned endpoint (`/auth/*` or the `/v1` aggregation composites
+`/v1/dashboard`, `/v1/onboarding`) means updating the hand-written, zod-driven OpenAPI 3.1 spec
+in `src/openapi/`. Register paths **only** through the helper DSL (`apiRoute` + `enveloped` +
+`problem401/502/422/400`), give every field a description + example, define enums once, and run
+`npm run openapi:lint` + `npm test` before pushing. Full guide: `docs/openapi-conventions.md`.
+CI enforces it (Spectral ruleset + the contract/drift test).
+
 ## Cross-repo rule (read before changing bff)
 
 bff holds two contracts — **Contract A** (what it returns to frontend) and **Contract B** (what it
