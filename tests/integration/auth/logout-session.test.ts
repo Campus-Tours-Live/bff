@@ -3,6 +3,7 @@ import request from "supertest";
 import { app } from "@/app.js";
 import { writeSession } from "@/session.js";
 import { cookieNamed, isCleared } from "./_helpers.js";
+import { SessionStatusSchema } from "@/openapi/schemas.js";
 
 /** Mint a real, valid ctl_sess cookie pair via the production writeSession. */
 function sessCookie(idToken = "id-tok"): string {
@@ -52,6 +53,8 @@ describe("GET /auth/session", () => {
 
     expect(res.status).toBe(200);
     expect(res.body).toEqual({ authenticated: true });
+    // Response-shape contract: the body must match the documented SessionStatus schema.
+    expect(SessionStatusSchema.safeParse(res.body).success).toBe(true);
   });
 
   it("returns authenticated:false when no session cookie is present", async () => {

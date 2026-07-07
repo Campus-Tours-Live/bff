@@ -28,6 +28,9 @@ jobs:
       - run: npm ci
       - run: npm run lint
       - run: npm run typecheck
+      # Export the in-code OpenAPI spec and lint it with Spectral (industry OAS linter) so a
+      # drifting/under-documented Contract A fails CI. See .spectral.yaml + docs/openapi-conventions.md.
+      - run: npm run openapi:lint
 
   test:
     name: Unit & Integration

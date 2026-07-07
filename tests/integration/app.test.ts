@@ -49,6 +49,25 @@ describe("CORS", () => {
   });
 });
 
+describe("API docs", () => {
+  it("GET /openapi.json returns the OpenAPI 3.1 spec with the bff-owned paths", async () => {
+    const res = await request(app).get("/openapi.json");
+    expect(res.status).toBe(200);
+    expect(res.body.openapi).toBe("3.1.0");
+    expect(Object.keys(res.body.paths)).toEqual(
+      expect.arrayContaining(["/v1/dashboard", "/v1/onboarding", "/auth/login", "/auth/session"]),
+    );
+    // Proxied /v1/* paths are pointed at the Core spec, not re-documented here.
+    expect(res.body.externalDocs.url).toContain("/v3/api-docs");
+  });
+
+  it("GET /docs serves the Swagger UI", async () => {
+    const res = await request(app).get("/docs/");
+    expect(res.status).toBe(200);
+    expect(res.text).toContain("swagger-ui");
+  });
+});
+
 describe("error handler", () => {
   it("turns a thrown body-parse error into a 500 problem+json", async () => {
     const res = await request(app)
