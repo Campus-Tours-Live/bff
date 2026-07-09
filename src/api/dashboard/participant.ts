@@ -1,7 +1,13 @@
 import type { Response } from "express";
-import { type CoreClient, sendData, type Json, type Me } from "../_shared/index.js";
+import {
+  type CoreClient,
+  sendData,
+  reshapeBooking,
+  type CoreBookingDetail,
+  type Json,
+  type Me,
+} from "../_shared/index.js";
 import { ParticipantDashboardDataSchema } from "../../openapi/schemas.js";
-import { reshapeBooking, type CoreBookingDetail } from "../bookings/utils/reshape.js";
 
 /**
  * Participant dashboard. Fans out four Core reads in parallel:
