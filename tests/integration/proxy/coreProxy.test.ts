@@ -74,7 +74,7 @@ describe("coreProxy (/v1/* passthrough)", () => {
 
     it("Core unreachable (fetch rejects) → 502 CORE_UNAVAILABLE", async () => {
       global.fetch = jest
-        .fn()
+        .fn<typeof fetch>()
         .mockRejectedValue(new Error("ECONNREFUSED")) as unknown as typeof fetch;
 
       const res = await request(app).get("/v1/guide/profile").set("Cookie", cookie);

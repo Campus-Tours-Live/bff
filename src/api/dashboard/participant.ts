@@ -1,5 +1,12 @@
 import type { Response } from "express";
-import { type CoreClient, sendData, type Json, type Me } from "../_shared/index.js";
+import {
+  type CoreClient,
+  sendData,
+  reshapeBooking,
+  type CoreBookingDetail,
+  type Json,
+  type Me,
+} from "../_shared/index.js";
 import { ParticipantDashboardDataSchema } from "../../openapi/schemas.js";
 
 /**
@@ -10,10 +17,10 @@ import { ParticipantDashboardDataSchema } from "../../openapi/schemas.js";
  * - pending actions counts (best-effort → null on failure)
  */
 export async function participantDashboard(res: Response, core: CoreClient, me: Me): Promise<void> {
-  const [participant, nextTour, upcomingBookings, pendingActions] = await Promise.all([
+  const [participant, nextTourRaw, upcomingRaw, pendingActions] = await Promise.all([
     core.getParticipantProfile<Json>(),
-    core.getNextTour<Json | null>().catch(() => null),
-    core.getUpcomingBookings<Json[]>().catch(() => [] as Json[]),
+    core.getNextTour<CoreBookingDetail | null>().catch(() => null),
+    core.getUpcomingBookings<CoreBookingDetail[] | null>().catch(() => null),
     core.getPendingActions<Json>().catch(() => null),
   ]);
   sendData(
@@ -21,8 +28,8 @@ export async function participantDashboard(res: Response, core: CoreClient, me: 
     {
       kind: "participant",
       participant,
-      nextTour,
-      upcomingBookings,
+      nextTour: nextTourRaw ? reshapeBooking(nextTourRaw) : null,
+      upcomingBookings: (upcomingRaw ?? []).map(reshapeBooking),
       pendingActions,
       createdAt: me.createdAt,
     },

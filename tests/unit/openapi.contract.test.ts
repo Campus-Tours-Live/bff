@@ -42,7 +42,7 @@ function extractRoutes(stack: RouteLayer[], prefix = ""): { method: string; path
   const out: { method: string; path: string }[] = [];
   for (const layer of stack) {
     if (layer.route) {
-      const path = prefix + layer.route.path;
+      const path = (prefix + layer.route.path).replace(/:([^/]+)/g, "{$1}");
       for (const [method, on] of Object.entries(layer.route.methods)) {
         if (on) out.push({ method: method.toLowerCase(), path });
       }
@@ -110,6 +110,12 @@ describe("OpenAPI contract — drift guard (Express routes ↔ spec)", () => {
         "get /v1/dashboard",
         "get /v1/onboarding",
         "post /auth/logout",
+        "post /v1/bookings",
+        "post /v1/bookings/{id}/cancel",
+        "get /v1/cart",
+        "post /v1/cart/items",
+        "delete /v1/cart/items/{id}",
+        "post /v1/cart/checkout",
       ].sort(),
     );
   });

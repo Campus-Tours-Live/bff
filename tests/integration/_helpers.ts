@@ -52,8 +52,8 @@ export function pathOf(url: unknown): string {
  * `routes` maps a stripped Core path to the Response to return; unmatched paths
  * reject so a test fails loudly rather than silently.
  */
-export function mockCoreByPath(routes: Record<string, Response>): jest.Mock {
-  const mock = jest.fn(async (url: string | URL) => {
+export function mockCoreByPath(routes: Record<string, Response>): jest.Mock<typeof fetch> {
+  const mock = jest.fn<typeof fetch>(async (url) => {
     const path = pathOf(url);
     const res = routes[path];
     if (!res) throw new Error(`No mock Core route for ${path}`);

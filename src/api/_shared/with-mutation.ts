@@ -7,18 +7,16 @@ import { CoreClient } from "./core-client.js";
 import { CoreAuthError, CoreError } from "./errors.js";
 
 /**
- * Handler wrapper for aggregation endpoints: resolve auth once, hand the handler a
- * ready-to-use Core client, and funnel every error through one place so handlers stay
- * branch-free (required reads just `await`; best-effort reads `.catch(...)`).
- * Error mapping:
- *   - no session / silent-refresh failed, OR a Core 401 → requireReauth (web app opens
- *     the sign-in modal);
- *   - a Core 5xx / unreachable → 502 (upstream unavailable);
- *   - a Core 4xx → surfaced with its real status (don't mislabel a 404/422 as
- *     "unavailable");
+ * Mutation sibling of {@link withSession}. Resolves auth once, then on a Core error:
+ *   - CoreAuthError / Core 401 → requireReauth;
+ *   - Core 5xx / unreachable → 502;
+ *   - Core 4xx → VERBATIM relay of the Core problem+json (status + content-type + body) so
+ *     validation messages (e.g. "time slot just taken", 422) reach the browser unchanged;
  *   - anything else → 500.
+ * The shared read wrapper (withSession) is intentionally NOT reused, so the read 4xx
+ * contract (generic UPSTREAM_ERROR) stays put.
  */
-export function withSession(
+export function withMutation(
   handler: (req: Request, res: Response, core: CoreClient) => Promise<void>,
 ): (req: Request, res: Response) => Promise<void> {
   return async (req: Request, res: Response): Promise<void> => {
@@ -29,13 +27,13 @@ export function withSession(
     } catch (err) {
       if (err instanceof CoreAuthError) return requireReauth(res);
       if (err instanceof CoreError) {
-        // 5xx / unreachable → genuinely unavailable; 4xx → surface the real status.
         if (err.status >= 500) return coreUnavailable(res);
-        return sendProblem(res, err.status, "Upstream request failed", { code: "UPSTREAM_ERROR" });
+        res.status(err.status);
+        if (err.contentType) res.type(err.contentType);
+        res.send(err.body ?? "");
+        return;
       }
-      // Unexpected (non-Core) exception in an aggregation handler — log it (it is otherwise
-      // swallowed) so a 500 is diagnosable, then return the generic problem.
-      console.error("[withSession] unhandled error:", err);
+      console.error("[withMutation] unhandled error:", err);
       sendProblem(res, 500, "Internal server error", { code: "INTERNAL" });
     }
   };

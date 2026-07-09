@@ -6,9 +6,14 @@ export class CoreAuthError extends Error {
   }
 }
 
-/** Core returned a non-2xx (other than 401) or was unreachable. */
+/** Core returned a non-2xx (other than 401) or was unreachable. Carries the raw body for
+ *  verbatim relay on mutations (reads ignore it). */
 export class CoreError extends Error {
-  constructor(public readonly status: number) {
+  constructor(
+    public readonly status: number,
+    public readonly body?: string,
+    public readonly contentType?: string,
+  ) {
     super(`Core error ${status}`);
     this.name = "CoreError";
   }

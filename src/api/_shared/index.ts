@@ -6,4 +6,8 @@ export { CoreClient } from "./core-client.js";
 export { CoreAuthError, CoreError } from "./errors.js";
 export { sendData, coreUnavailable } from "./envelope.js";
 export { withSession } from "./with-session.js";
+export { withMutation } from "./with-mutation.js";
 export type { Me, Json } from "./types.js";
+export { reshapeBooking } from "./reshape.js";
+export type { CoreBookingDetail, BookingResponse } from "./reshape.js";
+export { writeOpts } from "./write-opts.js";

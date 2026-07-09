@@ -2,10 +2,10 @@ import { jest } from "@jest/globals";
 import type { Request, Response } from "express";
 import { CoreAuthError, CoreError } from "@/api/_shared/errors.js";
 
-const resolveBearer = jest.fn();
-const requireReauth = jest.fn();
-const coreUnavailable = jest.fn();
-const sendProblem = jest.fn();
+const resolveBearer = jest.fn<(...args: unknown[]) => Promise<string | null>>();
+const requireReauth = jest.fn<(...args: unknown[]) => void>();
+const coreUnavailable = jest.fn<(...args: unknown[]) => void>();
+const sendProblem = jest.fn<(...args: unknown[]) => void>();
 
 jest.unstable_mockModule("@/api/_shared/session.js", () => ({
   resolveBearer: (...args: unknown[]) => resolveBearer(...args),

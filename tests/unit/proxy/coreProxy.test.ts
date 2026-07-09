@@ -6,8 +6,8 @@ import type { Request, Response } from "express";
 // `res.getHeader("X-Request-Id")` is never undefined there. Here we call coreProxy directly with a
 // response that has no such header to exercise the `?? crypto.randomUUID()` fallback.
 
-const resolveBearer = jest.fn();
-const requireReauth = jest.fn();
+const resolveBearer = jest.fn<(...args: unknown[]) => Promise<string | null>>();
+const requireReauth = jest.fn<(...args: unknown[]) => void>();
 jest.unstable_mockModule("@/api/_shared/index.js", () => ({
   resolveBearer: (...args: unknown[]) => resolveBearer(...args),
   requireReauth: (...args: unknown[]) => requireReauth(...args),
@@ -37,11 +37,14 @@ describe("coreProxy (unit) — correlation-id fallback", () => {
 
   it("generates an X-Request-Id when the response carries none", async () => {
     resolveBearer.mockResolvedValue("bearer-xyz");
-    const fetchMock = jest.fn(async () => ({
-      status: 200,
-      text: async () => "ok",
-      headers: { get: () => null },
-    }));
+    const fetchMock = jest.fn<typeof fetch>(
+      async () =>
+        ({
+          status: 200,
+          text: async () => "ok",
+          headers: { get: () => null },
+        }) as unknown as globalThis.Response,
+    );
     global.fetch = fetchMock as unknown as typeof fetch;
 
     const req = {

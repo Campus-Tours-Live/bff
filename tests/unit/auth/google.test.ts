@@ -137,7 +137,7 @@ describe("exchangeCode", () => {
   });
 
   it("POSTs to the Google token endpoint with form-urlencoded content type", async () => {
-    const mockFetch = jest.fn(async () => fetchResponse(true, 200, tokenSet));
+    const mockFetch = jest.fn<typeof fetch>(async () => fetchResponse(true, 200, tokenSet));
     global.fetch = mockFetch as unknown as typeof fetch;
 
     await exchangeCode("auth-code", "verifier-xyz");
@@ -198,7 +198,7 @@ describe("refreshTokens", () => {
   });
 
   it("POSTs to the Google token endpoint", async () => {
-    const mockFetch = jest.fn(async () => fetchResponse(true, 200, tokenSet));
+    const mockFetch = jest.fn<typeof fetch>(async () => fetchResponse(true, 200, tokenSet));
     global.fetch = mockFetch as unknown as typeof fetch;
 
     await refreshTokens("rt-existing");
