@@ -3,29 +3,7 @@ import type { Request, Response } from "express";
 import { config } from "../config.js";
 import { sendProblem } from "../util/problem.js";
 import { requireReauth, resolveBearer } from "../api/_shared/index.js";
-
-const SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
-
-/**
- * CSRF defence-in-depth (on top of the SameSite=Lax cookie): for state-changing
- * methods, reject when the Origin (or, failing that, Referer) is a different
- * site from the web app. Requests with no Origin/Referer are allowed (typical
- * same-origin fetches) — the SameSite cookie still guards those.
- */
-function isCrossSiteMutation(req: Request): boolean {
-  if (SAFE_METHODS.has(req.method.toUpperCase())) return false;
-  const origin = req.header("origin");
-  if (origin) return origin !== config.webOrigin;
-  const referer = req.header("referer");
-  if (referer) {
-    try {
-      return new URL(referer).origin !== config.webOrigin;
-    } catch {
-      return true;
-    }
-  }
-  return false;
-}
+import { isCrossSiteMutation } from "../util/csrf.js";
 
 /**
  * Proxy /v1/* to the Core API. The BFF strips the /v1 prefix (Core owns the bare
