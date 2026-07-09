@@ -572,69 +572,11 @@ export const coreUnavailableProblem = problem(
   "The Core API was unreachable or returned a 5xx.",
 );
 
-// --- Runtime response-shape contracts (loose on Core passthrough, strict on BFF-owned) ---
-//
-// These are used by the dev-only assertion in src/api/_shared/envelope.ts and by the
-// integration/contract tests to prove handler output ↔ schema ↔ spec stay in lockstep.
-// See the module header for the strict/loose rationale.
-
-/** A JSON object the BFF forwards verbatim from Core — any string-keyed shape passes. */
-const LooseObject = z.record(z.string(), z.unknown());
-
-/** The `{ data, meta: { requestId } }` success envelope, strict on the wrapper. */
-export function envelopeOf<T extends z.ZodTypeAny>(
-  data: T,
-): z.ZodObject<{ data: T; meta: z.ZodObject<{ requestId: z.ZodString }> }> {
-  return z.object({ data, meta: z.object({ requestId: z.string() }) });
-}
-
-/** GET /v1/dashboard guide `data` — strict on `kind`/`canPublish`/`offerings` (BFF-owned). */
-export const GuideDashboardDataSchema = z.object({
-  kind: z.literal("guide"),
-  guide: LooseObject, // forwarded from Core — opaque
-  guideStatus: z.string().nullable(), // forwarded from Core — value not constrained here
-  canPublish: z.boolean(), // BFF-derived
-  offerings: z.array(LooseObject), // BFF owns "it's an array"; items are Core-opaque
-  createdAt: z.string().optional(), // forwarded from Core
-});
-
-/** GET /v1/dashboard participant `data` — strict on `kind` + the array shape (BFF-owned). */
-export const ParticipantDashboardDataSchema = z.object({
-  kind: z.literal("participant"),
-  participant: LooseObject, // forwarded from Core — opaque
-  nextTour: z.unknown(), // Core-opaque (object | null)
-  upcomingBookings: z.array(z.unknown()), // BFF owns "it's an array"; items Core-opaque
-  pendingActions: z.unknown(), // Core-opaque (object | null)
-  createdAt: z.string().optional(), // forwarded from Core
-});
-
-/** GET /v1/dashboard `data`, discriminated by `kind`. */
-export const DashboardDataSchema = z.discriminatedUnion("kind", [
-  GuideDashboardDataSchema,
-  ParticipantDashboardDataSchema,
-]);
-
-/** Full enveloped GET /v1/dashboard response contract. */
-export const EnvelopedDashboardSchema = envelopeOf(DashboardDataSchema);
-
-/** GET /v1/onboarding `data` — the `Progress` structure is entirely BFF-owned (strict). */
-export const ProgressDataSchema = z.object({
-  role: RoleEnum,
-  started: z.boolean(),
-  complete: z.boolean(),
-  canSubmit: z.boolean(),
-  applicationStatus: z.string().nullable(), // forwarded from Core — value not constrained here
-  verificationStatus: z.string().nullable(), // deferred (currently always null)
-  steps: z.array(z.object({ key: z.string(), label: z.string(), done: z.boolean() })),
-});
-
-/** Full enveloped GET /v1/onboarding response contract. */
-export const EnvelopedProgressSchema = envelopeOf(ProgressDataSchema);
-
-/** GET /auth/session — the bare, un-enveloped `{ authenticated }` boolean (BFF-owned). */
-export const SessionStatusSchema = z.object({ authenticated: z.boolean() });
-
 // --- Booking schemas (Contract A for booking operations) ---
+//
+// Defined here, ahead of the runtime response-shape contracts below, so
+// `ParticipantDashboardDataSchema` can reference `BookingResponseSchema` directly (module-scope
+// `const`s must be initialized before use — no forward references).
 
 /** Money value in ISO-4217 currency, with amount in minor units (cents). */
 export const MoneySchema = z.object({
@@ -673,3 +615,65 @@ export const CreateBookingRequestSchema = z.object({
 export const CancelBookingRequestSchema = z.object({
   reason: z.string().max(1000).optional(),
 });
+
+// --- Runtime response-shape contracts (loose on Core passthrough, strict on BFF-owned) ---
+//
+// These are used by the dev-only assertion in src/api/_shared/envelope.ts and by the
+// integration/contract tests to prove handler output ↔ schema ↔ spec stay in lockstep.
+// See the module header for the strict/loose rationale.
+
+/** A JSON object the BFF forwards verbatim from Core — any string-keyed shape passes. */
+const LooseObject = z.record(z.string(), z.unknown());
+
+/** The `{ data, meta: { requestId } }` success envelope, strict on the wrapper. */
+export function envelopeOf<T extends z.ZodTypeAny>(
+  data: T,
+): z.ZodObject<{ data: T; meta: z.ZodObject<{ requestId: z.ZodString }> }> {
+  return z.object({ data, meta: z.object({ requestId: z.string() }) });
+}
+
+/** GET /v1/dashboard guide `data` — strict on `kind`/`canPublish`/`offerings` (BFF-owned). */
+export const GuideDashboardDataSchema = z.object({
+  kind: z.literal("guide"),
+  guide: LooseObject, // forwarded from Core — opaque
+  guideStatus: z.string().nullable(), // forwarded from Core — value not constrained here
+  canPublish: z.boolean(), // BFF-derived
+  offerings: z.array(LooseObject), // BFF owns "it's an array"; items are Core-opaque
+  createdAt: z.string().optional(), // forwarded from Core
+});
+
+/** GET /v1/dashboard participant `data` — strict on `kind` + the array shape (BFF-owned). */
+export const ParticipantDashboardDataSchema = z.object({
+  kind: z.literal("participant"),
+  participant: LooseObject, // forwarded from Core — opaque
+  nextTour: BookingResponseSchema.nullable(), // reshaped to Contract-A (one booking shape)
+  upcomingBookings: z.array(BookingResponseSchema), // reshaped to Contract-A
+  pendingActions: z.unknown(), // Core-opaque (object | null)
+  createdAt: z.string().optional(), // forwarded from Core
+});
+
+/** GET /v1/dashboard `data`, discriminated by `kind`. */
+export const DashboardDataSchema = z.discriminatedUnion("kind", [
+  GuideDashboardDataSchema,
+  ParticipantDashboardDataSchema,
+]);
+
+/** Full enveloped GET /v1/dashboard response contract. */
+export const EnvelopedDashboardSchema = envelopeOf(DashboardDataSchema);
+
+/** GET /v1/onboarding `data` — the `Progress` structure is entirely BFF-owned (strict). */
+export const ProgressDataSchema = z.object({
+  role: RoleEnum,
+  started: z.boolean(),
+  complete: z.boolean(),
+  canSubmit: z.boolean(),
+  applicationStatus: z.string().nullable(), // forwarded from Core — value not constrained here
+  verificationStatus: z.string().nullable(), // deferred (currently always null)
+  steps: z.array(z.object({ key: z.string(), label: z.string(), done: z.boolean() })),
+});
+
+/** Full enveloped GET /v1/onboarding response contract. */
+export const EnvelopedProgressSchema = envelopeOf(ProgressDataSchema);
+
+/** GET /auth/session — the bare, un-enveloped `{ authenticated }` boolean (BFF-owned). */
+export const SessionStatusSchema = z.object({ authenticated: z.boolean() });

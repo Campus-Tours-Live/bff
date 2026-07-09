@@ -151,6 +151,47 @@ describe("GET /v1/dashboard", () => {
     expect(res.body).toMatchObject({ code: "UPSTREAM_ERROR" });
   });
 
+  it("reshapes dashboard bookings into Contract-A field names", async () => {
+    const coreB = {
+      id: "b1",
+      status: "CONFIRMED",
+      scheduledAt: "2026-08-01T15:00:00Z",
+      timezone: "UTC",
+      offeringId: "o1",
+      offeringTitle: "T",
+      guideName: "G",
+      guideResponseDeadline: null,
+      universityName: "U",
+      durationMin: 45,
+      priceCents: 3000,
+      currency: "USD",
+    };
+    mockCoreByPath({
+      "/userinfo": coreOk({
+        roles: ["PARTICIPANT"],
+        activeRole: "PARTICIPANT",
+        participantType: "PROSPECTIVE",
+        guideStatus: null,
+      }),
+      "/participant/profile": coreOk({ id: "p1" }),
+      "/bookings/next-tour": coreOk(coreB),
+      "/bookings/upcoming": coreOk([coreB]),
+      "/bookings/pending-actions": coreOk({
+        paymentsToFinish: 0,
+        waitingForGuide: 1,
+        reviewsToWrite: 0,
+      }),
+    });
+    const res = await request(app).get("/v1/dashboard").set("Cookie", cookie);
+    expect(res.status).toBe(200);
+    expect(res.body.data.nextTour.durationMinutes).toBe(45);
+    expect(res.body.data.nextTour.tourTitle).toBe("T");
+    expect(res.body.data.nextTour.price).toEqual({ amount: 3000, currency: "USD" });
+    expect(res.body.data.nextTour).not.toHaveProperty("priceCents");
+    expect(res.body.data.upcomingBookings[0].scheduledStartAt).toBe("2026-08-01T15:00:00Z");
+    expect(res.body.data.upcomingBookings[0].scheduledEndAt).toBe("2026-08-01T15:45:00Z");
+  });
+
   it("forwards the session id_token as a Bearer to Core /userinfo", async () => {
     const mock = mockCoreByPath({
       "/userinfo": coreOk({

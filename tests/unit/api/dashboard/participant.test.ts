@@ -26,8 +26,36 @@ const ME: Me = { createdAt: "2025-03-15T00:00:00Z" } as unknown as Me;
 function mockCore(overrides: Partial<Record<keyof CoreClient, jest.Mock>> = {}): CoreClient {
   return {
     getParticipantProfile: jest.fn().mockResolvedValue({ id: "p1", displayName: "Sam" }),
-    getNextTour: jest.fn().mockResolvedValue({ id: "b1", displayStatus: "CONFIRMED" }),
-    getUpcomingBookings: jest.fn().mockResolvedValue([{ id: "b2", displayStatus: "CONFIRMED" }]),
+    getNextTour: jest.fn().mockResolvedValue({
+      id: "b1",
+      status: "CONFIRMED",
+      scheduledAt: "2026-08-01T15:00:00Z",
+      timezone: "UTC",
+      offeringId: "o1",
+      offeringTitle: "North Campus",
+      guideName: "Maya",
+      guideResponseDeadline: null,
+      universityName: "NCU",
+      durationMin: 60,
+      priceCents: 4200,
+      currency: "USD",
+    }),
+    getUpcomingBookings: jest.fn().mockResolvedValue([
+      {
+        id: "b2",
+        status: "CONFIRMED",
+        scheduledAt: "2026-08-01T15:00:00Z",
+        timezone: "UTC",
+        offeringId: "o1",
+        offeringTitle: "North Campus",
+        guideName: "Maya",
+        guideResponseDeadline: null,
+        universityName: "NCU",
+        durationMin: 60,
+        priceCents: 4200,
+        currency: "USD",
+      },
+    ]),
     getPendingActions: jest
       .fn()
       .mockResolvedValue({ paymentsToFinish: 0, waitingForGuide: 1, reviewsToWrite: 0 }),
@@ -43,8 +71,36 @@ describe("participantDashboard", () => {
     const body = JSON.parse(res.body as string).data;
     expect(body.kind).toBe("participant");
     expect(body.participant).toEqual({ id: "p1", displayName: "Sam" });
-    expect(body.nextTour).toEqual({ id: "b1", displayStatus: "CONFIRMED" });
-    expect(body.upcomingBookings).toEqual([{ id: "b2", displayStatus: "CONFIRMED" }]);
+    expect(body.nextTour).toEqual({
+      id: "b1",
+      status: "CONFIRMED",
+      scheduledStartAt: "2026-08-01T15:00:00Z",
+      scheduledEndAt: "2026-08-01T16:00:00Z",
+      displayTimeZone: "UTC",
+      durationMinutes: 60,
+      tourOfferingId: "o1",
+      tourTitle: "North Campus",
+      guideName: "Maya",
+      guideResponseDeadline: null,
+      universityName: "NCU",
+      price: { amount: 4200, currency: "USD" },
+    });
+    expect(body.upcomingBookings).toEqual([
+      {
+        id: "b2",
+        status: "CONFIRMED",
+        scheduledStartAt: "2026-08-01T15:00:00Z",
+        scheduledEndAt: "2026-08-01T16:00:00Z",
+        displayTimeZone: "UTC",
+        durationMinutes: 60,
+        tourOfferingId: "o1",
+        tourTitle: "North Campus",
+        guideName: "Maya",
+        guideResponseDeadline: null,
+        universityName: "NCU",
+        price: { amount: 4200, currency: "USD" },
+      },
+    ]);
     expect(body.pendingActions).toEqual({
       paymentsToFinish: 0,
       waitingForGuide: 1,
