@@ -1,4 +1,4 @@
-import { reshapeBooking } from "@/api/bookings/reshape.js";
+import { reshapeBooking } from "@/api/bookings/utils/reshape.js";
 
 const core = {
   id: "b1",
