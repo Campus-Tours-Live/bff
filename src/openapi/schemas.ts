@@ -349,7 +349,6 @@ export const BookingResponseSchema = z.object({
   status: z.string(),
   scheduledStartAt: z.string(),
   scheduledEndAt: z.string(),
-  displayTimeZone: z.string(),
   durationMinutes: z.number().int(),
   tourOfferingId: z.string(),
   tourTitle: z.string(),
@@ -395,7 +394,6 @@ const PARTICIPANT_NEXT_TOUR_EXAMPLE = {
   status: "CONFIRMED",
   scheduledStartAt: "2026-07-10T15:00:00Z",
   scheduledEndAt: "2026-07-10T16:00:00Z",
-  displayTimeZone: "America/New_York",
   durationMinutes: 60,
   tourOfferingId: "off_123",
   tourTitle: "Hidden gems of North Campus",
@@ -411,7 +409,6 @@ const PARTICIPANT_UPCOMING_EXAMPLE = {
   status: "WAITING_FOR_GUIDE",
   scheduledStartAt: "2026-07-14T18:00:00Z",
   scheduledEndAt: "2026-07-14T19:30:00Z",
-  displayTimeZone: "America/New_York",
   durationMinutes: 90,
   tourOfferingId: "off_456",
   tourTitle: "Engineering quad tour",
@@ -628,7 +625,6 @@ export const coreUnavailableProblem = problem(
 export const CreateBookingRequestSchema = z.object({
   tourOfferingId: z.string(),
   scheduledStartAt: z.string(),
-  displayTimezone: z.string(),
   participantNotes: z.string().max(1000).optional(),
 });
 
