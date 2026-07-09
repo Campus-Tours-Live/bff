@@ -30,6 +30,13 @@ describe("bff cart module", () => {
     expect(res.body.data[1].id).toBe("b2");
   });
 
+  it("GET /v1/cart with an empty cart → 200, [] (Core { data: [] } unwraps to [], not a crash)", async () => {
+    mockCoreByPath({ "/cart": coreOk([]) });
+    const res = await request(app).get("/v1/cart").set("Cookie", cookie);
+    expect(res.status).toBe(200);
+    expect(res.body.data).toEqual([]);
+  });
+
   it("POST /v1/cart/items reshapes the added item", async () => {
     mockCoreByPath({ "/cart/items": coreOk({ ...coreBooking, id: "b3", status: "DRAFT" }) });
     const res = await request(app).post("/v1/cart/items").set("Cookie", cookie).send({

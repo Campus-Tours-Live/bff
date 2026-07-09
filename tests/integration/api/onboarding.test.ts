@@ -87,6 +87,47 @@ describe("GET /v1/onboarding", () => {
     expect(res.body.data.canSubmit).toBe(true);
   });
 
+  it("brand-new user (no roles yet) → participant onboarding not started, incomplete", async () => {
+    mockCoreByPath({
+      "/userinfo": coreOk({
+        roles: [],
+        activeRole: null,
+        participantType: null,
+        guideStatus: null,
+      }),
+    });
+
+    const res = await request(app).get("/v1/onboarding?role=participant").set("Cookie", cookie);
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.role).toBe("participant");
+    expect(res.body.data.started).toBe(false);
+    expect(res.body.data.complete).toBe(false);
+    expect(res.body.data.canSubmit).toBe(true);
+    expect(EnvelopedProgressSchema.safeParse(res.body).success).toBe(true);
+  });
+
+  it("brand-new user (no roles, no guide profile) → guide onboarding not started, incomplete", async () => {
+    mockCoreByPath({
+      "/userinfo": coreOk({
+        roles: [],
+        activeRole: null,
+        participantType: null,
+        guideStatus: null,
+      }),
+    });
+
+    const res = await request(app).get("/v1/onboarding?role=guide").set("Cookie", cookie);
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.role).toBe("guide");
+    expect(res.body.data.started).toBe(false);
+    expect(res.body.data.complete).toBe(false);
+    expect(res.body.data.canSubmit).toBe(true);
+    expect(res.body.data.applicationStatus).toBeNull();
+    expect(EnvelopedProgressSchema.safeParse(res.body).success).toBe(true);
+  });
+
   it("role accepted case-insensitively (GUIDE)", async () => {
     mockCoreByPath({
       "/userinfo": coreOk({
