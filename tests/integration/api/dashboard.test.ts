@@ -184,7 +184,6 @@ describe("GET /v1/dashboard", () => {
       id: "b1",
       status: "CONFIRMED",
       scheduledAt: "2026-08-01T15:00:00Z",
-      timezone: "UTC",
       offeringId: "o1",
       offeringTitle: "T",
       guideName: "G",

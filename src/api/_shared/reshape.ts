@@ -3,7 +3,6 @@ export interface CoreBookingDetail {
   id: string;
   status: string;
   scheduledAt: string;
-  timezone: string;
   offeringId: string;
   offeringTitle: string;
   guideName: string;
@@ -20,7 +19,6 @@ export interface BookingResponse {
   status: string;
   scheduledStartAt: string;
   scheduledEndAt: string;
-  displayTimeZone: string;
   durationMinutes: number;
   tourOfferingId: string;
   tourTitle: string;
@@ -41,7 +39,6 @@ export function reshapeBooking(c: CoreBookingDetail): BookingResponse {
     status: c.status,
     scheduledStartAt: toZ(startMs),
     scheduledEndAt: toZ(startMs + c.durationMin * 60_000),
-    displayTimeZone: c.timezone,
     durationMinutes: c.durationMin,
     tourOfferingId: c.offeringId,
     tourTitle: c.offeringTitle,

@@ -6,7 +6,6 @@ const coreBooking = {
   id: "b1",
   status: "WAITING_FOR_GUIDE",
   scheduledAt: "2026-08-01T15:00:00Z",
-  timezone: "America/Los_Angeles",
   offeringId: "o1",
   offeringTitle: "North Campus",
   guideName: "Maya",
@@ -35,7 +34,6 @@ describe("bff booking module", () => {
     const res = await request(app).post("/v1/bookings").set("Cookie", cookie).send({
       tourOfferingId: "o1",
       scheduledStartAt: "2026-08-01T15:00:00Z",
-      displayTimezone: "UTC",
     });
     expect(res.status).toBe(200);
     expect(res.body.data.price).toEqual({ amount: 4200, currency: "USD" });
@@ -62,7 +60,7 @@ describe("bff booking module", () => {
     const res = await request(app)
       .post("/v1/bookings")
       .set("Cookie", cookie)
-      .send({ tourOfferingId: "o1", scheduledStartAt: "x", displayTimezone: "UTC" });
+      .send({ tourOfferingId: "o1", scheduledStartAt: "x" });
     expect(res.status).toBe(422);
     expect(res.headers["content-type"]).toContain("application/problem+json");
     expect(JSON.parse(res.text).title).toBe("That time slot was just taken");
