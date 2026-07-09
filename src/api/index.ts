@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { dashboardRoutes } from "./dashboard/routes.js";
 import { onboardingRoutes } from "./onboarding/routes.js";
-import { participantBookingRoutes } from "./bookings/participant.routes.js";
+import { bookingsRoutes } from "./bookings/routes.js";
 
 /**
  * BFF aggregation API — front-end-shaped composites the Core does not expose directly.
@@ -12,4 +12,4 @@ import { participantBookingRoutes } from "./bookings/participant.routes.js";
 export const apiRouter: Router = Router();
 apiRouter.use(dashboardRoutes);
 apiRouter.use(onboardingRoutes);
-apiRouter.use(participantBookingRoutes);
+apiRouter.use(bookingsRoutes);
