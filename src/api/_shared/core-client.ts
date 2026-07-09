@@ -30,13 +30,13 @@ export class CoreClient {
     return this.get<T>("/participant/profile");
   }
   getNextTour<T>(): Promise<T> {
-    return this.get<T>("/participant/bookings/next-tour");
+    return this.get<T>("/bookings/next-tour");
   }
   getUpcomingBookings<T>(): Promise<T> {
-    return this.get<T>("/participant/bookings/upcoming");
+    return this.get<T>("/bookings/upcoming");
   }
   getPendingActions<T>(): Promise<T> {
-    return this.get<T>("/participant/bookings/pending-actions");
+    return this.get<T>("/bookings/pending-actions");
   }
 
   async get<T>(path: string): Promise<T> {

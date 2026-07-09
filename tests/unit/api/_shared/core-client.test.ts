@@ -101,9 +101,9 @@ describe("CoreClient convenience methods", () => {
     ["getGuideProfile", "/guide/profile"],
     ["getOfferings", "/guide/offerings"],
     ["getParticipantProfile", "/participant/profile"],
-    ["getNextTour", "/participant/bookings/next-tour"],
-    ["getUpcomingBookings", "/participant/bookings/upcoming"],
-    ["getPendingActions", "/participant/bookings/pending-actions"],
+    ["getNextTour", "/bookings/next-tour"],
+    ["getUpcomingBookings", "/bookings/upcoming"],
+    ["getPendingActions", "/bookings/pending-actions"],
   ] as const)("%s GETs %s", async (method, path) => {
     const client = new CoreClient("tok") as unknown as Record<string, () => Promise<unknown>>;
     await client[method]();
