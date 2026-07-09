@@ -37,6 +37,28 @@ describe("bff cart module", () => {
     expect(res.body.data).toEqual([]);
   });
 
+  // Defensive: the backend returns [] for an empty list, but a null body must not 500.
+  it("GET /v1/cart with a null Core body → 200, []", async () => {
+    mockCoreByPath({ "/cart": coreOk(null) });
+    const res = await request(app).get("/v1/cart").set("Cookie", cookie);
+    expect(res.status).toBe(200);
+    expect(res.body.data).toEqual([]);
+  });
+
+  it("DELETE /v1/cart/items/:id with a null Core body → 200, []", async () => {
+    mockCoreByPath({ "/cart/items/b1": coreOk(null) });
+    const res = await request(app).delete("/v1/cart/items/b1").set("Cookie", cookie);
+    expect(res.status).toBe(200);
+    expect(res.body.data).toEqual([]);
+  });
+
+  it("POST /v1/cart/checkout with a null Core body → 200, []", async () => {
+    mockCoreByPath({ "/cart/checkout": coreOk(null) });
+    const res = await request(app).post("/v1/cart/checkout").set("Cookie", cookie).send({});
+    expect(res.status).toBe(200);
+    expect(res.body.data).toEqual([]);
+  });
+
   it("POST /v1/cart/items reshapes the added item", async () => {
     mockCoreByPath({ "/cart/items": coreOk({ ...coreBooking, id: "b3", status: "DRAFT" }) });
     const res = await request(app).post("/v1/cart/items").set("Cookie", cookie).send({

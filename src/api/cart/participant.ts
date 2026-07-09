@@ -9,8 +9,8 @@ import {
 import { BookingResponseSchema, BookingListSchema } from "../../openapi/schemas.js";
 
 export async function getCart(_req: Request, res: Response, core: CoreClient): Promise<void> {
-  const raw = await core.get<CoreBookingDetail[]>("/cart");
-  sendData(res, raw.map(reshapeBooking), BookingListSchema);
+  const raw = await core.get<CoreBookingDetail[] | null>("/cart");
+  sendData(res, (raw ?? []).map(reshapeBooking), BookingListSchema);
 }
 
 export async function addCartItem(req: Request, res: Response, core: CoreClient): Promise<void> {
@@ -19,14 +19,18 @@ export async function addCartItem(req: Request, res: Response, core: CoreClient)
 }
 
 export async function removeCartItem(req: Request, res: Response, core: CoreClient): Promise<void> {
-  const raw = await core.del<CoreBookingDetail[]>(
+  const raw = await core.del<CoreBookingDetail[] | null>(
     `/cart/items/${req.params.id}`,
     writeOpts(req, res),
   );
-  sendData(res, raw.map(reshapeBooking), BookingListSchema);
+  sendData(res, (raw ?? []).map(reshapeBooking), BookingListSchema);
 }
 
 export async function checkout(req: Request, res: Response, core: CoreClient): Promise<void> {
-  const raw = await core.post<CoreBookingDetail[]>("/cart/checkout", {}, writeOpts(req, res));
-  sendData(res, raw.map(reshapeBooking), BookingListSchema);
+  const raw = await core.post<CoreBookingDetail[] | null>(
+    "/cart/checkout",
+    {},
+    writeOpts(req, res),
+  );
+  sendData(res, (raw ?? []).map(reshapeBooking), BookingListSchema);
 }

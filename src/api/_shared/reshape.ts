@@ -32,14 +32,15 @@ export interface BookingResponse {
 
 /** Reshape one Core booking into Contract A (renames + computed end + money object). */
 export function reshapeBooking(c: CoreBookingDetail): BookingResponse {
-  const end = new Date(new Date(c.scheduledAt).getTime() + c.durationMin * 60_000)
-    .toISOString()
-    .replace(/\.\d{3}Z$/, "Z");
+  // Normalise BOTH times to the same canonical form (UTC, no millis) so start and end never
+  // diverge in notation regardless of how Core serialises `scheduledAt` (offset vs Z, millis).
+  const toZ = (ms: number): string => new Date(ms).toISOString().replace(/\.\d{3}Z$/, "Z");
+  const startMs = new Date(c.scheduledAt).getTime();
   return {
     id: c.id,
     status: c.status,
-    scheduledStartAt: c.scheduledAt,
-    scheduledEndAt: end,
+    scheduledStartAt: toZ(startMs),
+    scheduledEndAt: toZ(startMs + c.durationMin * 60_000),
     displayTimeZone: c.timezone,
     durationMinutes: c.durationMin,
     tourOfferingId: c.offeringId,

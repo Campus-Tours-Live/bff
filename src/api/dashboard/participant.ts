@@ -20,7 +20,7 @@ export async function participantDashboard(res: Response, core: CoreClient, me: 
   const [participant, nextTourRaw, upcomingRaw, pendingActions] = await Promise.all([
     core.getParticipantProfile<Json>(),
     core.getNextTour<CoreBookingDetail | null>().catch(() => null),
-    core.getUpcomingBookings<CoreBookingDetail[]>().catch(() => [] as CoreBookingDetail[]),
+    core.getUpcomingBookings<CoreBookingDetail[] | null>().catch(() => null),
     core.getPendingActions<Json>().catch(() => null),
   ]);
   sendData(
@@ -29,7 +29,7 @@ export async function participantDashboard(res: Response, core: CoreClient, me: 
       kind: "participant",
       participant,
       nextTour: nextTourRaw ? reshapeBooking(nextTourRaw) : null,
-      upcomingBookings: upcomingRaw.map(reshapeBooking),
+      upcomingBookings: (upcomingRaw ?? []).map(reshapeBooking),
       pendingActions,
       createdAt: me.createdAt,
     },
