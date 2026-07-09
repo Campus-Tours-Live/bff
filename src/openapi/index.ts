@@ -146,10 +146,10 @@ const cancelledBookingExample = { ...bookingExample, status: "CANCELLED" };
 
 const cartItemExample = { ...bookingExample, status: "IN_CART" };
 
-// POST /v1/participant/bookings
+// POST /v1/bookings
 apiRoute({
   method: "post",
-  path: "/v1/participant/bookings",
+  path: "/v1/bookings",
   tags: ["Booking"],
   summary: "Create a booking",
   description: "Creates a booking for a bookable offering and returns it in Contract-A shape.",
@@ -168,10 +168,10 @@ apiRoute({
   },
 });
 
-// POST /v1/participant/bookings/{id}/cancel
+// POST /v1/bookings/{id}/cancel
 apiRoute({
   method: "post",
-  path: "/v1/participant/bookings/{id}/cancel",
+  path: "/v1/bookings/{id}/cancel",
   tags: ["Booking"],
   summary: "Cancel a booking",
   description:
@@ -201,10 +201,10 @@ apiRoute({
   },
 });
 
-// GET /v1/participant/cart
+// GET /v1/cart
 apiRoute({
   method: "get",
-  path: "/v1/participant/cart",
+  path: "/v1/cart",
   tags: ["Booking"],
   summary: "Get the current cart",
   description:
@@ -217,10 +217,10 @@ apiRoute({
   },
 });
 
-// POST /v1/participant/cart/items
+// POST /v1/cart/items
 apiRoute({
   method: "post",
-  path: "/v1/participant/cart/items",
+  path: "/v1/cart/items",
   tags: ["Booking"],
   summary: "Add an item to the cart",
   description: "Adds a bookable offering to the caller's cart and returns the new cart item.",
@@ -238,10 +238,10 @@ apiRoute({
   },
 });
 
-// DELETE /v1/participant/cart/items/{id}
+// DELETE /v1/cart/items/{id}
 apiRoute({
   method: "delete",
-  path: "/v1/participant/cart/items/{id}",
+  path: "/v1/cart/items/{id}",
   tags: ["Booking"],
   summary: "Remove an item from the cart",
   description: "Removes a cart item owned by the caller and returns the remaining cart.",
@@ -263,10 +263,10 @@ apiRoute({
   },
 });
 
-// POST /v1/participant/cart/checkout
+// POST /v1/cart/checkout
 apiRoute({
   method: "post",
-  path: "/v1/participant/cart/checkout",
+  path: "/v1/cart/checkout",
   tags: ["Booking"],
   summary: "Check out the cart",
   description: "Checks out every item in the caller's cart, finalizing them into bookings.",

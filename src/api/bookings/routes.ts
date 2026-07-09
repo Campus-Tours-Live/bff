@@ -13,9 +13,9 @@ import {
 /** Participant booking + cart — Contract-A reshapes of the Core /bookings + /cart resource. */
 export const bookingsRoutes: Router = Router();
 
-bookingsRoutes.post("/participant/bookings", csrfGuard, withMutation(createBooking));
-bookingsRoutes.post("/participant/bookings/:id/cancel", csrfGuard, withMutation(cancelBooking));
-bookingsRoutes.get("/participant/cart", withSession(getCart));
-bookingsRoutes.post("/participant/cart/items", csrfGuard, withMutation(addCartItem));
-bookingsRoutes.delete("/participant/cart/items/:id", csrfGuard, withMutation(removeCartItem));
-bookingsRoutes.post("/participant/cart/checkout", csrfGuard, withMutation(checkout));
+bookingsRoutes.post("/bookings", csrfGuard, withMutation(createBooking));
+bookingsRoutes.post("/bookings/:id/cancel", csrfGuard, withMutation(cancelBooking));
+bookingsRoutes.get("/cart", withSession(getCart));
+bookingsRoutes.post("/cart/items", csrfGuard, withMutation(addCartItem));
+bookingsRoutes.delete("/cart/items/:id", csrfGuard, withMutation(removeCartItem));
+bookingsRoutes.post("/cart/checkout", csrfGuard, withMutation(checkout));

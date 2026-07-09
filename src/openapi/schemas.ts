@@ -432,7 +432,7 @@ const ParticipantDashboard = z
     nextTour: BookingResponseSchema.nullable().openapi({
       description:
         "The participant's next confirmed tour, reshaped to the Contract-A booking shape " +
-        "(same shape as GET/POST /v1/participant/bookings). Best-effort: null when there is " +
+        "(same shape as GET/POST /v1/bookings). Best-effort: null when there is " +
         "none or the Core read fails.",
       example: PARTICIPANT_NEXT_TOUR_EXAMPLE,
     }),

@@ -30,16 +30,13 @@ describe("bff booking/cart module", () => {
   let cookie: string;
   beforeEach(() => (cookie = mintSessionCookie()));
 
-  it("POST /v1/participant/bookings reshapes the Core booking", async () => {
+  it("POST /v1/bookings reshapes the Core booking", async () => {
     mockCoreByPath({ "/bookings": coreOk(coreBooking) });
-    const res = await request(app)
-      .post("/v1/participant/bookings")
-      .set("Cookie", cookie)
-      .send({
-        tourOfferingId: "o1",
-        scheduledStartAt: "2026-08-01T15:00:00Z",
-        displayTimezone: "UTC",
-      });
+    const res = await request(app).post("/v1/bookings").set("Cookie", cookie).send({
+      tourOfferingId: "o1",
+      scheduledStartAt: "2026-08-01T15:00:00Z",
+      displayTimezone: "UTC",
+    });
     expect(res.status).toBe(200);
     expect(res.body.data.price).toEqual({ amount: 4200, currency: "USD" });
     expect(res.body.data.scheduledEndAt).toBe("2026-08-01T16:00:00Z");
@@ -48,10 +45,10 @@ describe("bff booking/cart module", () => {
     expect(res.body.data).not.toHaveProperty("priceCents");
   });
 
-  it("POST /v1/participant/bookings/:id/cancel reshapes the cancelled booking", async () => {
+  it("POST /v1/bookings/:id/cancel reshapes the cancelled booking", async () => {
     mockCoreByPath({ "/bookings/b1/cancel": coreOk({ ...coreBooking, status: "CANCELLED" }) });
     const res = await request(app)
-      .post("/v1/participant/bookings/b1/cancel")
+      .post("/v1/bookings/b1/cancel")
       .set("Cookie", cookie)
       .send({ reason: "changed plans" });
     expect(res.status).toBe(200);
@@ -63,7 +60,7 @@ describe("bff booking/cart module", () => {
   it("relays a Core 422 verbatim (problem+json)", async () => {
     mockCoreByPath({ "/bookings": problem(422, "That time slot was just taken") });
     const res = await request(app)
-      .post("/v1/participant/bookings")
+      .post("/v1/bookings")
       .set("Cookie", cookie)
       .send({ tourOfferingId: "o1", scheduledStartAt: "x", displayTimezone: "UTC" });
     expect(res.status).toBe(422);
@@ -73,7 +70,7 @@ describe("bff booking/cart module", () => {
 
   it("blocks a cross-site mutation with 403 (CSRF)", async () => {
     const res = await request(app)
-      .post("/v1/participant/bookings")
+      .post("/v1/bookings")
       .set("Cookie", cookie)
       .set("Origin", "https://evil.test")
       .send({});
@@ -81,46 +78,40 @@ describe("bff booking/cart module", () => {
     expect(res.body.code).toBe("CSRF_BLOCKED");
   });
 
-  it("GET /v1/participant/cart reshapes each item (array)", async () => {
+  it("GET /v1/cart reshapes each item (array)", async () => {
     mockCoreByPath({ "/cart": coreOk([coreBooking, { ...coreBooking, id: "b2" }]) });
-    const res = await request(app).get("/v1/participant/cart").set("Cookie", cookie);
+    const res = await request(app).get("/v1/cart").set("Cookie", cookie);
     expect(res.status).toBe(200);
     expect(res.body.data).toHaveLength(2);
     expect(res.body.data[0].tourTitle).toBe("North Campus");
     expect(res.body.data[1].id).toBe("b2");
   });
 
-  it("POST /v1/participant/cart/items reshapes the added item", async () => {
+  it("POST /v1/cart/items reshapes the added item", async () => {
     mockCoreByPath({ "/cart/items": coreOk({ ...coreBooking, id: "b3", status: "DRAFT" }) });
-    const res = await request(app)
-      .post("/v1/participant/cart/items")
-      .set("Cookie", cookie)
-      .send({
-        tourOfferingId: "o1",
-        scheduledStartAt: "2026-08-01T15:00:00Z",
-        displayTimezone: "UTC",
-      });
+    const res = await request(app).post("/v1/cart/items").set("Cookie", cookie).send({
+      tourOfferingId: "o1",
+      scheduledStartAt: "2026-08-01T15:00:00Z",
+      displayTimezone: "UTC",
+    });
     expect(res.status).toBe(200);
     expect(res.body.data.id).toBe("b3");
     expect(res.body.data.status).toBe("DRAFT");
     expect(res.body.data).not.toHaveProperty("priceCents");
   });
 
-  it("DELETE /v1/participant/cart/items/:id returns the reshaped remaining cart", async () => {
+  it("DELETE /v1/cart/items/:id returns the reshaped remaining cart", async () => {
     mockCoreByPath({ "/cart/items/b1": coreOk([{ ...coreBooking, id: "b2" }]) });
-    const res = await request(app).delete("/v1/participant/cart/items/b1").set("Cookie", cookie);
+    const res = await request(app).delete("/v1/cart/items/b1").set("Cookie", cookie);
     expect(res.status).toBe(200);
     expect(res.body.data).toEqual([
       expect.objectContaining({ id: "b2", price: { amount: 4200, currency: "USD" } }),
     ]);
   });
 
-  it("POST /v1/participant/cart/checkout reshapes the committed bookings (array)", async () => {
+  it("POST /v1/cart/checkout reshapes the committed bookings (array)", async () => {
     mockCoreByPath({ "/cart/checkout": coreOk([coreBooking, { ...coreBooking, id: "b2" }]) });
-    const res = await request(app)
-      .post("/v1/participant/cart/checkout")
-      .set("Cookie", cookie)
-      .send({});
+    const res = await request(app).post("/v1/cart/checkout").set("Cookie", cookie).send({});
     expect(res.status).toBe(200);
     expect(res.body.data).toHaveLength(2);
     expect(res.body.data[0].price).toEqual({ amount: 4200, currency: "USD" });
