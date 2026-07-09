@@ -32,7 +32,9 @@ export interface BookingResponse {
 
 /** Reshape one Core booking into Contract A (renames + computed end + money object). */
 export function reshapeBooking(c: CoreBookingDetail): BookingResponse {
-  const end = new Date(new Date(c.scheduledAt).getTime() + c.durationMin * 60_000).toISOString();
+  const end = new Date(new Date(c.scheduledAt).getTime() + c.durationMin * 60_000)
+    .toISOString()
+    .replace(/\.\d{3}Z$/, "Z");
   return {
     id: c.id,
     status: c.status,

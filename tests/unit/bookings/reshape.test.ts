@@ -21,7 +21,7 @@ describe("reshapeBooking", () => {
       id: "b1",
       status: "WAITING_FOR_GUIDE",
       scheduledStartAt: "2026-08-01T15:00:00Z",
-      scheduledEndAt: "2026-08-01T16:00:00.000Z",
+      scheduledEndAt: "2026-08-01T16:00:00Z",
       displayTimeZone: "America/Los_Angeles",
       durationMinutes: 60,
       tourOfferingId: "o1",
