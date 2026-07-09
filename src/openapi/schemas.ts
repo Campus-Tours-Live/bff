@@ -190,22 +190,14 @@ export const GuideProfile = registry.register(
         .string()
         .optional()
         .openapi({ description: "Overall account status from Core.", example: "ACTIVE" }),
-      universityId: z
-        .string()
-        .nullable()
-        .optional()
-        .openapi({
-          description: "Id of the guide's university (null until set).",
-          example: "uni_mit",
-        }),
-      universityName: z
-        .string()
-        .nullable()
-        .optional()
-        .openapi({
-          description: "Full university name.",
-          example: "Massachusetts Institute of Technology",
-        }),
+      universityId: z.string().nullable().optional().openapi({
+        description: "Id of the guide's university (null until set).",
+        example: "uni_mit",
+      }),
+      universityName: z.string().nullable().optional().openapi({
+        description: "Full university name.",
+        example: "Massachusetts Institute of Technology",
+      }),
       universityShortName: z
         .string()
         .nullable()
@@ -219,14 +211,10 @@ export const GuideProfile = registry.register(
         .string()
         .optional()
         .openapi({ description: "Graduation year.", example: "2026" }),
-      bio: z
-        .string()
-        .nullable()
-        .optional()
-        .openapi({
-          description: "Free-text guide bio.",
-          example: "Sophomore who loves showing off the maker space.",
-        }),
+      bio: z.string().nullable().optional().openapi({
+        description: "Free-text guide bio.",
+        example: "Sophomore who loves showing off the maker space.",
+      }),
       languages: z
         .array(z.string())
         .optional()
@@ -235,15 +223,10 @@ export const GuideProfile = registry.register(
         .array(z.string())
         .optional()
         .openapi({ description: "Tour focus areas.", example: ["engineering", "campus-life"] }),
-      basePriceCents: z
-        .number()
-        .int()
-        .nullable()
-        .optional()
-        .openapi({
-          description: "Default price per tour, in cents (null until set).",
-          example: 2500,
-        }),
+      basePriceCents: z.number().int().nullable().optional().openapi({
+        description: "Default price per tour, in cents (null until set).",
+        example: 2500,
+      }),
       currency: z
         .string()
         .optional()
@@ -339,14 +322,10 @@ export const Offering = registry.register(
         .openapi({ description: "Tour length in minutes.", example: 45 }),
       priceCents: z.number().int().openapi({ description: "Price in cents.", example: 2500 }),
       currency: z.string().openapi({ description: "ISO-4217 currency code.", example: "USD" }),
-      description: z
-        .string()
-        .nullable()
-        .optional()
-        .openapi({
-          description: "Long-form description (nullable/optional).",
-          example: "A 45-minute walk through the parts of campus the official tour skips.",
-        }),
+      description: z.string().nullable().optional().openapi({
+        description: "Long-form description (nullable/optional).",
+        example: "A 45-minute walk through the parts of campus the official tour skips.",
+      }),
     })
     .openapi("Offering", { description: "A guide's sellable tour offering." }),
 );
@@ -368,11 +347,9 @@ const GuideDashboard = z
       description: 'Computed convenience gate — true only when `guideStatus === "APPROVED"`.',
       example: true,
     }),
-    offerings: z
-      .array(Offering)
-      .openapi({
-        description: "The guide's offerings (best-effort — empty list if the Core read fails).",
-      }),
+    offerings: z.array(Offering).openapi({
+      description: "The guide's offerings (best-effort — empty list if the Core read fails).",
+    }),
     createdAt: z.string().openapi({
       description: 'Account creation timestamp (ISO-8601 UTC), rendered as "member since".',
       example: "2025-09-01T12:00:00.000Z",
@@ -383,12 +360,10 @@ const GuideDashboard = z
 /** GET /v1/dashboard, participant variant (src/api/dashboard/participant.ts). */
 const ParticipantDashboard = z
   .object({
-    kind: z
-      .literal("participant")
-      .openapi({
-        description: "Discriminator — always `participant` here.",
-        example: "participant",
-      }),
+    kind: z.literal("participant").openapi({
+      description: "Discriminator — always `participant` here.",
+      example: "participant",
+    }),
     participant: ParticipantProfile,
     nextTour: JsonObject.nullable().openapi({
       description:
@@ -463,12 +438,10 @@ export const Progress = registry.register(
         .array(
           z.object({
             key: z.string().openapi({ description: "Stable step key.", example: "submitted" }),
-            label: z
-              .string()
-              .openapi({
-                description: "Human-readable step label.",
-                example: "Application submitted",
-              }),
+            label: z.string().openapi({
+              description: "Human-readable step label.",
+              example: "Application submitted",
+            }),
             done: z
               .boolean()
               .openapi({ description: "Whether this step is complete.", example: true }),
@@ -660,3 +633,43 @@ export const EnvelopedProgressSchema = envelopeOf(ProgressDataSchema);
 
 /** GET /auth/session — the bare, un-enveloped `{ authenticated }` boolean (BFF-owned). */
 export const SessionStatusSchema = z.object({ authenticated: z.boolean() });
+
+// --- Booking schemas (Contract A for booking operations) ---
+
+/** Money value in ISO-4217 currency, with amount in minor units (cents). */
+export const MoneySchema = z.object({
+  amount: z.number().int().describe("minor units (cents)"),
+  currency: z.string().length(3),
+});
+
+/** A confirmed or pending booking response. */
+export const BookingResponseSchema = z.object({
+  id: z.string(),
+  status: z.string(),
+  scheduledStartAt: z.string(),
+  scheduledEndAt: z.string(),
+  displayTimeZone: z.string(),
+  durationMinutes: z.number().int(),
+  tourOfferingId: z.string(),
+  tourTitle: z.string(),
+  guideName: z.string(),
+  guideResponseDeadline: z.string().nullable(),
+  universityName: z.string(),
+  price: MoneySchema,
+});
+
+/** Array of booking responses. */
+export const BookingListSchema = z.array(BookingResponseSchema);
+
+/** Request body to create a new booking. */
+export const CreateBookingRequestSchema = z.object({
+  tourOfferingId: z.string(),
+  scheduledStartAt: z.string(),
+  displayTimezone: z.string(),
+  participantNotes: z.string().max(1000).optional(),
+});
+
+/** Request body to cancel an existing booking. */
+export const CancelBookingRequestSchema = z.object({
+  reason: z.string().max(1000).optional(),
+});
