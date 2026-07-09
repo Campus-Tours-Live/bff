@@ -1,5 +1,11 @@
+import crypto from "node:crypto";
 import { config } from "../../config.js";
 import { CoreAuthError, CoreError } from "./errors.js";
+
+export interface WriteOpts {
+  idempotencyKey?: string;
+  correlationId?: string;
+}
 
 /**
  * Client for the one downstream the BFF talks to — the Core API. Holds the forward
@@ -48,5 +54,45 @@ export class CoreClient {
     if (!r.ok) throw new CoreError(r.status);
     const body = (await r.json().catch(() => null)) as { data?: T } | null;
     return (body?.data ?? body) as T;
+  }
+
+  post<T>(path: string, body: unknown, opts: WriteOpts): Promise<T> {
+    return this.write<T>("POST", path, body, opts);
+  }
+
+  del<T>(path: string, opts: WriteOpts): Promise<T> {
+    return this.write<T>("DELETE", path, undefined, opts);
+  }
+
+  private async write<T>(
+    method: "POST" | "DELETE",
+    path: string,
+    body: unknown,
+    opts: WriteOpts,
+  ): Promise<T> {
+    const headers: Record<string, string> = {
+      Authorization: `Bearer ${this.bearer}`,
+      Accept: "application/json",
+      "Idempotency-Key": opts.idempotencyKey ?? crypto.randomUUID(),
+    };
+    if (opts.correlationId) headers["X-Request-Id"] = opts.correlationId;
+    if (body !== undefined) headers["Content-Type"] = "application/json";
+    let r: Response;
+    try {
+      r = await fetch(`${config.coreApiBaseUrl}${path}`, {
+        method,
+        headers,
+        body: body !== undefined ? JSON.stringify(body) : undefined,
+      });
+    } catch {
+      throw new CoreError(502);
+    }
+    if (r.status === 401) throw new CoreAuthError();
+    if (!r.ok) {
+      const raw = await r.text().catch(() => "");
+      throw new CoreError(r.status, raw, r.headers.get("content-type") ?? undefined);
+    }
+    const parsed = JSON.parse((await r.text().catch(() => "")) || "null") as { data?: T } | null;
+    return (parsed?.data ?? parsed) as T;
   }
 }
