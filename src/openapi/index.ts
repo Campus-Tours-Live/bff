@@ -30,8 +30,22 @@ import {
   participantDashboardExample,
   guideProgressExample,
   participantProgressExample,
+  envelope,
+  BookingResponseSchema,
+  BookingListSchema,
+  CreateBookingRequestSchema,
+  CancelBookingRequestSchema,
 } from "./schemas.js";
-import { apiRoute, enveloped, problem400, problem401, problem422, problem502 } from "./helpers.js";
+import {
+  apiRoute,
+  enveloped,
+  problem400,
+  problem401,
+  problem404,
+  problem409,
+  problem422,
+  problem502,
+} from "./helpers.js";
 
 // Re-export the schema surface so consumers (handlers, tests) have one import site.
 export * from "./schemas.js";
@@ -111,6 +125,165 @@ apiRoute({
   },
 });
 
+// --- Booking / cart (participant) ---
+
+const bookingExample = {
+  id: "b1",
+  status: "WAITING_FOR_GUIDE",
+  scheduledStartAt: "2026-08-01T15:00:00Z",
+  scheduledEndAt: "2026-08-01T16:00:00Z",
+  displayTimeZone: "America/Los_Angeles",
+  durationMinutes: 60,
+  tourOfferingId: "o1",
+  tourTitle: "North Campus highlights",
+  guideName: "Maya Chen",
+  guideResponseDeadline: "2026-07-30T15:00:00Z",
+  universityName: "North Coast University",
+  price: { amount: 4200, currency: "USD" },
+};
+
+const cancelledBookingExample = { ...bookingExample, status: "CANCELLED" };
+
+const cartItemExample = { ...bookingExample, status: "IN_CART" };
+
+// POST /v1/participant/bookings
+apiRoute({
+  method: "post",
+  path: "/v1/participant/bookings",
+  tags: ["Booking"],
+  summary: "Create a booking",
+  description: "Creates a booking for a bookable offering and returns it in Contract-A shape.",
+  request: { body: { content: { "application/json": { schema: CreateBookingRequestSchema } } } },
+  responses: {
+    200: enveloped(BookingResponseSchema, {
+      description: "The created booking.",
+      example: envelope(bookingExample),
+    }),
+    422: problem422(
+      "BOOKING_VALIDATION",
+      "Validation failed",
+      "Bad fields, window violated, or the slot was just taken.",
+    ),
+    409: problem409("BOOKING_CONFLICT", "Conflict", "Concurrent modification — please retry."),
+  },
+});
+
+// POST /v1/participant/bookings/{id}/cancel
+apiRoute({
+  method: "post",
+  path: "/v1/participant/bookings/{id}/cancel",
+  tags: ["Booking"],
+  summary: "Cancel a booking",
+  description:
+    "Cancels an existing booking owned by the caller and returns it in Contract-A shape.",
+  request: {
+    params: z.object({
+      id: z.string().openapi({ description: "Booking id.", example: "b1" }),
+    }),
+    body: { content: { "application/json": { schema: CancelBookingRequestSchema } } },
+  },
+  responses: {
+    200: enveloped(BookingResponseSchema, {
+      description: "The cancelled booking.",
+      example: envelope(cancelledBookingExample),
+    }),
+    422: problem422(
+      "BOOKING_NOT_CANCELLABLE",
+      "Cannot cancel",
+      "The booking is in a state that can no longer be cancelled.",
+    ),
+    404: problem404(
+      "BOOKING_NOT_FOUND",
+      "Not found",
+      "No booking exists with this id for the caller.",
+    ),
+    409: problem409("BOOKING_CONFLICT", "Conflict", "Concurrent modification — please retry."),
+  },
+});
+
+// GET /v1/participant/cart
+apiRoute({
+  method: "get",
+  path: "/v1/participant/cart",
+  tags: ["Booking"],
+  summary: "Get the current cart",
+  description:
+    "Returns the caller's current cart — bookings not yet checked out — in Contract-A shape.",
+  responses: {
+    200: enveloped(BookingListSchema, {
+      description: "The caller's cart items.",
+      example: envelope([cartItemExample]),
+    }),
+  },
+});
+
+// POST /v1/participant/cart/items
+apiRoute({
+  method: "post",
+  path: "/v1/participant/cart/items",
+  tags: ["Booking"],
+  summary: "Add an item to the cart",
+  description: "Adds a bookable offering to the caller's cart and returns the new cart item.",
+  request: { body: { content: { "application/json": { schema: CreateBookingRequestSchema } } } },
+  responses: {
+    200: enveloped(BookingResponseSchema, {
+      description: "The added cart item.",
+      example: envelope(cartItemExample),
+    }),
+    422: problem422(
+      "BOOKING_VALIDATION",
+      "Validation failed",
+      "Bad fields, window violated, or the slot was just taken.",
+    ),
+  },
+});
+
+// DELETE /v1/participant/cart/items/{id}
+apiRoute({
+  method: "delete",
+  path: "/v1/participant/cart/items/{id}",
+  tags: ["Booking"],
+  summary: "Remove an item from the cart",
+  description: "Removes a cart item owned by the caller and returns the remaining cart.",
+  request: {
+    params: z.object({
+      id: z.string().openapi({ description: "Cart item (booking) id.", example: "b1" }),
+    }),
+  },
+  responses: {
+    200: enveloped(BookingListSchema, {
+      description: "The remaining cart items.",
+      example: envelope([{ ...cartItemExample, id: "b2" }]),
+    }),
+    404: problem404(
+      "CART_ITEM_NOT_FOUND",
+      "Not found",
+      "No cart item exists with this id for the caller.",
+    ),
+  },
+});
+
+// POST /v1/participant/cart/checkout
+apiRoute({
+  method: "post",
+  path: "/v1/participant/cart/checkout",
+  tags: ["Booking"],
+  summary: "Check out the cart",
+  description: "Checks out every item in the caller's cart, finalizing them into bookings.",
+  responses: {
+    200: enveloped(BookingListSchema, {
+      description: "The finalized bookings.",
+      example: envelope([bookingExample]),
+    }),
+    422: problem422(
+      "CART_VALIDATION",
+      "Validation failed",
+      "The cart is empty, or an item is no longer bookable.",
+    ),
+    409: problem409("BOOKING_CONFLICT", "Conflict", "Concurrent modification — please retry."),
+  },
+});
+
 // GET /auth/login
 apiRoute({
   method: "get",
@@ -180,13 +353,10 @@ apiRoute({
         description: "Provider error code (e.g. access_denied when the user cancels consent).",
         example: "access_denied",
       }),
-      error_description: z
-        .string()
-        .optional()
-        .openapi({
-          description: "Human-readable provider error detail.",
-          example: "The user denied the request.",
-        }),
+      error_description: z.string().optional().openapi({
+        description: "Human-readable provider error detail.",
+        example: "The user denied the request.",
+      }),
     }),
   },
   responses: {
@@ -298,6 +468,7 @@ export const openapiSpec = generator.generateDocument({
     { name: "Auth", description: "Google sign-in session lifecycle (`/auth/*`)." },
     { name: "Dashboard", description: "Role-shaped signed-in home aggregate." },
     { name: "Onboarding", description: "Per-role onboarding progress aggregate." },
+    { name: "Booking", description: "Participant booking and cart operations." },
   ],
   externalDocs: {
     url: `${coreApiBaseUrl}/v3/api-docs`,

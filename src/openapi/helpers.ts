@@ -84,6 +84,16 @@ export function problem400(code: string, title: string, description: string): Re
   return problemResponse(description, problem(400, title, code));
 }
 
+/** Standard `404 Not Found` with a stable `code` (e.g. BOOKING_NOT_FOUND). */
+export function problem404(code: string, title: string, description: string): ResponseConfig {
+  return problemResponse(description, problem(404, title, code));
+}
+
+/** Standard `409 Conflict` (rare uncaught optimistic-lock retry). */
+export function problem409(code: string, title: string, description: string): ResponseConfig {
+  return problemResponse(description, problem(409, title, code));
+}
+
 /** {@link apiRoute} config — a RouteConfig plus an optional explicit `protected` flag. */
 export type ApiRouteConfig = RouteConfig & {
   /**
