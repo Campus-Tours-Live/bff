@@ -330,6 +330,38 @@ export const Offering = registry.register(
     .openapi("Offering", { description: "A guide's sellable tour offering." }),
 );
 
+// --- Booking response schemas (Contract A for booking operations) ---
+//
+// Defined here, ahead of the dashboard payloads below, so both the registered/published
+// `ParticipantDashboard` schema and the runtime `ParticipantDashboardDataSchema` can reference
+// `BookingResponseSchema` directly (module-scope `const`s must be initialized before use — no
+// forward references).
+
+/** Money value in ISO-4217 currency, with amount in minor units (cents). */
+export const MoneySchema = z.object({
+  amount: z.number().int().describe("minor units (cents)"),
+  currency: z.string().length(3),
+});
+
+/** A confirmed or pending booking response. */
+export const BookingResponseSchema = z.object({
+  id: z.string(),
+  status: z.string(),
+  scheduledStartAt: z.string(),
+  scheduledEndAt: z.string(),
+  displayTimeZone: z.string(),
+  durationMinutes: z.number().int(),
+  tourOfferingId: z.string(),
+  tourTitle: z.string(),
+  guideName: z.string(),
+  guideResponseDeadline: z.string().nullable(),
+  universityName: z.string(),
+  price: MoneySchema,
+});
+
+/** Array of booking responses. */
+export const BookingListSchema = z.array(BookingResponseSchema);
+
 // --- Dashboard payloads (GET /v1/dashboard, discriminated by `kind`) ---
 
 /** GET /v1/dashboard, guide variant (src/api/dashboard/guide.ts). */
@@ -357,6 +389,38 @@ const GuideDashboard = z
   })
   .openapi("GuideDashboard", { description: "Signed-in home for a guide." });
 
+/** Shared example for `ParticipantDashboard.nextTour` and `participantDashboardExample`. */
+const PARTICIPANT_NEXT_TOUR_EXAMPLE = {
+  id: "bk_789",
+  status: "CONFIRMED",
+  scheduledStartAt: "2026-07-10T15:00:00Z",
+  scheduledEndAt: "2026-07-10T16:00:00Z",
+  displayTimeZone: "America/New_York",
+  durationMinutes: 60,
+  tourOfferingId: "off_123",
+  tourTitle: "Hidden gems of North Campus",
+  guideName: "Maya Chen",
+  guideResponseDeadline: null,
+  universityName: "North Campus University",
+  price: { amount: 4200, currency: "USD" },
+};
+
+/** Shared example for `ParticipantDashboard.upcomingBookings` and `participantDashboardExample`. */
+const PARTICIPANT_UPCOMING_EXAMPLE = {
+  id: "bk_790",
+  status: "WAITING_FOR_GUIDE",
+  scheduledStartAt: "2026-07-14T18:00:00Z",
+  scheduledEndAt: "2026-07-14T19:30:00Z",
+  displayTimeZone: "America/New_York",
+  durationMinutes: 90,
+  tourOfferingId: "off_456",
+  tourTitle: "Engineering quad tour",
+  guideName: "Sam Rivera",
+  guideResponseDeadline: "2026-07-12T18:00:00Z",
+  universityName: "North Campus University",
+  price: { amount: 6000, currency: "USD" },
+};
+
 /** GET /v1/dashboard, participant variant (src/api/dashboard/participant.ts). */
 const ParticipantDashboard = z
   .object({
@@ -365,26 +429,17 @@ const ParticipantDashboard = z
       example: "participant",
     }),
     participant: ParticipantProfile,
-    nextTour: JsonObject.nullable().openapi({
+    nextTour: BookingResponseSchema.nullable().openapi({
       description:
-        "The participant's next confirmed tour, forwarded from Core (opaque shape — see the " +
-        "Core spec). Best-effort: null when there is none or the Core read fails.",
-      example: {
-        bookingId: "bk_789",
-        offeringTitle: "Hidden gems of North Campus",
-        startsAt: "2026-07-10T15:00:00.000Z",
-      },
+        "The participant's next confirmed tour, reshaped to the Contract-A booking shape " +
+        "(same shape as GET/POST /v1/participant/bookings). Best-effort: null when there is " +
+        "none or the Core read fails.",
+      example: PARTICIPANT_NEXT_TOUR_EXAMPLE,
     }),
-    upcomingBookings: z.array(JsonObject).openapi({
+    upcomingBookings: z.array(BookingResponseSchema).openapi({
       description:
-        "Upcoming bookings, forwarded from Core (opaque items). Best-effort: empty list on failure.",
-      example: [
-        {
-          bookingId: "bk_790",
-          offeringTitle: "Engineering quad tour",
-          startsAt: "2026-07-14T18:00:00.000Z",
-        },
-      ],
+        "Upcoming bookings, reshaped to the Contract-A booking shape. Best-effort: empty list on failure.",
+      example: [PARTICIPANT_UPCOMING_EXAMPLE],
     }),
     pendingActions: JsonObject.nullable().openapi({
       description:
@@ -522,18 +577,8 @@ export const participantDashboardExample = envelope({
     universitiesOfInterest: ["uni_mit", "uni_stanford"],
     guardianRequired: false,
   },
-  nextTour: {
-    bookingId: "bk_789",
-    offeringTitle: "Hidden gems of North Campus",
-    startsAt: "2026-07-10T15:00:00.000Z",
-  },
-  upcomingBookings: [
-    {
-      bookingId: "bk_790",
-      offeringTitle: "Engineering quad tour",
-      startsAt: "2026-07-14T18:00:00.000Z",
-    },
-  ],
+  nextTour: PARTICIPANT_NEXT_TOUR_EXAMPLE,
+  upcomingBookings: [PARTICIPANT_UPCOMING_EXAMPLE],
   pendingActions: { unreadMessages: 2, awaitingReview: 1 },
   createdAt: "2026-01-15T09:30:00.000Z",
 });
@@ -572,36 +617,12 @@ export const coreUnavailableProblem = problem(
   "The Core API was unreachable or returned a 5xx.",
 );
 
-// --- Booking schemas (Contract A for booking operations) ---
+// --- Booking request schemas (Contract A for booking operations) ---
 //
-// Defined here, ahead of the runtime response-shape contracts below, so
-// `ParticipantDashboardDataSchema` can reference `BookingResponseSchema` directly (module-scope
-// `const`s must be initialized before use — no forward references).
-
-/** Money value in ISO-4217 currency, with amount in minor units (cents). */
-export const MoneySchema = z.object({
-  amount: z.number().int().describe("minor units (cents)"),
-  currency: z.string().length(3),
-});
-
-/** A confirmed or pending booking response. */
-export const BookingResponseSchema = z.object({
-  id: z.string(),
-  status: z.string(),
-  scheduledStartAt: z.string(),
-  scheduledEndAt: z.string(),
-  displayTimeZone: z.string(),
-  durationMinutes: z.number().int(),
-  tourOfferingId: z.string(),
-  tourTitle: z.string(),
-  guideName: z.string(),
-  guideResponseDeadline: z.string().nullable(),
-  universityName: z.string(),
-  price: MoneySchema,
-});
-
-/** Array of booking responses. */
-export const BookingListSchema = z.array(BookingResponseSchema);
+// `MoneySchema`/`BookingResponseSchema`/`BookingListSchema` live earlier in this file (just
+// above the dashboard payloads) so both the registered/published `ParticipantDashboard` schema
+// and the runtime `ParticipantDashboardDataSchema` can reference `BookingResponseSchema`
+// directly (module-scope `const`s must be initialized before use — no forward references).
 
 /** Request body to create a new booking. */
 export const CreateBookingRequestSchema = z.object({
