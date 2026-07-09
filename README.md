@@ -267,22 +267,29 @@ src/
 ├── auth/                     # Google OAuth login flow
 │   ├── routes.ts             #   /auth/login | /auth/callback | /auth/logout | /auth/session
 │   └── google.ts             #   PKCE, authorize URL, code + refresh token exchange
-├── api/                      # BFF-owned aggregation endpoints (front-end-shaped composites)
+├── api/                      # BFF-owned endpoints (front-end-shaped composites + reshapes)
 │   ├── index.ts              #   mounts the feature routers under /v1
-│   ├── dashboard/            #   GET /v1/dashboard (role-aware: guide / participant)
-│   ├── onboarding/           #   GET /v1/onboarding
-│   └── _shared/              #   withSession, CoreClient, envelope, reauth, errors, types
+│   ├── dashboard/            #   GET /v1/dashboard (fan-out aggregation; role-aware)
+│   ├── onboarding/           #   GET /v1/onboarding (fan-out aggregation)
+│   ├── bookings/             #   POST /v1/bookings (+ /:id/cancel) — reshape of Core /bookings
+│   ├── cart/                 #   GET/POST/DELETE /v1/cart* — reshape of Core /cart (DRAFT bookings)
+│   └── _shared/              #   withSession + withMutation, CoreClient, reshapeBooking, writeOpts,
+│                             #   envelope, reauth, errors, types
 ├── proxy/
-│   └── coreProxy.ts          # catch-all /v1/* passthrough to the Core (CSRF, bearer, idempotency)
+│   └── coreProxy.ts          # catch-all /v1/* passthrough to the Core (bearer, idempotency)
 └── util/
+    ├── csrf.ts               # shared cross-site-mutation guard (Origin/Referer vs WEB_ORIGIN)
     └── problem.ts            # RFC 7807 problem+json helper
 ```
 
-Key principle: `app.ts` mounts the aggregation router (`api/`) under `/v1` **before** the
-`coreProxy`, so the specific composites win over the generic passthrough. Auth concerns live in
-`auth/` (login flow) and `session.ts` (cookie crypto); everything the aggregation handlers share —
-the `CoreClient`, the `withSession` wrapper, the `{ data, meta }` envelope, and the re-auth signal —
-sits in `api/_shared/`.
+Key principle: `app.ts` mounts the feature router (`api/`) under `/v1` **before** the `coreProxy`,
+so the specific composites and reshapes win over the generic passthrough. Each feature owns a folder
+(`routes.ts` + per-role handlers); `api/index.ts` flattens them into one router. Auth concerns live
+in `auth/` (login flow) and `session.ts` (cookie crypto); everything the handlers share — the
+`CoreClient`, the `withSession` (read) and `withMutation` (write) wrappers, the `reshapeBooking`
+mapper, the `writeOpts` header helper, the `{ data, meta }` envelope, and the re-auth signal — sits
+in `api/_shared/`. The CSRF guard is extracted to `util/csrf.ts` and applied by **both** the proxy
+and the composite mutation routes.
 
 ---
 
@@ -339,27 +346,36 @@ If the refresh fails, the request triggers re-authentication (see below).
 
 **Front-facing (called by the web app):**
 
-| Route                    | Purpose                                                               |
-| ------------------------ | --------------------------------------------------------------------- |
-| `GET /health`            | Liveness — `{ "status": "ok", "auth": "google" }`                     |
-| `GET /docs`              | Swagger UI — interactive Contract A reference                         |
-| `GET /openapi.json`      | OpenAPI 3.1 spec (Contract A), generated in-code from the zod schemas |
-| `GET /auth/login`        | Start Google sign-in. Query: `returnTo`, `intent`, `login_hint`       |
-| `GET /auth/callback`     | Google redirect target (code → session, then redirect to the web app) |
-| `GET\|POST /auth/logout` | Clear the session cookie, return to the web app                       |
-| `GET /auth/session`      | `{ authenticated: boolean }` (no Core call)                           |
-| `GET /v1/dashboard`      | **Aggregation** — role-aware home (discriminated by `kind`)           |
-| `GET /v1/onboarding`     | **Aggregation** — onboarding bootstrap data                           |
-| `ALL /v1/*` (other)      | **Proxy** to the Core API (authenticated passthrough)                 |
+| Route                          | Purpose                                                               |
+| ------------------------------ | --------------------------------------------------------------------- |
+| `GET /health`                  | Liveness — `{ "status": "ok", "auth": "google" }`                     |
+| `GET /docs`                    | Swagger UI — interactive Contract A reference                         |
+| `GET /openapi.json`            | OpenAPI 3.1 spec (Contract A), generated in-code from the zod schemas |
+| `GET /auth/login`              | Start Google sign-in. Query: `returnTo`, `intent`, `login_hint`       |
+| `GET /auth/callback`           | Google redirect target (code → session, then redirect to the web app) |
+| `GET\|POST /auth/logout`       | Clear the session cookie, return to the web app                       |
+| `GET /auth/session`            | `{ authenticated: boolean }` (no Core call)                           |
+| `GET /v1/dashboard`            | **Aggregation** — role-aware home (discriminated by `kind`)           |
+| `GET /v1/onboarding`           | **Aggregation** — onboarding bootstrap data                           |
+| `POST /v1/bookings`            | **Reshape** — create a booking; Core reply mapped to Contract A       |
+| `POST /v1/bookings/:id/cancel` | **Reshape** — cancel own booking; reshaped reply                      |
+| `GET /v1/cart`                 | **Reshape** — the booking cart (list of reshaped DRAFT bookings)      |
+| `POST /v1/cart/items`          | **Reshape** — validate + add a cart item; reshaped reply              |
+| `DELETE /v1/cart/items/:id`    | **Reshape** — remove a cart item; reshaped cart list                  |
+| `POST /v1/cart/checkout`       | **Reshape** — check out the whole cart atomically; reshaped list      |
+| `ALL /v1/*` (other)            | **Proxy** to the Core API (authenticated passthrough)                 |
 
-The aggregation routes are mounted under `/v1` **before** the catch-all proxy, so they win over the
-passthrough.
+The composite/reshape routes are mounted under `/v1` **before** the catch-all proxy, so they win
+over the passthrough. Their paths are **generic** (`/v1/bookings*`, `/v1/cart*`) — they mirror the
+Core's canonical resource paths one-to-one and only add the `/v1` prefix. Role (PARTICIPANT) is
+enforced by the Core's authorization, never by the URL, so the front end builds one URL regardless
+of role (matching how `/v1/dashboard` and `/v1/onboarding` already work).
 
 ---
 
 ## Aggregation, proxy & the Core client
 
-The BFF talks to exactly one downstream — the Core — and exposes two patterns over it:
+The BFF talks to exactly one downstream — the Core — and exposes three patterns over it:
 
 - **Proxy** (`/v1/*`, catch-all): strips the `/v1` prefix (the Core owns the bare resource paths),
   attaches the `Bearer` token, an `X-Request-Id`, and — for mutations — an `Idempotency-Key`
@@ -368,17 +384,33 @@ The BFF talks to exactly one downstream — the Core — and exposes two pattern
   a `CoreClient`, then composes a single front-end-shaped payload. The `withSession` wrapper resolves
   the Bearer once, hands the handler a `CoreClient`, and funnels all errors through one place — so
   handlers stay branch-free (required reads `await`; best-effort reads `.catch(() => fallback)`).
+- **Reshape** (`/v1/bookings*`, `/v1/cart*`): a single-resource read/write whose Core payload is
+  **renamed into Contract A** before it reaches the browser. `reshapeBooking` maps each Core
+  `BookingDetailResponse` → the Contract-A booking: money becomes a `{ amount, currency }` **cents**
+  object, `durationMin` → `durationMinutes`, and `scheduledAt` is normalised to a canonical UTC
+  string (`…Z`, no millis) with `scheduledEndAt` **computed** from the duration — so start and end
+  never diverge in notation regardless of how the Core serialises the timestamp. List reads
+  (`GET /v1/cart`, checkout) tolerate a null Core body via `(raw ?? []).map(reshapeBooking)`.
 
-**Downstream error mapping** (consistent across proxy and aggregation):
+Reads use `withSession`; **writes use `withMutation`** — the mutation sibling that resolves auth
+once and, on a Core error, **relays the Core's `4xx` `problem+json` verbatim** (its status,
+content-type, and body) so validation messages (e.g. "time slot just taken", `422`) reach the
+browser unchanged. Writes carry headers built by `writeOpts`: the client's `Idempotency-Key` (or one the `CoreClient`
+generates) and the canonical `X-Request-Id` that `app.ts` echoes back.
 
-| Core responds          | BFF returns                                                      |
-| ---------------------- | ---------------------------------------------------------------- |
-| `401` (token rejected) | `401` + `Auth-Required: reauthenticate` (`SESSION_EXPIRED`)      |
-| `4xx` (e.g. 404/422)   | the **real** status surfaced as `problem+json` (not mislabelled) |
-| `5xx` / unreachable    | `502` `CORE_UNAVAILABLE`                                         |
+**Downstream error mapping:**
+
+| Core responds          | BFF returns                                                                         |
+| ---------------------- | ----------------------------------------------------------------------------------- |
+| `401` (token rejected) | `401` + `Auth-Required: reauthenticate` (`SESSION_EXPIRED`)                         |
+| `4xx` on a **read**    | the real status as generic `problem+json` (`UPSTREAM_ERROR`)                        |
+| `4xx` on a **write**   | the Core's own `problem+json` **relayed verbatim** (so field-level detail survives) |
+| `5xx` / unreachable    | `502` `CORE_UNAVAILABLE`                                                            |
 
 The `CoreClient` uses plain `fetch` with no built-in retry/timeout — failures throw (`CoreAuthError`
-on 401, `CoreError` otherwise) and are mapped centrally.
+on 401, `CoreError` carrying the response body/content-type otherwise) and are mapped centrally. Its
+`unwrap` returns the Core's `{ data }` payload — and returns `null` for a `{ data: null }` envelope
+(e.g. a participant with no next tour) rather than leaking the envelope to a reshape.
 
 ---
 
@@ -491,7 +523,7 @@ npm run lint              # ESLint
 npm run lint:fix          # ESLint with autofix
 npm run format            # Prettier (write)
 npm run format:check      # Prettier (check only)
-npm run typecheck         # tsc --noEmit
+npm run typecheck         # tsc --noEmit for src AND tests (tests/tsconfig.json)
 npm run openapi:lint      # Spectral — lint the OpenAPI spec (see API documentation)
 ```
 
