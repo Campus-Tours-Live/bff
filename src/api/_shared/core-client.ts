@@ -39,6 +39,17 @@ export class CoreClient {
     return this.get<T>("/bookings/pending-actions");
   }
 
+  /**
+   * Unwrap Core's `{ data }` envelope — return `data` whenever the body IS enveloped, even
+   * when `data` is legitimately `null` (e.g. "no next tour"). A plain `body?.data ?? body`
+   * wrongly returns the WHOLE envelope for null data, which downstream then mistakes for a
+   * truthy result (and e.g. reshapes it, throwing). Falls back to the raw body only when the
+   * response is not enveloped at all.
+   */
+  private static unwrap<T>(body: { data?: T } | null): T {
+    return (body && typeof body === "object" && "data" in body ? body.data : body) as T;
+  }
+
   async get<T>(path: string): Promise<T> {
     let r: Response;
     try {
@@ -53,7 +64,7 @@ export class CoreClient {
     if (r.status === 401) throw new CoreAuthError();
     if (!r.ok) throw new CoreError(r.status);
     const body = (await r.json().catch(() => null)) as { data?: T } | null;
-    return (body?.data ?? body) as T;
+    return CoreClient.unwrap<T>(body);
   }
 
   post<T>(path: string, body: unknown, opts: WriteOpts): Promise<T> {
@@ -93,6 +104,6 @@ export class CoreClient {
       throw new CoreError(r.status, raw, r.headers.get("content-type") ?? undefined);
     }
     const parsed = JSON.parse((await r.text().catch(() => "")) || "null") as { data?: T } | null;
-    return (parsed?.data ?? parsed) as T;
+    return CoreClient.unwrap<T>(parsed);
   }
 }

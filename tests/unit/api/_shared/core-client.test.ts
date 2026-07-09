@@ -53,6 +53,12 @@ describe("CoreClient.get", () => {
     expect(result).toEqual({ name: "Bob" });
   });
 
+  it("returns null (not the envelope) when the Core envelope's data is null", async () => {
+    (global.fetch as jest.Mock<typeof fetch>).mockResolvedValue(jsonResponse(200, { data: null }));
+    const result = await new CoreClient("t").get("/bookings/next-tour");
+    expect(result).toBeNull();
+  });
+
   it("returns null body (the fallback of json().catch) when JSON parsing fails", async () => {
     (global.fetch as jest.Mock<typeof fetch>).mockResolvedValue({
       status: 200,

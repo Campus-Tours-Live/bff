@@ -33,6 +33,9 @@ export function withSession(
         if (err.status >= 500) return coreUnavailable(res);
         return sendProblem(res, err.status, "Upstream request failed", { code: "UPSTREAM_ERROR" });
       }
+      // Unexpected (non-Core) exception in an aggregation handler — log it (it is otherwise
+      // swallowed) so a 500 is diagnosable, then return the generic problem.
+      console.error("[withSession] unhandled error:", err);
       sendProblem(res, 500, "Internal server error", { code: "INTERNAL" });
     }
   };

@@ -33,6 +33,7 @@ export function withMutation(
         res.send(err.body ?? "");
         return;
       }
+      console.error("[withMutation] unhandled error:", err);
       sendProblem(res, 500, "Internal server error", { code: "INTERNAL" });
     }
   };

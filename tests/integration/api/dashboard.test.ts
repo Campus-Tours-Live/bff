@@ -73,6 +73,34 @@ describe("GET /v1/dashboard", () => {
     expect(EnvelopedDashboardSchema.safeParse(res.body).success).toBe(true);
   });
 
+  it("participant with no next tour (Core returns { data: null }) → 200, nextTour null", async () => {
+    // Regression: CoreClient must unwrap null envelope data to null, not return the whole
+    // { data: null } envelope — otherwise the dashboard reshapes it and throws a 500.
+    mockCoreByPath({
+      "/userinfo": coreOk({
+        roles: ["PARTICIPANT"],
+        activeRole: "PARTICIPANT",
+        participantType: "PROSPECTIVE",
+        guideStatus: null,
+      }),
+      "/participant/profile": coreOk({ id: "p1" }),
+      "/bookings/next-tour": coreOk(null),
+      "/bookings/upcoming": coreOk([]),
+      "/bookings/pending-actions": coreOk({
+        paymentsToFinish: 0,
+        waitingForGuide: 0,
+        reviewsToWrite: 0,
+      }),
+    });
+
+    const res = await request(app).get("/v1/dashboard").set("Cookie", cookie);
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.kind).toBe("participant");
+    expect(res.body.data.nextTour).toBeNull();
+    expect(res.body.data.upcomingBookings).toEqual([]);
+  });
+
   it("offerings fetch fails for a guide → degrades to offerings:[] (still 200)", async () => {
     mockCoreByPath({
       "/userinfo": coreOk({
