@@ -22,11 +22,13 @@ function jsonResponse(status: number, body: unknown): Response {
 
 describe("CoreClient.get", () => {
   beforeEach(() => {
-    global.fetch = jest.fn();
+    global.fetch = jest.fn<typeof fetch>();
   });
 
   it("calls fetch with the base URL + path and the right headers", async () => {
-    (global.fetch as jest.Mock).mockResolvedValue(jsonResponse(200, { data: { ok: true } }));
+    (global.fetch as jest.Mock<typeof fetch>).mockResolvedValue(
+      jsonResponse(200, { data: { ok: true } }),
+    );
     const client = new CoreClient("tok-123");
 
     await client.get("/some/path");
@@ -38,19 +40,21 @@ describe("CoreClient.get", () => {
   });
 
   it("unwraps the Core { data } envelope and returns body.data", async () => {
-    (global.fetch as jest.Mock).mockResolvedValue(jsonResponse(200, { data: { name: "Alice" } }));
+    (global.fetch as jest.Mock<typeof fetch>).mockResolvedValue(
+      jsonResponse(200, { data: { name: "Alice" } }),
+    );
     const result = await new CoreClient("t").get<{ name: string }>("/userinfo");
     expect(result).toEqual({ name: "Alice" });
   });
 
   it("returns the whole body when there is no data field", async () => {
-    (global.fetch as jest.Mock).mockResolvedValue(jsonResponse(200, { name: "Bob" }));
+    (global.fetch as jest.Mock<typeof fetch>).mockResolvedValue(jsonResponse(200, { name: "Bob" }));
     const result = await new CoreClient("t").get<{ name: string }>("/userinfo");
     expect(result).toEqual({ name: "Bob" });
   });
 
   it("returns null body (the fallback of json().catch) when JSON parsing fails", async () => {
-    (global.fetch as jest.Mock).mockResolvedValue({
+    (global.fetch as jest.Mock<typeof fetch>).mockResolvedValue({
       status: 200,
       ok: true,
       json: async () => {
@@ -62,12 +66,12 @@ describe("CoreClient.get", () => {
   });
 
   it("throws CoreAuthError on a 401", async () => {
-    (global.fetch as jest.Mock).mockResolvedValue(jsonResponse(401, {}));
+    (global.fetch as jest.Mock<typeof fetch>).mockResolvedValue(jsonResponse(401, {}));
     await expect(new CoreClient("t").get("/userinfo")).rejects.toBeInstanceOf(CoreAuthError);
   });
 
   it("throws CoreError carrying the status on other non-ok responses (404)", async () => {
-    (global.fetch as jest.Mock).mockResolvedValue(jsonResponse(404, {}));
+    (global.fetch as jest.Mock<typeof fetch>).mockResolvedValue(jsonResponse(404, {}));
     await expect(new CoreClient("t").get("/userinfo")).rejects.toMatchObject({
       name: "CoreError",
       status: 404,
@@ -75,7 +79,7 @@ describe("CoreClient.get", () => {
   });
 
   it("throws CoreError(500) for a 500 response", async () => {
-    (global.fetch as jest.Mock).mockResolvedValue(jsonResponse(500, {}));
+    (global.fetch as jest.Mock<typeof fetch>).mockResolvedValue(jsonResponse(500, {}));
     await expect(new CoreClient("t").get("/userinfo")).rejects.toMatchObject({
       name: "CoreError",
       status: 500,
@@ -83,7 +87,7 @@ describe("CoreClient.get", () => {
   });
 
   it("throws CoreError(502) when fetch itself rejects (unreachable)", async () => {
-    (global.fetch as jest.Mock).mockRejectedValue(new Error("ECONNREFUSED"));
+    (global.fetch as jest.Mock<typeof fetch>).mockRejectedValue(new Error("ECONNREFUSED"));
     await expect(new CoreClient("t").get("/userinfo")).rejects.toMatchObject({
       name: "CoreError",
       status: 502,
@@ -93,7 +97,9 @@ describe("CoreClient.get", () => {
 
 describe("CoreClient convenience methods", () => {
   beforeEach(() => {
-    global.fetch = jest.fn().mockResolvedValue(jsonResponse(200, { data: { ok: true } }));
+    global.fetch = jest
+      .fn<typeof fetch>()
+      .mockResolvedValue(jsonResponse(200, { data: { ok: true } }));
   });
 
   it.each([
@@ -113,7 +119,9 @@ describe("CoreClient convenience methods", () => {
   });
 
   it("convenience methods unwrap data like get()", async () => {
-    (global.fetch as jest.Mock).mockResolvedValue(jsonResponse(200, { data: { id: 7 } }));
+    (global.fetch as jest.Mock<typeof fetch>).mockResolvedValue(
+      jsonResponse(200, { data: { id: 7 } }),
+    );
     const result = await new CoreClient("tok").getUserinfo<{ id: number }>();
     expect(result).toEqual({ id: 7 });
   });

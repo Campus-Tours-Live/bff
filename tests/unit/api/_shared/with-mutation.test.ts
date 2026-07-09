@@ -1,7 +1,9 @@
 import { jest } from "@jest/globals";
 import { CoreError, CoreAuthError } from "@/api/_shared/errors.js";
 
-const resolveBearer = jest.fn(() => Promise.resolve("tok"));
+const resolveBearer = jest.fn<(...args: unknown[]) => Promise<string>>(() =>
+  Promise.resolve("tok"),
+);
 const requireReauth = jest.fn();
 const coreUnavailable = jest.fn();
 const sendProblem = jest.fn();
@@ -54,7 +56,7 @@ describe("withMutation", () => {
     const handler = jest.fn(async () => {
       throw new CoreError(422, '{"title":"slot taken"}', "application/problem+json");
     });
-    await withMutation(handler as never)({} as never, r);
+    await withMutation(handler as never)({} as never, r as never);
     expect(r.statusCode).toBe(422);
     expect(r.headers["content-type"]).toBe("application/problem+json");
     expect(r.sent).toBe('{"title":"slot taken"}');
@@ -66,7 +68,7 @@ describe("withMutation", () => {
     const handler = jest.fn(async () => {
       throw new CoreError(500);
     });
-    await withMutation(handler as never)({} as never, r);
+    await withMutation(handler as never)({} as never, r as never);
     expect(coreUnavailable).toHaveBeenCalledWith(r);
   });
 
@@ -76,7 +78,7 @@ describe("withMutation", () => {
     const handler = jest.fn(async () => {
       throw new CoreAuthError();
     });
-    await withMutation(handler as never)({} as never, r);
+    await withMutation(handler as never)({} as never, r as never);
     expect(requireReauth).toHaveBeenCalledWith(r);
   });
 });

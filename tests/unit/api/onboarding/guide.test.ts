@@ -8,7 +8,7 @@ function makeMe(over: Partial<Me> = {}): Me {
     participantType: null,
     guideStatus: null,
     ...over,
-  };
+  } as Me;
 }
 
 describe("guideProgress", () => {

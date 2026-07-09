@@ -25,7 +25,13 @@ function sentData(res: { body: unknown }): unknown {
 }
 
 function makeMe(over: Partial<Me> = {}): Me {
-  return { roles: [], activeRole: null, participantType: null, guideStatus: null, ...over };
+  return {
+    roles: [],
+    activeRole: null,
+    participantType: null,
+    guideStatus: null,
+    ...over,
+  } as Me;
 }
 
 describe("guideDashboard", () => {
@@ -33,8 +39,8 @@ describe("guideDashboard", () => {
     const guide: Json = { id: "g1", displayName: "Ana" };
     const offerings: Json[] = [{ id: "o1" }, { id: "o2" }];
     const core = {
-      getGuideProfile: jest.fn().mockResolvedValue(guide),
-      getOfferings: jest.fn().mockResolvedValue(offerings),
+      getGuideProfile: jest.fn<() => Promise<unknown>>().mockResolvedValue(guide),
+      getOfferings: jest.fn<() => Promise<unknown>>().mockResolvedValue(offerings),
     } as unknown as CoreClient;
     const me = makeMe({ guideStatus: "APPROVED" });
 
@@ -52,8 +58,8 @@ describe("guideDashboard", () => {
 
   it("canPublish is false when guideStatus is not APPROVED", async () => {
     const core = {
-      getGuideProfile: jest.fn().mockResolvedValue({ id: "g1" }),
-      getOfferings: jest.fn().mockResolvedValue([]),
+      getGuideProfile: jest.fn<() => Promise<unknown>>().mockResolvedValue({ id: "g1" }),
+      getOfferings: jest.fn<() => Promise<unknown>>().mockResolvedValue([]),
     } as unknown as CoreClient;
 
     const res = mockRes();
@@ -69,8 +75,8 @@ describe("guideDashboard", () => {
   it("degrades offerings to an empty array when getOfferings rejects", async () => {
     const guide: Json = { id: "g1" };
     const core = {
-      getGuideProfile: jest.fn().mockResolvedValue(guide),
-      getOfferings: jest.fn().mockRejectedValue(new Error("core down")),
+      getGuideProfile: jest.fn<() => Promise<unknown>>().mockResolvedValue(guide),
+      getOfferings: jest.fn<() => Promise<unknown>>().mockRejectedValue(new Error("core down")),
     } as unknown as CoreClient;
 
     const res = mockRes();

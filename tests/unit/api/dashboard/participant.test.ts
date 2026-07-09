@@ -25,8 +25,10 @@ const ME: Me = { createdAt: "2025-03-15T00:00:00Z" } as unknown as Me;
 /** Full happy-path mock — all four Core calls succeed. */
 function mockCore(overrides: Partial<Record<keyof CoreClient, jest.Mock>> = {}): CoreClient {
   return {
-    getParticipantProfile: jest.fn().mockResolvedValue({ id: "p1", displayName: "Sam" }),
-    getNextTour: jest.fn().mockResolvedValue({
+    getParticipantProfile: jest
+      .fn<() => Promise<unknown>>()
+      .mockResolvedValue({ id: "p1", displayName: "Sam" }),
+    getNextTour: jest.fn<() => Promise<unknown>>().mockResolvedValue({
       id: "b1",
       status: "CONFIRMED",
       scheduledAt: "2026-08-01T15:00:00Z",
@@ -40,7 +42,7 @@ function mockCore(overrides: Partial<Record<keyof CoreClient, jest.Mock>> = {}):
       priceCents: 4200,
       currency: "USD",
     }),
-    getUpcomingBookings: jest.fn().mockResolvedValue([
+    getUpcomingBookings: jest.fn<() => Promise<unknown>>().mockResolvedValue([
       {
         id: "b2",
         status: "CONFIRMED",
@@ -57,7 +59,7 @@ function mockCore(overrides: Partial<Record<keyof CoreClient, jest.Mock>> = {}):
       },
     ]),
     getPendingActions: jest
-      .fn()
+      .fn<() => Promise<unknown>>()
       .mockResolvedValue({ paymentsToFinish: 0, waitingForGuide: 1, reviewsToWrite: 0 }),
     ...overrides,
   } as unknown as CoreClient;
@@ -111,7 +113,7 @@ describe("participantDashboard", () => {
 
   it("propagates a rejection from getParticipantProfile (required read)", async () => {
     const core = mockCore({
-      getParticipantProfile: jest.fn().mockRejectedValue(new Error("401")),
+      getParticipantProfile: jest.fn<() => Promise<unknown>>().mockRejectedValue(new Error("401")),
     } as Partial<Record<keyof CoreClient, jest.Mock>>);
 
     const res = mockRes();
@@ -120,7 +122,7 @@ describe("participantDashboard", () => {
 
   it("degrades nextTour to null when getNextTour fails (best-effort)", async () => {
     const core = mockCore({
-      getNextTour: jest.fn().mockRejectedValue(new Error("503")),
+      getNextTour: jest.fn<() => Promise<unknown>>().mockRejectedValue(new Error("503")),
     } as Partial<Record<keyof CoreClient, jest.Mock>>);
 
     const res = mockRes();
@@ -131,7 +133,7 @@ describe("participantDashboard", () => {
 
   it("degrades upcomingBookings to [] when getUpcomingBookings fails (best-effort)", async () => {
     const core = mockCore({
-      getUpcomingBookings: jest.fn().mockRejectedValue(new Error("503")),
+      getUpcomingBookings: jest.fn<() => Promise<unknown>>().mockRejectedValue(new Error("503")),
     } as Partial<Record<keyof CoreClient, jest.Mock>>);
 
     const res = mockRes();
@@ -142,7 +144,7 @@ describe("participantDashboard", () => {
 
   it("degrades pendingActions to null when getPendingActions fails (best-effort)", async () => {
     const core = mockCore({
-      getPendingActions: jest.fn().mockRejectedValue(new Error("503")),
+      getPendingActions: jest.fn<() => Promise<unknown>>().mockRejectedValue(new Error("503")),
     } as Partial<Record<keyof CoreClient, jest.Mock>>);
 
     const res = mockRes();
@@ -153,9 +155,9 @@ describe("participantDashboard", () => {
 
   it("still sends the response when all three booking calls fail", async () => {
     const core = mockCore({
-      getNextTour: jest.fn().mockRejectedValue(new Error("down")),
-      getUpcomingBookings: jest.fn().mockRejectedValue(new Error("down")),
-      getPendingActions: jest.fn().mockRejectedValue(new Error("down")),
+      getNextTour: jest.fn<() => Promise<unknown>>().mockRejectedValue(new Error("down")),
+      getUpcomingBookings: jest.fn<() => Promise<unknown>>().mockRejectedValue(new Error("down")),
+      getPendingActions: jest.fn<() => Promise<unknown>>().mockRejectedValue(new Error("down")),
     } as Partial<Record<keyof CoreClient, jest.Mock>>);
 
     const res = mockRes();

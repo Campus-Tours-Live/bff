@@ -1,9 +1,19 @@
 import { jest } from "@jest/globals";
 import type { Request, Response } from "express";
 
-const readSession = jest.fn();
-const writeSession = jest.fn();
-const refreshTokens = jest.fn();
+const readSession =
+  jest.fn<
+    (...args: unknown[]) => { idToken?: string; refreshToken?: string; expiresAt?: number } | null
+  >();
+const writeSession = jest.fn<(...args: unknown[]) => void>();
+const refreshTokens = jest.fn<
+  (...args: unknown[]) => Promise<{
+    id_token?: string;
+    access_token: string;
+    refresh_token?: string;
+    expires_in: number;
+  }>
+>();
 
 jest.unstable_mockModule("@/session.js", () => ({
   readSession: (...args: unknown[]) => readSession(...args),

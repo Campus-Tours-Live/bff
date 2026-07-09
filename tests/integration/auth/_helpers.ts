@@ -1,4 +1,4 @@
-import type { Response } from "express";
+import type { Response as ExpressResponse } from "express";
 import { type AuthTx, writeAuthTx } from "@/session.js";
 
 /** A minimal res that records appended Set-Cookie values. */
@@ -10,7 +10,7 @@ function recordingRes() {
       return res;
     },
   };
-  return { res: res as unknown as Response, cookies };
+  return { res: res as unknown as ExpressResponse, cookies };
 }
 
 /**
