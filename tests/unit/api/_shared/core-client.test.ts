@@ -197,4 +197,63 @@ describe("CoreClient.post/del", () => {
     await new CoreClient("t").post("/cart/checkout", {}, {});
     expect((seen!.headers as Record<string, string>)["Idempotency-Key"]).toMatch(/[0-9a-f-]{36}/);
   });
+
+  it("throws CoreError(502) when the write fetch itself rejects (unreachable)", async () => {
+    global.fetch = (() => Promise.reject(new Error("ECONNREFUSED"))) as unknown as typeof fetch;
+    await expect(new CoreClient("t").post("/bookings", {}, {})).rejects.toMatchObject({
+      name: "CoreError",
+      status: 502,
+    });
+  });
+
+  it("throws CoreError with contentType undefined when a write 4xx has no content-type header", async () => {
+    global.fetch = (async () =>
+      ({
+        ok: false,
+        status: 404,
+        headers: new Headers(),
+        text: async () => "not found",
+      }) as Response) as unknown as typeof fetch;
+    await expect(new CoreClient("t").del("/cart/items/x", {})).rejects.toMatchObject({
+      status: 404,
+      body: "not found",
+      contentType: undefined,
+    });
+  });
+
+  it("returns null when a write succeeds with an empty body", async () => {
+    global.fetch = (async () =>
+      ({ ok: true, status: 200, text: async () => "" }) as Response) as unknown as typeof fetch;
+    const result = await new CoreClient("t").post("/cart/checkout", {}, {});
+    expect(result).toBeNull();
+  });
+
+  it("write 4xx: falls back to an empty body when the response text() rejects", async () => {
+    global.fetch = (async () =>
+      ({
+        ok: false,
+        status: 400,
+        headers: new Headers(),
+        text: async () => {
+          throw new Error("stream aborted");
+        },
+      }) as unknown as Response) as unknown as typeof fetch;
+    await expect(new CoreClient("t").post("/x", {}, {})).rejects.toMatchObject({
+      status: 400,
+      body: "",
+    });
+  });
+
+  it("write success: returns null when the body text() rejects", async () => {
+    global.fetch = (async () =>
+      ({
+        ok: true,
+        status: 200,
+        text: async () => {
+          throw new Error("stream aborted");
+        },
+      }) as unknown as Response) as unknown as typeof fetch;
+    const result = await new CoreClient("t").post("/x", {}, {});
+    expect(result).toBeNull();
+  });
 });

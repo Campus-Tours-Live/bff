@@ -81,4 +81,40 @@ describe("withMutation", () => {
     await withMutation(handler as never)({} as never, r as never);
     expect(requireReauth).toHaveBeenCalledWith(r);
   });
+
+  it("maps an unexpected (non-Core) error to a 500 INTERNAL and logs it", async () => {
+    resolveBearer.mockResolvedValueOnce("tok");
+    const spy = jest.spyOn(console, "error").mockImplementation(() => {});
+    const r = res();
+    const handler = jest.fn(async () => {
+      throw new Error("boom");
+    });
+    await withMutation(handler as never)({} as never, r as never);
+    expect(sendProblem).toHaveBeenCalledWith(r, 500, "Internal server error", {
+      code: "INTERNAL",
+    });
+    expect(spy).toHaveBeenCalled();
+    spy.mockRestore();
+  });
+
+  it("no session bearer → re-auth, handler never runs", async () => {
+    resolveBearer.mockResolvedValueOnce(null as never);
+    const r = res();
+    const handler = jest.fn(async () => {});
+    await withMutation(handler as never)({} as never, r as never);
+    expect(requireReauth).toHaveBeenCalledWith(r);
+    expect(handler).not.toHaveBeenCalled();
+  });
+
+  it("relays a Core 4xx with no content-type/body (no res.type, empty body)", async () => {
+    resolveBearer.mockResolvedValueOnce("tok");
+    const r = res();
+    const handler = jest.fn(async () => {
+      throw new CoreError(404);
+    });
+    await withMutation(handler as never)({} as never, r as never);
+    expect(r.statusCode).toBe(404);
+    expect(r.headers["content-type"]).toBeUndefined();
+    expect(r.sent).toBe("");
+  });
 });
