@@ -1,4 +1,5 @@
 import type { Request, Response } from "express";
+import { z } from "zod";
 import {
   sendData,
   writeOpts,
@@ -12,6 +13,12 @@ import {
   type OccurrenceResponse,
   type Json,
 } from "../_shared/index.js";
+import {
+  AvailabilityRuleResponseSchema,
+  AvailabilityExceptionResponseSchema,
+  AvailabilitySettingsResponseSchema,
+  ResolvedAvailabilityResponseSchema,
+} from "../../openapi/schemas.js";
 
 /**
  * The Core `AvailabilityRuleResponse` shape (Contract B). A weekly recurring window: no
@@ -88,7 +95,7 @@ function sendWrite(res: Response, data: unknown, affectedBookings: CoreAffectedB
 
 export async function getRules(_req: Request, res: Response, core: CoreClient): Promise<void> {
   const raw = await core.get<CoreAvailabilityRule[]>("/availability/rules");
-  sendData(res, raw);
+  sendData(res, raw, z.array(AvailabilityRuleResponseSchema));
 }
 
 export async function createRule(req: Request, res: Response, core: CoreClient): Promise<void> {
@@ -120,7 +127,7 @@ export async function deleteRule(req: Request, res: Response, core: CoreClient):
 
 export async function getExceptions(_req: Request, res: Response, core: CoreClient): Promise<void> {
   const raw = await core.get<CoreAvailabilityException[]>("/availability/exceptions");
-  sendData(res, raw);
+  sendData(res, raw, z.array(AvailabilityExceptionResponseSchema));
 }
 
 export async function createException(
@@ -163,7 +170,7 @@ export async function deleteException(
 
 export async function getSettings(_req: Request, res: Response, core: CoreClient): Promise<void> {
   const raw = await core.get<CoreGuideSettings>("/availability/settings");
-  sendData(res, reshapeSettings(raw));
+  sendData(res, reshapeSettings(raw), AvailabilitySettingsResponseSchema);
 }
 
 export async function updateSettings(req: Request, res: Response, core: CoreClient): Promise<void> {
@@ -229,5 +236,5 @@ export async function getAvailability(
   if (typeof to === "string") params.set("to", to);
   const qs = params.toString();
   const raw = await core.get<CoreResolvedAvailability>(`/availability${qs ? `?${qs}` : ""}`);
-  sendData(res, reshapeResolvedAvailability(raw));
+  sendData(res, reshapeResolvedAvailability(raw), ResolvedAvailabilityResponseSchema);
 }

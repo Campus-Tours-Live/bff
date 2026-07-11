@@ -31,20 +31,33 @@ import {
   guideProgressExample,
   participantProgressExample,
   envelope,
+  writeEnvelope,
   BookingResponseSchema,
   BookingListSchema,
   CreateBookingRequestSchema,
   CancelBookingRequestSchema,
+  CreateAvailabilityRuleRequestSchema,
+  UpdateAvailabilityRuleRequestSchema,
+  AvailabilityRuleResponseSchema,
+  CreateAvailabilityExceptionRequestSchema,
+  UpdateAvailabilityExceptionRequestSchema,
+  AvailabilityExceptionResponseSchema,
+  UpdateAvailabilitySettingsRequestSchema,
+  AvailabilitySettingsResponseSchema,
+  AvailabilityOccurrenceSchema,
+  ResolvedAvailabilityResponseSchema,
 } from "./schemas.js";
 import {
   apiRoute,
   enveloped,
+  envelopedWrite,
   problem400,
   problem401,
   problem404,
   problem409,
   problem422,
   problem502,
+  problemResponse,
 } from "./helpers.js";
 
 // Re-export the schema surface so consumers (handlers, tests) have one import site.
@@ -284,6 +297,385 @@ apiRoute({
   },
 });
 
+// --- Availability (guide CRUD + resolved read; participant slots) — CTL-56 ---
+//
+// Generic routes: role is enforced by Core's authz, not this router, so these carry no
+// audience prefix (mirrors the Booking/cart module above). Reads use the framework's generic
+// read-error mapping (any Core 4xx surfaces with its real status and code `UPSTREAM_ERROR`,
+// via withSession) — see the slots 403/404 examples below; writes relay a Core 4xx verbatim
+// (via withMutation), so the 404/422 examples below illustrate Core's real error shape.
+
+const ruleExample = {
+  id: "r1",
+  dayOfWeek: 1,
+  startLocal: "09:00",
+  windowMin: 120,
+  timezone: "America/Los_Angeles",
+  effectiveFrom: "2026-01-01",
+  effectiveTo: null,
+  active: true,
+};
+
+const exceptionExample = {
+  id: "e1",
+  exceptionDate: "2026-08-01",
+  kind: "UNAVAILABLE",
+  startLocal: "09:00",
+  windowMin: 60,
+  reason: "Holiday",
+};
+
+const settingsExample = {
+  guideId: "g1",
+  acceptanceMode: "AUTO",
+  responseDeadlineMin: 60,
+  minNoticeMin: 120,
+  maxAdvanceDays: 30,
+  bufferBeforeMin: 10,
+  bufferAfterMin: 10,
+  durationsOffered: [30, 60],
+  timezone: "America/Los_Angeles",
+  updatedAt: "2026-07-01T12:00:00Z",
+};
+
+const occurrenceExample = { startAt: "2026-08-01T15:00:00Z", endAt: "2026-08-01T16:00:00Z" };
+
+const affectedBookingExample = {
+  bookingId: "b1",
+  bookingNumber: "BK-001",
+  status: "CONFIRMED",
+  scheduledStartAt: "2026-08-01T15:00:00Z",
+  scheduledEndAt: "2026-08-01T16:00:00Z",
+};
+
+const resolvedAvailabilityExample = {
+  rules: [ruleExample],
+  occurrences: [occurrenceExample],
+  dstGapDays: ["2026-03-08"],
+};
+
+/** A read-side 4xx: the generic `withSession` mapping (real status, code `UPSTREAM_ERROR`). */
+const upstreamErrorProblem = (status: number, title: string) =>
+  problemResponse(title, problem(status, title, "UPSTREAM_ERROR"));
+
+// GET /v1/availability/rules
+apiRoute({
+  method: "get",
+  path: "/v1/availability/rules",
+  tags: ["Availability"],
+  summary: "List a guide's recurring availability rules",
+  description:
+    "Returns the guide's weekly recurring availability windows, forwarded from Core " +
+    "unchanged — the wall-clock fields (`startLocal`, `windowMin`, `effectiveFrom`/`effectiveTo`) " +
+    "carry no absolute instant, so CTL-49 does not touch this shape. Guide-only; role is " +
+    "enforced by Core.",
+  responses: {
+    200: enveloped(z.array(AvailabilityRuleResponseSchema), {
+      description: "The guide's availability rules.",
+      example: envelope([ruleExample]),
+    }),
+  },
+});
+
+// POST /v1/availability/rules
+apiRoute({
+  method: "post",
+  path: "/v1/availability/rules",
+  tags: ["Availability"],
+  summary: "Create a recurring availability rule",
+  description:
+    "Creates a new weekly recurring availability window. The write may shift or invalidate " +
+    "existing bookings that no longer fit the guide's availability — those are reported back " +
+    "in `affectedBookings` (a warning list, not an error).",
+  request: {
+    body: { content: { "application/json": { schema: CreateAvailabilityRuleRequestSchema } } },
+  },
+  responses: {
+    200: envelopedWrite(AvailabilityRuleResponseSchema, {
+      description: "The created rule, plus any bookings affected by the change.",
+      example: writeEnvelope(ruleExample),
+    }),
+    422: problem422(
+      "AVAILABILITY_RULE_VALIDATION",
+      "Validation failed",
+      "Bad fields, or the rule overlaps an existing one.",
+    ),
+  },
+});
+
+// PATCH /v1/availability/rules/{id}
+apiRoute({
+  method: "patch",
+  path: "/v1/availability/rules/{id}",
+  tags: ["Availability"],
+  summary: "Update a recurring availability rule",
+  description:
+    "Partially updates one of the guide's recurring rules and returns it, plus any bookings " +
+    "affected by the change.",
+  request: {
+    params: z.object({ id: z.string().openapi({ description: "Rule id.", example: "r1" }) }),
+    body: { content: { "application/json": { schema: UpdateAvailabilityRuleRequestSchema } } },
+  },
+  responses: {
+    200: envelopedWrite(AvailabilityRuleResponseSchema, {
+      description: "The updated rule, plus any bookings affected by the change.",
+      example: writeEnvelope({ ...ruleExample, active: false }),
+    }),
+    404: problem404(
+      "AVAILABILITY_RULE_NOT_FOUND",
+      "Not found",
+      "No rule exists with this id for the caller.",
+    ),
+    422: problem422(
+      "AVAILABILITY_RULE_VALIDATION",
+      "Validation failed",
+      "Bad fields, or the update overlaps an existing rule.",
+    ),
+  },
+});
+
+// DELETE /v1/availability/rules/{id}
+apiRoute({
+  method: "delete",
+  path: "/v1/availability/rules/{id}",
+  tags: ["Availability"],
+  summary: "Delete a recurring availability rule",
+  description:
+    "Deletes one of the guide's recurring rules and returns the remaining rules, plus any " +
+    "bookings affected by the change.",
+  request: {
+    params: z.object({ id: z.string().openapi({ description: "Rule id.", example: "r1" }) }),
+  },
+  responses: {
+    200: envelopedWrite(z.array(AvailabilityRuleResponseSchema), {
+      description: "The remaining rules, plus any bookings affected by the deletion.",
+      example: writeEnvelope([], [affectedBookingExample]),
+    }),
+    404: problem404(
+      "AVAILABILITY_RULE_NOT_FOUND",
+      "Not found",
+      "No rule exists with this id for the caller.",
+    ),
+  },
+});
+
+// GET /v1/availability/exceptions
+apiRoute({
+  method: "get",
+  path: "/v1/availability/exceptions",
+  tags: ["Availability"],
+  summary: "List a guide's availability exceptions",
+  description:
+    "Returns the guide's one-off date overrides (blocked or extra windows), forwarded from " +
+    "Core unchanged — same wall-clock rationale as the rules above. Guide-only; role is " +
+    "enforced by Core.",
+  responses: {
+    200: enveloped(z.array(AvailabilityExceptionResponseSchema), {
+      description: "The guide's availability exceptions.",
+      example: envelope([exceptionExample]),
+    }),
+  },
+});
+
+// POST /v1/availability/exceptions
+apiRoute({
+  method: "post",
+  path: "/v1/availability/exceptions",
+  tags: ["Availability"],
+  summary: "Create a one-off availability exception",
+  description:
+    "Creates a one-off date override (UNAVAILABLE blocks a window or the whole day; " +
+    "ADDITIONAL adds an extra one-off window) and returns it, plus any bookings affected by " +
+    "the change.",
+  request: {
+    body: {
+      content: { "application/json": { schema: CreateAvailabilityExceptionRequestSchema } },
+    },
+  },
+  responses: {
+    200: envelopedWrite(AvailabilityExceptionResponseSchema, {
+      description: "The created exception, plus any bookings affected by the change.",
+      example: writeEnvelope(exceptionExample),
+    }),
+    422: problem422(
+      "AVAILABILITY_EXCEPTION_VALIDATION",
+      "Validation failed",
+      "Bad fields, e.g. a missing `startLocal`/`windowMin` on an ADDITIONAL exception.",
+    ),
+  },
+});
+
+// PATCH /v1/availability/exceptions/{id}
+apiRoute({
+  method: "patch",
+  path: "/v1/availability/exceptions/{id}",
+  tags: ["Availability"],
+  summary: "Update an availability exception",
+  description:
+    "Partially updates one of the guide's exceptions and returns it, plus any bookings " +
+    "affected by the change.",
+  request: {
+    params: z.object({ id: z.string().openapi({ description: "Exception id.", example: "e1" }) }),
+    body: {
+      content: { "application/json": { schema: UpdateAvailabilityExceptionRequestSchema } },
+    },
+  },
+  responses: {
+    200: envelopedWrite(AvailabilityExceptionResponseSchema, {
+      description: "The updated exception, plus any bookings affected by the change.",
+      example: writeEnvelope({ ...exceptionExample, reason: "Storm" }),
+    }),
+    404: problem404(
+      "AVAILABILITY_EXCEPTION_NOT_FOUND",
+      "Not found",
+      "No exception exists with this id for the caller.",
+    ),
+    422: problem422(
+      "AVAILABILITY_EXCEPTION_VALIDATION",
+      "Validation failed",
+      "Bad fields on the update.",
+    ),
+  },
+});
+
+// DELETE /v1/availability/exceptions/{id}
+apiRoute({
+  method: "delete",
+  path: "/v1/availability/exceptions/{id}",
+  tags: ["Availability"],
+  summary: "Delete an availability exception",
+  description:
+    "Deletes one of the guide's exceptions and returns the remaining exceptions, plus any " +
+    "bookings affected by the change.",
+  request: {
+    params: z.object({ id: z.string().openapi({ description: "Exception id.", example: "e1" }) }),
+  },
+  responses: {
+    200: envelopedWrite(z.array(AvailabilityExceptionResponseSchema), {
+      description: "The remaining exceptions, plus any bookings affected by the deletion.",
+      example: writeEnvelope([], [affectedBookingExample]),
+    }),
+    404: problem404(
+      "AVAILABILITY_EXCEPTION_NOT_FOUND",
+      "Not found",
+      "No exception exists with this id for the caller.",
+    ),
+  },
+});
+
+// GET /v1/availability/settings
+apiRoute({
+  method: "get",
+  path: "/v1/availability/settings",
+  tags: ["Availability"],
+  summary: "Get a guide's booking-acceptance and scheduling-window settings",
+  description:
+    "Returns the guide's settings; `updatedAt` is normalized to canonical UTC `Z` (CTL-49), " +
+    "every other field forwarded from Core unchanged.",
+  responses: {
+    200: enveloped(AvailabilitySettingsResponseSchema, {
+      description: "The guide's settings.",
+      example: envelope(settingsExample),
+    }),
+  },
+});
+
+// PATCH /v1/availability/settings
+apiRoute({
+  method: "patch",
+  path: "/v1/availability/settings",
+  tags: ["Availability"],
+  summary: "Update a guide's booking-acceptance and scheduling-window settings",
+  description:
+    "Partially updates the guide's settings and returns them (`updatedAt` reshaped to UTC " +
+    "`Z`), plus any bookings affected by the change (e.g. a shrunk notice/buffer window).",
+  request: {
+    body: {
+      content: { "application/json": { schema: UpdateAvailabilitySettingsRequestSchema } },
+    },
+  },
+  responses: {
+    200: envelopedWrite(AvailabilitySettingsResponseSchema, {
+      description: "The updated settings, plus any bookings affected by the change.",
+      example: writeEnvelope({ ...settingsExample, acceptanceMode: "MANUAL" }, [
+        affectedBookingExample,
+      ]),
+    }),
+    422: problem422(
+      "AVAILABILITY_SETTINGS_VALIDATION",
+      "Validation failed",
+      "Bad fields, e.g. a non-positive duration or deadline.",
+    ),
+  },
+});
+
+// GET /v1/availability
+apiRoute({
+  method: "get",
+  path: "/v1/availability",
+  tags: ["Availability"],
+  summary: "Get a guide's resolved availability",
+  description:
+    "Resolves the guide's active rules against exceptions and existing bookings into " +
+    "coalesced, disjoint, ascending occurrences over the requested window (`occurrences` " +
+    "reshaped to canonical UTC `Z`, CTL-49) and reports any DST gap-days (a local calendar " +
+    "day a spring-forward transition eliminates). `from`/`to` are forwarded to Core " +
+    "VERBATIM — Core's window is UTC-midnight-anchored, not guide-local, so widening the " +
+    "window to safely catch local-day edges is the frontend's (CTL-55) responsibility. This " +
+    "is the CTL-55 frontend contract.",
+  request: {
+    query: z.object({
+      from: z.string().optional().openapi({
+        description: "Inclusive window start (ISO date), forwarded to Core verbatim.",
+        example: "2026-08-01",
+      }),
+      to: z.string().optional().openapi({
+        description: "Inclusive window end (ISO date), forwarded to Core verbatim.",
+        example: "2026-08-31",
+      }),
+    }),
+  },
+  responses: {
+    200: enveloped(ResolvedAvailabilityResponseSchema, {
+      description: "The guide's resolved availability.",
+      example: envelope(resolvedAvailabilityExample),
+    }),
+  },
+});
+
+// GET /v1/offerings/{id}/slots
+apiRoute({
+  method: "get",
+  path: "/v1/offerings/{id}/slots",
+  tags: ["Availability"],
+  summary: "List an offering's bookable slots",
+  description:
+    "Participant-facing bookable slots for a tour offering, reshaped to canonical UTC `Z` " +
+    "(CTL-49). `from`/`to` are forwarded to Core verbatim (same caveat as the resolved-" +
+    "availability read above). Role PARTICIPANT is enforced by Core.",
+  request: {
+    params: z.object({ id: z.string().openapi({ description: "Offering id.", example: "off1" }) }),
+    query: z.object({
+      from: z.string().optional().openapi({
+        description: "Inclusive window start (ISO date), forwarded to Core verbatim.",
+        example: "2026-08-01",
+      }),
+      to: z.string().optional().openapi({
+        description: "Inclusive window end (ISO date), forwarded to Core verbatim.",
+        example: "2026-08-31",
+      }),
+    }),
+  },
+  responses: {
+    200: enveloped(z.array(AvailabilityOccurrenceSchema), {
+      description: "The offering's bookable slots.",
+      example: envelope([occurrenceExample]),
+    }),
+    403: upstreamErrorProblem(403, "Non-participant caller"),
+    404: upstreamErrorProblem(404, "Offering not found or inactive"),
+  },
+});
+
 // GET /auth/login
 apiRoute({
   method: "get",
@@ -469,6 +861,12 @@ export const openapiSpec = generator.generateDocument({
     { name: "Dashboard", description: "Role-shaped signed-in home aggregate." },
     { name: "Onboarding", description: "Per-role onboarding progress aggregate." },
     { name: "Booking", description: "Participant booking and cart operations." },
+    {
+      name: "Availability",
+      description:
+        "Guide recurring-rule/exception/settings CRUD, the resolved-availability read, and " +
+        "participant offering slots.",
+    },
   ],
   externalDocs: {
     url: `${coreApiBaseUrl}/v3/api-docs`,

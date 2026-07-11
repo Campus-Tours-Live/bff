@@ -1,5 +1,7 @@
 import type { Request, Response } from "express";
+import { z } from "zod";
 import { sendData, reshapeSlot, type CoreClient, type CoreSlot } from "../_shared/index.js";
+import { AvailabilityOccurrenceSchema } from "../../openapi/schemas.js";
 
 /**
  * Participant bookable-slots read (`GET /v1/offerings/:id/slots`) — a different resource
@@ -19,5 +21,5 @@ export async function getSlots(req: Request, res: Response, core: CoreClient): P
   if (typeof to === "string") params.set("to", to);
   const qs = params.toString();
   const raw = await core.get<CoreSlot[]>(`/offerings/${req.params.id}/slots${qs ? `?${qs}` : ""}`);
-  sendData(res, raw.map(reshapeSlot));
+  sendData(res, raw.map(reshapeSlot), z.array(AvailabilityOccurrenceSchema));
 }

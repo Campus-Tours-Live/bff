@@ -116,6 +116,18 @@ describe("OpenAPI contract — drift guard (Express routes ↔ spec)", () => {
         "post /v1/cart/items",
         "delete /v1/cart/items/{id}",
         "post /v1/cart/checkout",
+        "get /v1/availability/rules",
+        "post /v1/availability/rules",
+        "patch /v1/availability/rules/{id}",
+        "delete /v1/availability/rules/{id}",
+        "get /v1/availability/exceptions",
+        "post /v1/availability/exceptions",
+        "patch /v1/availability/exceptions/{id}",
+        "delete /v1/availability/exceptions/{id}",
+        "get /v1/availability/settings",
+        "patch /v1/availability/settings",
+        "get /v1/availability",
+        "get /v1/offerings/{id}/slots",
       ].sort(),
     );
   });
