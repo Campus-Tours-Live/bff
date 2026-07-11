@@ -1,4 +1,9 @@
-import { reshapeBooking } from "@/api/_shared/reshape.js";
+import {
+  reshapeBooking,
+  reshapeOccurrence,
+  reshapeSlot,
+  reshapeAffectedBooking,
+} from "@/api/_shared/reshape.js";
 
 const core = {
   id: "b1",
@@ -54,5 +59,101 @@ describe("reshapeBooking", () => {
     });
     expect(out.scheduledStartAt).toBe("2026-08-01T15:00:00Z"); // 11:00-04:00 == 15:00Z
     expect(out.scheduledEndAt).toBe("2026-08-01T16:00:00Z");
+  });
+});
+
+describe("reshapeOccurrence", () => {
+  it("passes through an already-Z instant unchanged for startAt/endAt", () => {
+    expect(
+      reshapeOccurrence({
+        startAt: "2026-07-11T16:00:00Z",
+        endAt: "2026-07-11T17:00:00Z",
+      }),
+    ).toEqual({
+      startAt: "2026-07-11T16:00:00Z",
+      endAt: "2026-07-11T17:00:00Z",
+    });
+  });
+
+  it("normalizes a non-Z UTC offset instant to canonical Z (same instant) for start and end", () => {
+    expect(
+      reshapeOccurrence({
+        startAt: "2026-07-11T12:00:00-04:00",
+        endAt: "2026-07-11T13:00:00-04:00",
+      }),
+    ).toEqual({
+      startAt: "2026-07-11T16:00:00Z",
+      endAt: "2026-07-11T17:00:00Z",
+    });
+  });
+
+  it("strips millis on both times", () => {
+    expect(
+      reshapeOccurrence({
+        startAt: "2026-07-11T16:00:00.123Z",
+        endAt: "2026-07-11T17:00:00.500Z",
+      }),
+    ).toEqual({
+      startAt: "2026-07-11T16:00:00Z",
+      endAt: "2026-07-11T17:00:00Z",
+    });
+  });
+});
+
+describe("reshapeSlot", () => {
+  it("is the same reshaper as reshapeOccurrence (occurrences and slots share the {startAt,endAt} shape)", () => {
+    expect(reshapeSlot).toBe(reshapeOccurrence);
+  });
+
+  it("normalizes a non-Z UTC offset instant to canonical Z for a slot", () => {
+    expect(
+      reshapeSlot({
+        startAt: "2026-07-11T12:00:00-04:00",
+        endAt: "2026-07-11T13:00:00-04:00",
+      }),
+    ).toEqual({
+      startAt: "2026-07-11T16:00:00Z",
+      endAt: "2026-07-11T17:00:00Z",
+    });
+  });
+});
+
+describe("reshapeAffectedBooking", () => {
+  const affected = {
+    bookingId: "b1",
+    bookingNumber: "CTL-0001",
+    status: "CONFIRMED",
+    scheduledStartAt: "2026-07-11T16:00:00Z",
+    scheduledEndAt: "2026-07-11T17:00:00Z",
+  };
+
+  it("normalizes both scheduled instants to Z and passes through bookingId/bookingNumber/status unchanged", () => {
+    expect(reshapeAffectedBooking(affected)).toEqual({
+      bookingId: "b1",
+      bookingNumber: "CTL-0001",
+      status: "CONFIRMED",
+      scheduledStartAt: "2026-07-11T16:00:00Z",
+      scheduledEndAt: "2026-07-11T17:00:00Z",
+    });
+  });
+
+  it("normalizes a non-Z UTC offset instant to canonical Z (same instant) for both scheduled times", () => {
+    const out = reshapeAffectedBooking({
+      ...affected,
+      scheduledStartAt: "2026-07-11T12:00:00-04:00",
+      scheduledEndAt: "2026-07-11T13:00:00-04:00",
+    });
+    expect(out.scheduledStartAt).toBe("2026-07-11T16:00:00Z");
+    expect(out.scheduledEndAt).toBe("2026-07-11T17:00:00Z");
+  });
+
+  it("strips millis on both scheduled times", () => {
+    const out = reshapeAffectedBooking({
+      ...affected,
+      scheduledStartAt: "2026-07-11T16:00:00.999Z",
+      scheduledEndAt: "2026-07-11T17:00:00.001Z",
+    });
+    expect(out.scheduledStartAt).toBe("2026-07-11T16:00:00Z");
+    expect(out.scheduledEndAt).toBe("2026-07-11T17:00:00Z");
   });
 });

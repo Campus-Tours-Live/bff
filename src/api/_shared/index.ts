@@ -8,6 +8,20 @@ export { sendData, coreUnavailable } from "./envelope.js";
 export { withSession } from "./with-session.js";
 export { withMutation } from "./with-mutation.js";
 export type { Me, Json } from "./types.js";
-export { reshapeBooking } from "./reshape.js";
-export type { CoreBookingDetail, BookingResponse } from "./reshape.js";
+export {
+  reshapeBooking,
+  reshapeOccurrence,
+  reshapeSlot,
+  reshapeAffectedBooking,
+} from "./reshape.js";
+export type {
+  CoreBookingDetail,
+  BookingResponse,
+  CoreOccurrence,
+  OccurrenceResponse,
+  CoreSlot,
+  SlotResponse,
+  CoreAffectedBooking,
+  AffectedBookingResponse,
+} from "./reshape.js";
 export { writeOpts } from "./write-opts.js";
