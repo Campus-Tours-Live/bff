@@ -96,15 +96,12 @@ describe("bff availability module", () => {
 
     it("POST /v1/availability/rules passes data through and reshapes affectedBookings", async () => {
       mockCoreByPath({ "/availability/rules": coreWrite(rule, [affectedBooking]) });
-      const res = await request(app)
-        .post("/v1/availability/rules")
-        .set("Cookie", cookie)
-        .send({
-          dayOfWeek: 1,
-          startLocal: "09:00",
-          windowMin: 120,
-          timezone: "America/Los_Angeles",
-        });
+      const res = await request(app).post("/v1/availability/rules").set("Cookie", cookie).send({
+        dayOfWeek: 1,
+        startLocal: "09:00",
+        windowMin: 120,
+        timezone: "America/Los_Angeles",
+      });
       expect(res.status).toBe(200);
       expect(res.body.data).toEqual(rule);
       expect(res.body.affectedBookings).toEqual([
@@ -252,5 +249,77 @@ describe("bff availability module", () => {
     const res = await request(app).get("/v1/availability/rules");
     expect(res.status).toBe(401);
     expect(res.headers["auth-required"]).toBe("reauthenticate");
+  });
+
+  describe("resolved read (GET /v1/availability)", () => {
+    const occurrence = { startAt: "2026-08-01T15:00:00.000Z", endAt: "2026-08-01T16:00:00.000Z" };
+    const resolved = {
+      rules: [rule],
+      occurrences: [occurrence],
+      dstGapDays: ["2026-03-08"],
+    };
+
+    it("reshapes occurrences to UTC Z and passes rules/dstGapDays through unchanged", async () => {
+      mockCoreByPath({ "/availability": coreRead(resolved) });
+      const res = await request(app).get("/v1/availability").set("Cookie", cookie);
+      expect(res.status).toBe(200);
+      expect(res.body.data.rules).toEqual([rule]);
+      expect(res.body.data.dstGapDays).toEqual(["2026-03-08"]);
+      expect(res.body.data.occurrences).toEqual([
+        { startAt: "2026-08-01T15:00:00Z", endAt: "2026-08-01T16:00:00Z" },
+      ]);
+      expect(res.body.meta).toBeDefined();
+    });
+
+    it("forwards from/to query params to Core verbatim", async () => {
+      const mock = mockCoreByPath({ "/availability": coreRead(resolved) });
+      const res = await request(app)
+        .get("/v1/availability")
+        .query({ from: "2026-08-01", to: "2026-08-31" })
+        .set("Cookie", cookie);
+      expect(res.status).toBe(200);
+      const [url] = mock.mock.calls[0] as [string, RequestInit];
+      const parsed = new URL(url);
+      expect(parsed.pathname).toBe("/availability");
+      expect(parsed.searchParams.get("from")).toBe("2026-08-01");
+      expect(parsed.searchParams.get("to")).toBe("2026-08-31");
+    });
+
+    it("calls Core without a query string when from/to are absent", async () => {
+      const mock = mockCoreByPath({ "/availability": coreRead(resolved) });
+      const res = await request(app).get("/v1/availability").set("Cookie", cookie);
+      expect(res.status).toBe(200);
+      const [url] = mock.mock.calls[0] as [string, RequestInit];
+      expect(url).toBe(new URL(url).origin + "/availability");
+      expect(new URL(url).search).toBe("");
+    });
+
+    it("returns empty arrays when Core has no rules/occurrences/gap-days", async () => {
+      mockCoreByPath({
+        "/availability": coreRead({ rules: [], occurrences: [], dstGapDays: [] }),
+      });
+      const res = await request(app).get("/v1/availability").set("Cookie", cookie);
+      expect(res.status).toBe(200);
+      expect(res.body.data).toEqual({ rules: [], occurrences: [], dstGapDays: [] });
+    });
+
+    it("no cookie → 401 + Auth-Required", async () => {
+      const res = await request(app).get("/v1/availability");
+      expect(res.status).toBe(401);
+      expect(res.headers["auth-required"]).toBe("reauthenticate");
+    });
+
+    it("does not shadow the /v1/availability/rules sub-route", async () => {
+      mockCoreByPath({
+        "/availability": coreRead(resolved),
+        "/availability/rules": coreRead([rule]),
+      });
+      const bare = await request(app).get("/v1/availability").set("Cookie", cookie);
+      const sub = await request(app).get("/v1/availability/rules").set("Cookie", cookie);
+      expect(bare.status).toBe(200);
+      expect(sub.status).toBe(200);
+      expect(bare.body.data.rules).toEqual([rule]);
+      expect(sub.body.data).toEqual([rule]);
+    });
   });
 });

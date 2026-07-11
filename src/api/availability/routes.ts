@@ -12,6 +12,7 @@ import {
   deleteException,
   getSettings,
   updateSettings,
+  getAvailability,
 } from "./handlers.js";
 
 /**
@@ -22,6 +23,13 @@ import {
  * `withMutation` so a bad Core write (e.g. 422 "overlapping rule") relays verbatim.
  */
 export const availabilityRoutes: Router = Router();
+
+// The resolved-availability read (Task 3 — the CTL-55 contract): rules + coalesced
+// occurrences + DST gap-days. This is the bare collection path, distinct from the
+// `/availability/rules|exceptions|settings` sub-resources below — Express matches each
+// route by its exact literal path, so the bare `/availability` here is never shadowed by
+// (nor shadows) the more specific sub-paths, regardless of registration order.
+availabilityRoutes.get("/availability", withSession(getAvailability));
 
 availabilityRoutes.get("/availability/rules", withSession(getRules));
 availabilityRoutes.post("/availability/rules", csrfGuard, withMutation(createRule));

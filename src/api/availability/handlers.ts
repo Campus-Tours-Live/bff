@@ -4,9 +4,12 @@ import {
   writeOpts,
   toZ,
   reshapeAffectedBooking,
+  reshapeOccurrence,
   type CoreClient,
   type CoreAffectedBooking,
   type AffectedBookingResponse,
+  type CoreOccurrence,
+  type OccurrenceResponse,
   type Json,
 } from "../_shared/index.js";
 
@@ -170,4 +173,61 @@ export async function updateSettings(req: Request, res: Response, core: CoreClie
     writeOpts(req, res),
   );
   sendWrite(res, reshapeSettings(data), affectedBookings);
+}
+
+// ---- Resolved read (Task 3 — the CTL-55 frontend contract) ----------------------------------
+
+/**
+ * Core's resolved-availability read (`GET /availability`, CTL-54 Task 5b): the guide's active
+ * rules, the coalesced/disjoint/ascending occurrences they resolve to over the requested
+ * window, and any DST "gap days" (a local calendar day that a spring-forward transition
+ * eliminates, so it has zero wall-clock occurrences even though a rule would otherwise apply).
+ */
+export interface CoreResolvedAvailability {
+  rules: CoreAvailabilityRule[];
+  occurrences: CoreOccurrence[];
+  dstGapDays: string[];
+}
+
+/** Contract-A resolved-availability shape: `occurrences` normalized to canonical UTC `Z`
+ *  (CTL-49); `rules` (wall-clock) and `dstGapDays` (ISO dates, not instants) pass through
+ *  unchanged — mirrors the rationale on {@link CoreAvailabilityRule}. */
+export interface ResolvedAvailabilityResponse {
+  rules: CoreAvailabilityRule[];
+  occurrences: OccurrenceResponse[];
+  dstGapDays: string[];
+}
+
+function reshapeResolvedAvailability(c: CoreResolvedAvailability): ResolvedAvailabilityResponse {
+  return {
+    rules: c.rules,
+    occurrences: c.occurrences.map(reshapeOccurrence),
+    dstGapDays: c.dstGapDays,
+  };
+}
+
+/**
+ * Resolved-availability read (`GET /v1/availability`) — the CTL-55 frontend contract. Reshapes
+ * Core's rules + coalesced occurrences + DST gap-days: occurrences → canonical UTC `Z`
+ * (CTL-49); rules and gap-days pass through unchanged (see {@link reshapeResolvedAvailability}).
+ *
+ * `from`/`to` (optional ISO-date query params) are forwarded to Core VERBATIM — this handler
+ * does not widen or pad them. **Caveat (flagged in the CTL-54 review):** Core's `from`/`to`
+ * window is UTC-midnight-anchored, NOT guide-local, so a guide far from UTC can have edge
+ * occurrences fall just outside a naively-local-day request window. Widening the requested
+ * window to safely catch local-day edges is the frontend's (CTL-55) responsibility, not this
+ * bff's — it just proxies whatever `from`/`to` it's given.
+ */
+export async function getAvailability(
+  req: Request,
+  res: Response,
+  core: CoreClient,
+): Promise<void> {
+  const params = new URLSearchParams();
+  const { from, to } = req.query;
+  if (typeof from === "string") params.set("from", from);
+  if (typeof to === "string") params.set("to", to);
+  const qs = params.toString();
+  const raw = await core.get<CoreResolvedAvailability>(`/availability${qs ? `?${qs}` : ""}`);
+  sendData(res, reshapeResolvedAvailability(raw));
 }
