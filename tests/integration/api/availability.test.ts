@@ -322,4 +322,67 @@ describe("bff availability module", () => {
       expect(sub.body.data).toEqual([rule]);
     });
   });
+
+  describe("participant slots read (GET /v1/offerings/:id/slots)", () => {
+    const slot = { startAt: "2026-08-01T15:00:00.000Z", endAt: "2026-08-01T15:30:00.000Z" };
+
+    it("reshapes each slot's startAt/endAt to canonical UTC Z", async () => {
+      mockCoreByPath({ "/offerings/off1/slots": coreRead([slot]) });
+      const res = await request(app).get("/v1/offerings/off1/slots").set("Cookie", cookie);
+      expect(res.status).toBe(200);
+      expect(res.body.data).toEqual([
+        { startAt: "2026-08-01T15:00:00Z", endAt: "2026-08-01T15:30:00Z" },
+      ]);
+      expect(res.body.meta).toBeDefined();
+    });
+
+    it("forwards the :id path param and from/to query params to the correct Core path", async () => {
+      const mock = mockCoreByPath({ "/offerings/off1/slots": coreRead([slot]) });
+      const res = await request(app)
+        .get("/v1/offerings/off1/slots")
+        .query({ from: "2026-08-01", to: "2026-08-31" })
+        .set("Cookie", cookie);
+      expect(res.status).toBe(200);
+      const [url] = mock.mock.calls[0] as [string, RequestInit];
+      const parsed = new URL(url);
+      expect(parsed.pathname).toBe("/offerings/off1/slots");
+      expect(parsed.searchParams.get("from")).toBe("2026-08-01");
+      expect(parsed.searchParams.get("to")).toBe("2026-08-31");
+    });
+
+    it("calls Core without a query string when from/to are absent", async () => {
+      const mock = mockCoreByPath({ "/offerings/off1/slots": coreRead([slot]) });
+      const res = await request(app).get("/v1/offerings/off1/slots").set("Cookie", cookie);
+      expect(res.status).toBe(200);
+      const [url] = mock.mock.calls[0] as [string, RequestInit];
+      expect(new URL(url).search).toBe("");
+    });
+
+    it("returns an empty array when Core has no bookable slots", async () => {
+      mockCoreByPath({ "/offerings/off1/slots": coreRead([]) });
+      const res = await request(app).get("/v1/offerings/off1/slots").set("Cookie", cookie);
+      expect(res.status).toBe(200);
+      expect(res.body.data).toEqual([]);
+    });
+
+    it("no cookie → 401 + Auth-Required", async () => {
+      const res = await request(app).get("/v1/offerings/off1/slots");
+      expect(res.status).toBe(401);
+      expect(res.headers["auth-required"]).toBe("reauthenticate");
+    });
+
+    it("Core 404 (offering not found/inactive) → surfaces the real 404", async () => {
+      mockCoreByPath({ "/offerings/off1/slots": coreErr(404) });
+      const res = await request(app).get("/v1/offerings/off1/slots").set("Cookie", cookie);
+      expect(res.status).toBe(404);
+      expect(res.body).toMatchObject({ code: "UPSTREAM_ERROR" });
+    });
+
+    it("Core 403 (non-participant) → surfaces the real 403", async () => {
+      mockCoreByPath({ "/offerings/off1/slots": coreErr(403) });
+      const res = await request(app).get("/v1/offerings/off1/slots").set("Cookie", cookie);
+      expect(res.status).toBe(403);
+      expect(res.body).toMatchObject({ code: "UPSTREAM_ERROR" });
+    });
+  });
 });

@@ -14,6 +14,7 @@ import {
   updateSettings,
   getAvailability,
 } from "./handlers.js";
+import { getSlots } from "./participant.js";
 
 /**
  * Generic guide-availability CRUD (rules / exceptions / settings) — a thin Contract-A
@@ -43,3 +44,9 @@ availabilityRoutes.delete("/availability/exceptions/:id", csrfGuard, withMutatio
 
 availabilityRoutes.get("/availability/settings", withSession(getSettings));
 availabilityRoutes.patch("/availability/settings", csrfGuard, withMutation(updateSettings));
+
+// Participant slots (Task 4): a DIFFERENT resource path (`/offerings/:id/slots`), outside
+// the `/availability` sub-tree above. Registered here (in `apiRouter`, before the generic
+// `coreProxy`) so this specific path is reshaped; every other `/v1/offerings/*` request
+// still falls through to the catch-all passthrough. Role PARTICIPANT is enforced by Core.
+availabilityRoutes.get("/offerings/:id/slots", withSession(getSlots));
