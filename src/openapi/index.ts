@@ -46,6 +46,8 @@ import {
   AvailabilitySettingsResponseSchema,
   AvailabilityOccurrenceSchema,
   ResolvedAvailabilityResponseSchema,
+  ExceptionKindEnum,
+  OverridePreviewResponseSchema,
 } from "./schemas.js";
 import {
   apiRoute,
@@ -685,6 +687,70 @@ apiRoute({
     }),
     403: upstreamErrorProblem(403, "Non-participant caller"),
     404: upstreamErrorProblem(404, "Offering not found or inactive"),
+  },
+});
+
+const overridePreviewExample = {
+  days: [
+    {
+      date: "2026-07-18",
+      resultingWindows: [{ startAt: "2026-07-18T16:00:00Z", endAt: "2026-07-18T16:30:00Z" }],
+      trimmed: [{ kind: "ADDITIONAL", startLocal: "09:00", windowMin: 30 }],
+    },
+  ],
+  valid: true,
+  message: null,
+};
+
+// GET /v1/availability/preview
+apiRoute({
+  method: "get",
+  path: "/v1/availability/preview",
+  tags: ["Availability"],
+  summary: "Preview a proposed date-specific availability override (dry-run)",
+  description:
+    "Read-only, non-persisting dry-run of a proposed date-specific override (`kind`/" +
+    "`startLocal`/`windowMin`) across `[dateFrom, dateTo]` (CTL-54 v2.1) — does not create " +
+    "anything. Each day's `resultingWindows` is reshaped to canonical UTC `Z` (CTL-49); " +
+    "`trimmed`/`valid`/`message` pass through unchanged. Unlike the resolved-availability read " +
+    "above, `dateFrom`/`dateTo` are forwarded to Core verbatim, NOT widened — they are the " +
+    "EXACT range the caller is proposing to create, so widening them would silently change " +
+    "what's being previewed. Guide-only; role is enforced by Core.\n\n" +
+    "**4xx caveat:** this is the generic read-path relay (`withSession`), so a Core 4xx (e.g. " +
+    "a range over 366 dates) surfaces with its real status but a generic `UPSTREAM_ERROR` body, " +
+    "not Core's message.",
+  request: {
+    query: z.object({
+      dateFrom: z.string().openapi({
+        description: "ISO-8601 first date (inclusive) of the proposed override.",
+        example: "2026-07-18",
+      }),
+      dateTo: z.string().openapi({
+        description: "ISO-8601 last date (inclusive) of the proposed override.",
+        example: "2026-07-18",
+      }),
+      kind: ExceptionKindEnum.openapi({
+        description:
+          "UNAVAILABLE blocks the window (or whole day); ADDITIONAL proposes an extra window.",
+        example: "ADDITIONAL",
+      }),
+      startLocal: z.string().openapi({
+        description: "Wall-clock start time of day, 24h `HH:mm`, in the guide's account timezone.",
+        example: "09:00",
+      }),
+      windowMin: z.string().openapi({
+        description: "Window length in minutes (> 0), as a query-string integer.",
+        example: "60",
+      }),
+    }),
+  },
+  responses: {
+    200: enveloped(OverridePreviewResponseSchema, {
+      description: "Per-date dry-run result of the proposed override.",
+      example: envelope(overridePreviewExample),
+    }),
+    403: upstreamErrorProblem(403, "Non-guide caller"),
+    422: upstreamErrorProblem(422, "Invalid preview params/range (e.g. a range over 366 dates)"),
   },
 });
 

@@ -18,6 +18,7 @@ import {
   AvailabilityExceptionResponseSchema,
   AvailabilitySettingsResponseSchema,
   ResolvedAvailabilityResponseSchema,
+  OverridePreviewResponseSchema,
 } from "../../openapi/schemas.js";
 
 /**
@@ -347,5 +348,5 @@ export async function getOverridePreview(
   }
   const qs = params.toString();
   const raw = await core.get<CoreOverridePreview>(`/availability/preview${qs ? `?${qs}` : ""}`);
-  sendData(res, reshapeOverridePreview(raw));
+  sendData(res, reshapeOverridePreview(raw), OverridePreviewResponseSchema);
 }

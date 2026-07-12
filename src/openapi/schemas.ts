@@ -883,6 +883,74 @@ export const ResolvedAvailabilityResponseSchema = registry.register(
     }),
 );
 
+/** One field of the proposed override that a day's dry-run preview trimmed against an
+ *  existing conflict (Core `OverridePreviewResponse.days[].trimmed`, CTL-54 v2.1). Wall-clock
+ *  fields — no absolute instant, so CTL-49 does not touch this shape (same rationale as
+ *  {@link AvailabilityExceptionResponseSchema}). */
+const OverridePreviewTrimmedItemSchema = z.object({
+  kind: ExceptionKindEnum.openapi({
+    description: "Which side of the proposed override this trimmed entry names.",
+    example: "ADDITIONAL",
+  }),
+  startLocal: z.string().openapi({
+    description: "Wall-clock start time `HH:mm` of the (possibly trimmed) window.",
+    example: "09:00",
+  }),
+  windowMin: z.number().int().positive().openapi({
+    description: "Window length in minutes (> 0) after trimming against the conflict.",
+    example: 30,
+  }),
+});
+
+/** A single date's dry-run result within the override preview (Core
+ *  `OverridePreviewResponse.days[]`, CTL-54 v2.1): the occurrences that date resolves to
+ *  after applying the proposed override, and which requested fields got trimmed. */
+const OverridePreviewDaySchema = z.object({
+  date: z.string().openapi({
+    description: "ISO-8601 date this day's dry-run result applies to.",
+    example: "2026-07-18",
+  }),
+  resultingWindows: z.array(AvailabilityOccurrenceSchema).openapi({
+    description:
+      "Bookable windows this date resolves to after applying the proposed override, " +
+      "canonical UTC `Z` (CTL-49).",
+  }),
+  trimmed: z.array(OverridePreviewTrimmedItemSchema).openapi({
+    description:
+      "Requested override fields (by `kind`) that were trimmed against an existing " +
+      "conflict; empty when nothing was trimmed.",
+  }),
+});
+
+/** `GET /v1/availability/preview` — a read-only, non-persisting dry-run of a proposed
+ *  date-specific override across `[dateFrom, dateTo]` (Core `OverridePreviewResponse`,
+ *  CTL-54 v2.1). */
+export const OverridePreviewResponseSchema = registry.register(
+  "OverridePreviewResponse",
+  z
+    .object({
+      days: z.array(OverridePreviewDaySchema).openapi({
+        description: "Per-date dry-run results across the requested `[dateFrom, dateTo]` range.",
+      }),
+      valid: z.boolean().openapi({
+        description:
+          "Whether the proposed override is valid. This preview is valid=true-always on " +
+          "content (trimming, not rejection, resolves conflicts) — it only reports invalid on " +
+          "a bad param/range.",
+        example: true,
+      }),
+      message: z.string().nullable().openapi({
+        description: "Human-readable detail; null when `valid` is true.",
+        example: null,
+      }),
+    })
+    .openapi("OverridePreviewResponse", {
+      description:
+        "Read-only, non-persisting dry-run preview of a proposed date-specific availability " +
+        "override.",
+    }),
+);
+
 /** A booking whose schedule shifted or was cancelled as a side effect of an availability
  *  write (Core `AvailabilityWriteResponse.affectedBookings`, CTL-54). */
 export const AffectedBookingSchema = registry.register(
