@@ -350,6 +350,20 @@ describe("bff availability module", () => {
       expect(parsed.searchParams.get("to")).toBe("also-bad");
     });
 
+    it("forwards a shape-valid but value-invalid date (e.g. month 13) verbatim, unwidened", async () => {
+      // `2026-13-01` passes the yyyy-MM-dd shape regex but is not a real date, so Date.parse
+      // returns NaN and widening is skipped — the original string is forwarded to Core verbatim
+      // (Core validates it and rejects with a 4xx, which we relay).
+      const mock = mockCoreByPath({ "/availability": problem(422, "Invalid from") });
+      const res = await request(app)
+        .get("/v1/availability")
+        .query({ from: "2026-13-01" })
+        .set("Cookie", cookie);
+      expect(res.status).toBe(422);
+      const [url] = mock.mock.calls[0] as [string, RequestInit];
+      expect(new URL(url).searchParams.get("from")).toBe("2026-13-01");
+    });
+
     it("calls Core without a query string when from/to are absent", async () => {
       const mock = mockCoreByPath({ "/availability": coreRead(resolved) });
       const res = await request(app).get("/v1/availability").set("Cookie", cookie);

@@ -225,10 +225,11 @@ const ONE_DAY_MS = 24 * 60 * 60 * 1000;
 function widenIsoDate(input: string, deltaDays: number): string | undefined {
   if (!ISO_DATE_RE.test(input)) return undefined;
   const ms = Date.parse(`${input}T00:00:00Z`);
-  // Defensive only: the regex above already guarantees a `\d{4}-\d{2}-\d{2}` shape, and
-  // `Date.parse` never returns NaN for that shape (out-of-range components just roll over,
-  // e.g. month 13 -> next year), so this is unreachable in practice.
-  /* istanbul ignore next */
+  // The regex only guarantees the `\d{4}-\d{2}-\d{2}` SHAPE, not that the numbers are a real
+  // date: a shape-valid but value-invalid string (e.g. month > 12 like `2026-13-01`, or
+  // `2026-08-32`) makes `Date.parse` return NaN. Any client can send such a value, so this
+  // branch IS reachable — return `undefined` so the caller forwards the original string to Core
+  // verbatim (Core validates and 4xxs it), matching how a shape-invalid string is handled.
   if (Number.isNaN(ms)) return undefined;
   return new Date(ms + deltaDays * ONE_DAY_MS).toISOString().slice(0, 10);
 }
