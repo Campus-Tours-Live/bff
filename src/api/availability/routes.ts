@@ -13,6 +13,7 @@ import {
   getSettings,
   updateSettings,
   getAvailability,
+  getOverridePreview,
 } from "./handlers.js";
 import { getSlots } from "./participant.js";
 
@@ -31,6 +32,12 @@ export const availabilityRoutes: Router = Router();
 // route by its exact literal path, so the bare `/availability` here is never shadowed by
 // (nor shadows) the more specific sub-paths, regardless of registration order.
 availabilityRoutes.get("/availability", withSession(getAvailability));
+
+// The date-specific override dry-run preview (CTL-56 v2.1 Task 1): a read-only, non-persisting
+// preview of a proposed override, reshaped the same way as the resolved read above. Another
+// distinct literal path — `/availability/preview` is never shadowed by nor shadows the bare
+// `/availability` above or the `/availability/rules|exceptions|settings` sub-paths below.
+availabilityRoutes.get("/availability/preview", withSession(getOverridePreview));
 
 availabilityRoutes.get("/availability/rules", withSession(getRules));
 availabilityRoutes.post("/availability/rules", csrfGuard, withMutation(createRule));

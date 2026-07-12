@@ -267,3 +267,85 @@ export async function getAvailability(
   const raw = await core.get<CoreResolvedAvailability>(`/availability${qs ? `?${qs}` : ""}`);
   sendData(res, reshapeResolvedAvailability(raw), ResolvedAvailabilityResponseSchema);
 }
+
+// ---- Override dry-run preview (CTL-56 v2.1 Task 1) -------------------------------------------
+
+/** A single day's dry-run result within the Core `GET /availability/preview` response
+ *  (CTL-54 v2.1): the resolved occurrences after applying the proposed override, and which
+ *  of the caller's requested override params got trimmed against an existing conflict. */
+export interface CorePreviewDay {
+  date: string;
+  resultingWindows: CoreOccurrence[];
+  trimmed: { kind: string; startLocal: string; windowMin: number }[];
+}
+
+/** The Core `OverridePreviewResponse` shape (Contract B, CTL-54 v2.1): a read-only, non-
+ *  persisting dry-run of a proposed date-specific override across `[dateFrom, dateTo]`. */
+export interface CoreOverridePreview {
+  days: CorePreviewDay[];
+  valid: boolean;
+  message: string | null;
+}
+
+/** Contract-A per-day preview shape: `resultingWindows` normalized to canonical UTC `Z`
+ *  (CTL-49); `date`/`trimmed` are wall-clock/local fields and pass through unchanged. */
+export interface OverridePreviewDayResponse {
+  date: string;
+  resultingWindows: OccurrenceResponse[];
+  trimmed: { kind: string; startLocal: string; windowMin: number }[];
+}
+
+/** Contract-A override-preview response: same shape as Core's, with every day's
+ *  `resultingWindows` reshaped to UTC `Z`; `valid`/`message` pass through unchanged. */
+export interface OverridePreviewResponse {
+  days: OverridePreviewDayResponse[];
+  valid: boolean;
+  message: string | null;
+}
+
+/** Reshape Core's dry-run preview into Contract A: map each day's `resultingWindows` through
+ *  {@link reshapeOccurrence}; `date`/`trimmed`/`valid`/`message` pass through unchanged. */
+function reshapeOverridePreview(c: CoreOverridePreview): OverridePreviewResponse {
+  return {
+    days: c.days.map((d) => ({
+      date: d.date,
+      resultingWindows: d.resultingWindows.map(reshapeOccurrence),
+      trimmed: d.trimmed,
+    })),
+    valid: c.valid,
+    message: c.message,
+  };
+}
+
+/** The five query params the override dry-run preview accepts, forwarded to Core verbatim
+ *  (string-guarded) in the same order they're documented — see {@link getOverridePreview}. */
+const PREVIEW_QUERY_PARAMS = ["dateFrom", "dateTo", "kind", "startLocal", "windowMin"] as const;
+
+/**
+ * Override dry-run preview (`GET /v1/availability/preview`) — CTL-54 v2.1's read-only,
+ * non-persisting preview of a proposed date-specific override (`dateFrom`/`dateTo`/`kind`/
+ * `startLocal`/`windowMin`). Reshapes each day's `resultingWindows` to canonical UTC `Z`
+ * (CTL-49); `trimmed`/`valid`/`message` pass through unchanged (see
+ * {@link reshapeOverridePreview}).
+ *
+ * **No window widening (unlike {@link getAvailability}):** `dateFrom`/`dateTo` here are the
+ * EXACT override the caller is proposing to create, not a display window being resolved —
+ * widening them would silently change what's being previewed. So this handler forwards all
+ * five params verbatim; a malformed/out-of-range value (e.g. a >366-day span) reaches Core
+ * unchanged and Core's 4xx is relayed with its real status via `withSession` (read-path
+ * relay) — see the caveat in the CTL-56 v2.1 plan about the generic `UPSTREAM_ERROR` body.
+ */
+export async function getOverridePreview(
+  req: Request,
+  res: Response,
+  core: CoreClient,
+): Promise<void> {
+  const params = new URLSearchParams();
+  for (const key of PREVIEW_QUERY_PARAMS) {
+    const value = req.query[key];
+    if (typeof value === "string") params.set(key, value);
+  }
+  const qs = params.toString();
+  const raw = await core.get<CoreOverridePreview>(`/availability/preview${qs ? `?${qs}` : ""}`);
+  sendData(res, reshapeOverridePreview(raw));
+}

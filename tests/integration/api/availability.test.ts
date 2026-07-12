@@ -161,6 +161,26 @@ describe("bff availability module", () => {
       expect(res.body.affectedBookings[0].bookingId).toBe("b1");
     });
 
+    it("POST /v1/availability/exceptions forwards a multi-day date-range body unchanged (CTL-56 v2.1 no-op confirmation)", async () => {
+      const mock = mockCoreByPath({
+        "/availability/exceptions": coreWrite({ ...exception, exceptionDate: "2026-08-01" }, []),
+      });
+      const multiDayBody = {
+        dateFrom: "2026-08-01",
+        dateTo: "2026-08-03",
+        kind: "UNAVAILABLE",
+        startLocal: "09:30",
+        windowMin: 90,
+      };
+      const res = await request(app)
+        .post("/v1/availability/exceptions")
+        .set("Cookie", cookie)
+        .send(multiDayBody);
+      expect(res.status).toBe(200);
+      const [, init] = mock.mock.calls[0] as [string, RequestInit];
+      expect(JSON.parse(init.body as string)).toEqual(multiDayBody);
+    });
+
     it("PATCH /v1/availability/exceptions/:id forwards to Core with the id", async () => {
       const mock = mockCoreByPath({
         "/availability/exceptions/e1": coreWrite({ ...exception, reason: "Storm" }, []),
@@ -399,6 +419,115 @@ describe("bff availability module", () => {
       expect(sub.status).toBe(200);
       expect(bare.body.data.rules).toEqual([rule]);
       expect(sub.body.data).toEqual([rule]);
+    });
+  });
+
+  describe("override dry-run preview (GET /v1/availability/preview)", () => {
+    const previewQuery = {
+      dateFrom: "2026-07-18",
+      dateTo: "2026-07-18",
+      kind: "UNAVAILABLE",
+      startLocal: "09:30",
+      windowMin: "90",
+    };
+
+    it("forwards dateFrom/dateTo/kind/startLocal/windowMin to Core verbatim and reshapes resultingWindows to UTC Z", async () => {
+      const day = {
+        date: "2026-07-18",
+        resultingWindows: [
+          { startAt: "2026-07-18T16:30:00.000Z", endAt: "2026-07-18T18:00:00.000Z" },
+        ],
+        trimmed: [{ kind: "UNAVAILABLE", startLocal: "09:30", windowMin: 90 }],
+      };
+      const mock = mockCoreByPath({
+        "/availability/preview": coreRead({ days: [day], valid: true, message: null }),
+      });
+      const res = await request(app)
+        .get("/v1/availability/preview")
+        .query(previewQuery)
+        .set("Cookie", cookie);
+      expect(res.status).toBe(200);
+      const [url] = mock.mock.calls[0] as [string, RequestInit];
+      const parsed = new URL(url);
+      expect(parsed.pathname).toBe("/availability/preview");
+      expect(parsed.searchParams.get("dateFrom")).toBe("2026-07-18");
+      expect(parsed.searchParams.get("dateTo")).toBe("2026-07-18");
+      expect(parsed.searchParams.get("kind")).toBe("UNAVAILABLE");
+      expect(parsed.searchParams.get("startLocal")).toBe("09:30");
+      expect(parsed.searchParams.get("windowMin")).toBe("90");
+      expect(res.body.data.valid).toBe(true);
+      expect(res.body.data.message).toBeNull();
+      expect(res.body.data.days).toEqual([
+        {
+          date: "2026-07-18",
+          resultingWindows: [{ startAt: "2026-07-18T16:30:00Z", endAt: "2026-07-18T18:00:00Z" }],
+          trimmed: [{ kind: "UNAVAILABLE", startLocal: "09:30", windowMin: 90 }],
+        },
+      ]);
+    });
+
+    it("multi-day: reshapes resultingWindows on every day entry", async () => {
+      const days = [
+        {
+          date: "2026-07-18",
+          resultingWindows: [
+            { startAt: "2026-07-18T16:30:00.000Z", endAt: "2026-07-18T18:00:00.000Z" },
+          ],
+          trimmed: [],
+        },
+        {
+          date: "2026-07-19",
+          resultingWindows: [
+            { startAt: "2026-07-19T16:30:00+00:00", endAt: "2026-07-19T18:00:00+00:00" },
+          ],
+          trimmed: [{ kind: "UNAVAILABLE", startLocal: "09:30", windowMin: 90 }],
+        },
+      ];
+      mockCoreByPath({
+        "/availability/preview": coreRead({ days, valid: true, message: null }),
+      });
+      const res = await request(app)
+        .get("/v1/availability/preview")
+        .query({ ...previewQuery, dateTo: "2026-07-19" })
+        .set("Cookie", cookie);
+      expect(res.status).toBe(200);
+      expect(res.body.data.days).toHaveLength(2);
+      expect(res.body.data.days[0].resultingWindows).toEqual([
+        { startAt: "2026-07-18T16:30:00Z", endAt: "2026-07-18T18:00:00Z" },
+      ]);
+      expect(res.body.data.days[1].resultingWindows).toEqual([
+        { startAt: "2026-07-19T16:30:00Z", endAt: "2026-07-19T18:00:00Z" },
+      ]);
+      expect(res.body.data.days[1].trimmed).toEqual([
+        { kind: "UNAVAILABLE", startLocal: "09:30", windowMin: 90 },
+      ]);
+    });
+
+    it("no cookie → 401 + Auth-Required", async () => {
+      const res = await request(app).get("/v1/availability/preview").query(previewQuery);
+      expect(res.status).toBe(401);
+      expect(res.headers["auth-required"]).toBe("reauthenticate");
+    });
+
+    it("calls Core without a query string when no preview params are present", async () => {
+      const mock = mockCoreByPath({
+        "/availability/preview": coreRead({ days: [], valid: true, message: null }),
+      });
+      const res = await request(app).get("/v1/availability/preview").set("Cookie", cookie);
+      expect(res.status).toBe(200);
+      const [url] = mock.mock.calls[0] as [string, RequestInit];
+      expect(new URL(url).search).toBe("");
+      expect(res.body.data.days).toEqual([]);
+    });
+
+    it("Core 422 (e.g. cross-midnight/>366 override) → surfaces the real status, not a blanket 500", async () => {
+      mockCoreByPath({ "/availability/preview": coreErr(422) });
+      const res = await request(app)
+        .get("/v1/availability/preview")
+        .query(previewQuery)
+        .set("Cookie", cookie);
+      expect(res.status).toBe(422);
+      expect(res.body).toMatchObject({ code: "UPSTREAM_ERROR" });
     });
   });
 
