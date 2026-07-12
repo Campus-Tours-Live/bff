@@ -271,7 +271,7 @@ describe("bff availability module", () => {
       expect(res.body.meta).toBeDefined();
     });
 
-    it("forwards from/to query params to Core verbatim", async () => {
+    it("widens from/to query params sent to Core by 1 day on each present side", async () => {
       const mock = mockCoreByPath({ "/availability": coreRead(resolved) });
       const res = await request(app)
         .get("/v1/availability")
@@ -281,8 +281,73 @@ describe("bff availability module", () => {
       const [url] = mock.mock.calls[0] as [string, RequestInit];
       const parsed = new URL(url);
       expect(parsed.pathname).toBe("/availability");
-      expect(parsed.searchParams.get("from")).toBe("2026-08-01");
-      expect(parsed.searchParams.get("to")).toBe("2026-08-31");
+      // Widened by 1 calendar day on each side vs. what the caller requested (2026-08-01 /
+      // 2026-08-31), so Core's UTC-midnight-anchored window can't cut a guide-local edge day.
+      expect(parsed.searchParams.get("from")).toBe("2026-07-31");
+      expect(parsed.searchParams.get("to")).toBe("2026-09-01");
+    });
+
+    it("widens only `from` when `to` is absent, leaving `to` unset", async () => {
+      const mock = mockCoreByPath({ "/availability": coreRead(resolved) });
+      const res = await request(app)
+        .get("/v1/availability")
+        .query({ from: "2026-08-01" })
+        .set("Cookie", cookie);
+      expect(res.status).toBe(200);
+      const [url] = mock.mock.calls[0] as [string, RequestInit];
+      const parsed = new URL(url);
+      expect(parsed.searchParams.get("from")).toBe("2026-07-31");
+      expect(parsed.searchParams.has("to")).toBe(false);
+    });
+
+    it("widens only `to` when `from` is absent, leaving `from` unset", async () => {
+      const mock = mockCoreByPath({ "/availability": coreRead(resolved) });
+      const res = await request(app)
+        .get("/v1/availability")
+        .query({ to: "2026-08-31" })
+        .set("Cookie", cookie);
+      expect(res.status).toBe(200);
+      const [url] = mock.mock.calls[0] as [string, RequestInit];
+      const parsed = new URL(url);
+      expect(parsed.searchParams.get("to")).toBe("2026-09-01");
+      expect(parsed.searchParams.has("from")).toBe(false);
+    });
+
+    it("does not cut an edge occurrence just outside the UTC-midnight-anchored `from` boundary", async () => {
+      // A UTC+13 guide's local day 2026-07-15 begins at 2026-07-14T11:00Z. An occurrence at
+      // 2026-07-14T19:00Z is still within that guide-local 2026-07-15, but a naive
+      // from=2026-07-15 (Core's UTC-midnight anchor = 2026-07-15T00:00Z) would exclude it.
+      // Widening `from` to 2026-07-14 pulls Core's window back far enough to include it.
+      const edgeOccurrence = {
+        startAt: "2026-07-14T19:00:00.000Z",
+        endAt: "2026-07-14T20:00:00.000Z",
+      };
+      const mock = mockCoreByPath({
+        "/availability": coreRead({ rules: [rule], occurrences: [edgeOccurrence], dstGapDays: [] }),
+      });
+      const res = await request(app)
+        .get("/v1/availability")
+        .query({ from: "2026-07-15" })
+        .set("Cookie", cookie);
+      expect(res.status).toBe(200);
+      const [url] = mock.mock.calls[0] as [string, RequestInit];
+      expect(new URL(url).searchParams.get("from")).toBe("2026-07-14");
+      expect(res.body.data.occurrences).toEqual([
+        { startAt: "2026-07-14T19:00:00Z", endAt: "2026-07-14T20:00:00Z" },
+      ]);
+    });
+
+    it("does not crash on a malformed from/to and forwards it verbatim so Core can reject it", async () => {
+      const mock = mockCoreByPath({ "/availability": problem(422, "Invalid from") });
+      const res = await request(app)
+        .get("/v1/availability")
+        .query({ from: "not-a-date", to: "also-bad" })
+        .set("Cookie", cookie);
+      expect(res.status).toBe(422);
+      const [url] = mock.mock.calls[0] as [string, RequestInit];
+      const parsed = new URL(url);
+      expect(parsed.searchParams.get("from")).toBe("not-a-date");
+      expect(parsed.searchParams.get("to")).toBe("also-bad");
     });
 
     it("calls Core without a query string when from/to are absent", async () => {

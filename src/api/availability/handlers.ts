@@ -213,17 +213,45 @@ function reshapeResolvedAvailability(c: CoreResolvedAvailability): ResolvedAvail
   };
 }
 
+const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+const ONE_DAY_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * Widen an ISO `yyyy-MM-dd` date string by `deltaDays` UTC calendar days (e.g. `-1` for `from`,
+ * `+1` for `to`). Returns `undefined` if `input` isn't a well-formed ISO date — the caller then
+ * falls back to forwarding the original string verbatim, so a malformed value still reaches
+ * Core and gets rejected the same way it did before this fix (no crash, no silent swallow).
+ */
+function widenIsoDate(input: string, deltaDays: number): string | undefined {
+  if (!ISO_DATE_RE.test(input)) return undefined;
+  const ms = Date.parse(`${input}T00:00:00Z`);
+  // Defensive only: the regex above already guarantees a `\d{4}-\d{2}-\d{2}` shape, and
+  // `Date.parse` never returns NaN for that shape (out-of-range components just roll over,
+  // e.g. month 13 -> next year), so this is unreachable in practice.
+  /* istanbul ignore next */
+  if (Number.isNaN(ms)) return undefined;
+  return new Date(ms + deltaDays * ONE_DAY_MS).toISOString().slice(0, 10);
+}
+
 /**
  * Resolved-availability read (`GET /v1/availability`) — the CTL-55 frontend contract. Reshapes
  * Core's rules + coalesced occurrences + DST gap-days: occurrences → canonical UTC `Z`
  * (CTL-49); rules and gap-days pass through unchanged (see {@link reshapeResolvedAvailability}).
  *
- * `from`/`to` (optional ISO-date query params) are forwarded to Core VERBATIM — this handler
- * does not widen or pad them. **Caveat (flagged in the CTL-54 review):** Core's `from`/`to`
- * window is UTC-midnight-anchored, NOT guide-local, so a guide far from UTC can have edge
- * occurrences fall just outside a naively-local-day request window. Widening the requested
- * window to safely catch local-day edges is the frontend's (CTL-55) responsibility, not this
- * bff's — it just proxies whatever `from`/`to` it's given.
+ * **`from`/`to` window widening (edge-occurrence fix):** Core's `from`/`to` (optional ISO-date
+ * query params) filter occurrences against a **UTC-midnight-anchored** window
+ * (`from T00:00:00Z .. to T00:00:00Z`), NOT a guide-local one. For a guide far from UTC, an
+ * occurrence that belongs to the requested guide-local day can have a UTC instant that falls
+ * just outside that UTC-anchored window and gets silently dropped. To avoid that data loss,
+ * this handler widens whichever of `from`/`to` is present by **1 calendar day** on that side
+ * (`coreFrom = from - 1 day`, `coreTo = to + 1 day`) before forwarding to Core — 1 day
+ * comfortably exceeds the largest real IANA UTC offset (±14h), so Core returns every occurrence
+ * that could belong to the guide-local `[from, to)` window, plus a small margin. The returned
+ * set may therefore include a few occurrences just outside the exact requested window; that is
+ * acceptable and strictly better than silently losing edge occurrences. **Precise guide-local
+ * re-anchoring/re-filtering of the returned set to the exact requested window is a tracked
+ * follow-up**, not done here. A malformed `from`/`to` is forwarded unwidened (Core will reject
+ * it, matching this handler's pre-existing behavior) rather than crashing this handler.
  */
 export async function getAvailability(
   req: Request,
@@ -232,8 +260,8 @@ export async function getAvailability(
 ): Promise<void> {
   const params = new URLSearchParams();
   const { from, to } = req.query;
-  if (typeof from === "string") params.set("from", from);
-  if (typeof to === "string") params.set("to", to);
+  if (typeof from === "string") params.set("from", widenIsoDate(from, -1) ?? from);
+  if (typeof to === "string") params.set("to", widenIsoDate(to, 1) ?? to);
   const qs = params.toString();
   const raw = await core.get<CoreResolvedAvailability>(`/availability${qs ? `?${qs}` : ""}`);
   sendData(res, reshapeResolvedAvailability(raw), ResolvedAvailabilityResponseSchema);

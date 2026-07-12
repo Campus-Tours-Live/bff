@@ -619,20 +619,32 @@ apiRoute({
     "Resolves the guide's active rules against exceptions and existing bookings into " +
     "coalesced, disjoint, ascending occurrences over the requested window (`occurrences` " +
     "reshaped to canonical UTC `Z`, CTL-49) and reports any DST gap-days (a local calendar " +
-    "day a spring-forward transition eliminates). `from`/`to` are forwarded to Core " +
-    "VERBATIM — Core's window is UTC-midnight-anchored, not guide-local, so widening the " +
-    "window to safely catch local-day edges is the frontend's (CTL-55) responsibility. This " +
-    "is the CTL-55 frontend contract.",
+    "day a spring-forward transition eliminates). Core's `from`/`to` window is " +
+    "UTC-midnight-anchored, not guide-local, so this bff widens whichever of `from`/`to` is " +
+    "present by 1 calendar day on that side before forwarding to Core, to avoid silently " +
+    "cutting a guide-local edge occurrence at the UTC-midnight boundary — the response may " +
+    "therefore include a few occurrences just outside the exact requested window (precise " +
+    "guide-local re-anchoring is a tracked follow-up). This is the CTL-55 frontend contract.",
   request: {
     query: z.object({
-      from: z.string().optional().openapi({
-        description: "Inclusive window start (ISO date), forwarded to Core verbatim.",
-        example: "2026-08-01",
-      }),
-      to: z.string().optional().openapi({
-        description: "Inclusive window end (ISO date), forwarded to Core verbatim.",
-        example: "2026-08-31",
-      }),
+      from: z
+        .string()
+        .optional()
+        .openapi({
+          description:
+            "Inclusive window start (ISO date). Widened by 1 day earlier before hitting Core " +
+            "to avoid a UTC-midnight edge-cut; see the endpoint description.",
+          example: "2026-08-01",
+        }),
+      to: z
+        .string()
+        .optional()
+        .openapi({
+          description:
+            "Inclusive window end (ISO date). Widened by 1 day later before hitting Core to " +
+            "avoid a UTC-midnight edge-cut; see the endpoint description.",
+          example: "2026-08-31",
+        }),
     }),
   },
   responses: {
