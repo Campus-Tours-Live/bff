@@ -43,14 +43,17 @@ export interface CoreAvailabilityRule {
 /**
  * The Core `AvailabilityExceptionResponse` shape (Contract B). Same rationale as
  * {@link CoreAvailabilityRule}: `exceptionDate` is a date, `startLocal` a wall-clock
- * time-of-day — no absolute instants, so this passes through unchanged.
+ * time-of-day — no absolute instants, so this passes through unchanged. `startLocal`
+ * and `windowMin` are always present: Core's columns are non-null and it encodes an
+ * all-day block as `00:00` / `1440`, never null (so this must not be nullable — see
+ * the matching non-nullable `AvailabilityExceptionResponseSchema`).
  */
 export interface CoreAvailabilityException {
   id: string;
   exceptionDate: string;
   kind: "UNAVAILABLE" | "ADDITIONAL";
-  startLocal: string | null;
-  windowMin: number | null;
+  startLocal: string;
+  windowMin: number;
   reason: string | null;
 }
 

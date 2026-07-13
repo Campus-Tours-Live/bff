@@ -885,12 +885,14 @@ export const AvailabilityExceptionResponseSchema = registry.register(
           "UNAVAILABLE blocks the window (or whole day); ADDITIONAL adds an extra window.",
         example: "UNAVAILABLE",
       }),
-      startLocal: z.string().nullable().openapi({
-        description: "Wall-clock start time `HH:mm`; null = the whole day.",
+      startLocal: z.string().openapi({
+        description:
+          "Wall-clock start time `HH:mm`. Always present — Core encodes an all-day block as `00:00`, never null.",
         example: "09:00",
       }),
-      windowMin: z.number().int().positive().nullable().openapi({
-        description: "Window length in minutes; null for an all-day UNAVAILABLE.",
+      windowMin: z.number().int().positive().openapi({
+        description:
+          "Window length in minutes. Always present — Core encodes an all-day block as `1440`, never null.",
         example: 60,
       }),
       reason: z
