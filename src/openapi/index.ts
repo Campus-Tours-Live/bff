@@ -489,7 +489,10 @@ apiRoute({
   description:
     "Creates a one-off date override (UNAVAILABLE blocks a window or the whole day; " +
     "ADDITIONAL adds an extra one-off window) and returns it, plus any bookings affected by " +
-    "the change.",
+    "the change. The caller supplies EITHER `exceptionDate` (a single date) OR both " +
+    "`dateFrom`/`dateTo` (an inclusive multi-day range, capped at 366 days) — never a mix; " +
+    "`kind`/`startLocal`/`windowMin` are always required (there is no separate ALL_DAY kind — " +
+    'an all-day block is `startLocal: "00:00"`, `windowMin: 1440`).',
   request: {
     body: {
       content: { "application/json": { schema: CreateAvailabilityExceptionRequestSchema } },

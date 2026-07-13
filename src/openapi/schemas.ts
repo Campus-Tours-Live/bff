@@ -722,29 +722,62 @@ export const AvailabilityRuleResponseSchema = registry.register(
     }),
 );
 
-/** Request body to create a one-off availability exception. */
+/**
+ * Request body to create a one-off availability exception (Core `AvailabilityExceptionRequest`,
+ * `POST /availability/exceptions`; CTL-56 B4 fix). The caller supplies EITHER `exceptionDate` (a
+ * single date) OR both `dateFrom`/`dateTo` (an inclusive multi-day range, CTL-54 v2.1 Task 3) —
+ * never a mix; `kind`/`startLocal`/`windowMin` are always required (Core
+ * `AvailabilityWriteService.validateExceptionInput`). There is no separate ALL_DAY kind — an
+ * all-day UNAVAILABLE block is expressed as `startLocal: "00:00"`, `windowMin: 1440`, not by
+ * omitting the fields.
+ */
 export const CreateAvailabilityExceptionRequestSchema = z.object({
-  exceptionDate: z.string().openapi({
-    description: "ISO-8601 date this exception applies to.",
-    example: "2026-08-01",
-  }),
+  exceptionDate: z
+    .string()
+    .optional()
+    .openapi({
+      description:
+        "ISO-8601 date this exception applies to (single-date form). Mutually exclusive with " +
+        "`dateFrom`/`dateTo`; required if those are omitted.",
+      example: "2026-08-01",
+    }),
   kind: ExceptionKindEnum.openapi({
     description:
       "UNAVAILABLE blocks the window (or whole day); ADDITIONAL adds an extra one-off window.",
     example: "UNAVAILABLE",
   }),
-  startLocal: z.string().nullable().optional().openapi({
-    description: "Wall-clock start time `HH:mm`; omitted/null = the whole day (UNAVAILABLE only).",
+  startLocal: z.string().openapi({
+    description:
+      "Wall-clock start time `HH:mm`. Always required — an all-day UNAVAILABLE block is " +
+      '`"00:00"` with `windowMin: 1440`, not an omitted value.',
     example: "09:00",
   }),
-  windowMin: z.number().int().positive().nullable().optional().openapi({
-    description: "Window length in minutes (> 0); omitted/null with an all-day UNAVAILABLE.",
+  windowMin: z.number().int().positive().openapi({
+    description: "Window length in minutes (> 0). Always required.",
     example: 60,
   }),
   reason: z.string().optional().openapi({
     description: "Free-text reason, shown to the guide only.",
     example: "Holiday",
   }),
+  dateFrom: z
+    .string()
+    .optional()
+    .openapi({
+      description:
+        "ISO-8601 inclusive start date of a multi-day override. Requires `dateTo`; mutually " +
+        "exclusive with `exceptionDate`. Capped at 366 days from `dateTo`.",
+      example: "2026-08-01",
+    }),
+  dateTo: z
+    .string()
+    .optional()
+    .openapi({
+      description:
+        "ISO-8601 inclusive end date of a multi-day override. Requires `dateFrom`; mutually " +
+        "exclusive with `exceptionDate`.",
+      example: "2026-08-03",
+    }),
 });
 
 /** Request body to update an exception — every field optional (partial update). */
