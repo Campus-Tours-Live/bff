@@ -982,8 +982,10 @@ export const OverrideMultiPreviewRequestSchema = z.object({
       "UNAVAILABLE blocks the windows (or whole day); ADDITIONAL proposes extra windows.",
     example: "ADDITIONAL",
   }),
-  windows: z.array(OverrideMultiPreviewWindowSchema).min(1).openapi({
-    description: "The proposed windows to apply together (non-empty).",
+  windows: z.array(OverrideMultiPreviewWindowSchema).openapi({
+    description:
+      "The proposed windows to apply together — non-empty unless replaceExisting is true " +
+      "(empty windows clears that kind for the day).",
   }),
   replaceExisting: z
     .boolean()
