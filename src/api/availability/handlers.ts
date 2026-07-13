@@ -128,7 +128,11 @@ export async function updateRule(req: Request, res: Response, core: CoreClient):
   const { data, affectedBookings } = await core.patchFull<
     CoreAvailabilityRule,
     CoreAffectedBooking
-  >(`/availability/rules/${req.params.id}`, req.body, writeOpts(req, res));
+  >(
+    `/availability/rules/${encodeURIComponent(req.params.id ?? "")}`,
+    req.body,
+    writeOpts(req, res),
+  );
   sendWrite(res, data, affectedBookings, AvailabilityRuleResponseSchema);
 }
 
@@ -136,7 +140,7 @@ export async function deleteRule(req: Request, res: Response, core: CoreClient):
   const { data, affectedBookings } = await core.delFull<
     CoreAvailabilityRule[],
     CoreAffectedBooking
-  >(`/availability/rules/${req.params.id}`, writeOpts(req, res));
+  >(`/availability/rules/${encodeURIComponent(req.params.id ?? "")}`, writeOpts(req, res));
   sendWrite(res, data, affectedBookings, z.array(AvailabilityRuleResponseSchema));
 }
 
@@ -188,7 +192,11 @@ export async function updateException(
   const { data, affectedBookings } = await core.patchFull<
     CoreAvailabilityException,
     CoreAffectedBooking
-  >(`/availability/exceptions/${req.params.id}`, req.body, writeOpts(req, res));
+  >(
+    `/availability/exceptions/${encodeURIComponent(req.params.id ?? "")}`,
+    req.body,
+    writeOpts(req, res),
+  );
   sendWrite(res, data, affectedBookings, AvailabilityExceptionResponseSchema);
 }
 
@@ -200,7 +208,7 @@ export async function deleteException(
   const { data, affectedBookings } = await core.delFull<
     CoreAvailabilityException[],
     CoreAffectedBooking
-  >(`/availability/exceptions/${req.params.id}`, writeOpts(req, res));
+  >(`/availability/exceptions/${encodeURIComponent(req.params.id ?? "")}`, writeOpts(req, res));
   sendWrite(res, data, affectedBookings, z.array(AvailabilityExceptionResponseSchema));
 }
 

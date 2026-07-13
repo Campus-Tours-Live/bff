@@ -233,6 +233,44 @@ describe("bff availability module", () => {
     });
   });
 
+  describe("id encoding in the outbound Core URL (S5)", () => {
+    it("PATCH rules: encodes an id containing / and ? so it cannot inject path/query", async () => {
+      // Express decodes `req.params.id` to the raw `a/b?c`; interpolated raw it would split into
+      // extra path segments and a query string. encodeURIComponent keeps it one opaque segment.
+      const mock = mockCoreByPath({ "/availability/rules/a%2Fb%3Fc": coreWrite(rule, []) });
+      const res = await request(app)
+        .patch(`/v1/availability/rules/${encodeURIComponent("a/b?c")}`)
+        .set("Cookie", cookie)
+        .send({ active: false });
+      expect(res.status).toBe(200);
+      const [url] = mock.mock.calls[0] as [string, RequestInit];
+      const parsed = new URL(url);
+      expect(parsed.pathname).toBe("/availability/rules/a%2Fb%3Fc");
+      expect(parsed.search).toBe("");
+    });
+
+    it("DELETE exceptions: encodes an id containing / in the outbound Core URL", async () => {
+      const mock = mockCoreByPath({ "/availability/exceptions/x%2Fy": coreWrite([], []) });
+      const res = await request(app)
+        .delete(`/v1/availability/exceptions/${encodeURIComponent("x/y")}`)
+        .set("Cookie", cookie);
+      expect(res.status).toBe(200);
+      const [url] = mock.mock.calls[0] as [string, RequestInit];
+      expect(new URL(url).pathname).toBe("/availability/exceptions/x%2Fy");
+    });
+
+    it("GET slots: encodes an offering id containing / so `/slots` stays the trailing segment", async () => {
+      const mock = mockCoreByPath({ "/offerings/o%2Fp/slots": coreRead([]) });
+      const res = await request(app)
+        .get(`/v1/offerings/${encodeURIComponent("o/p")}/slots`)
+        .set("Cookie", cookie);
+      expect(res.status).toBe(200);
+      expect(new URL((mock.mock.calls[0] as [string, RequestInit])[0]).pathname).toBe(
+        "/offerings/o%2Fp/slots",
+      );
+    });
+  });
+
   describe("write-response shape guard (S3)", () => {
     it("catches a malformed write response (bad affectedBookings) in dev/test → 500 INTERNAL", async () => {
       // Core returns a write envelope whose affectedBookings entry is missing the required

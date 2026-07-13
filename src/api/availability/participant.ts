@@ -20,6 +20,8 @@ export async function getSlots(req: Request, res: Response, core: CoreClient): P
   if (typeof from === "string") params.set("from", from);
   if (typeof to === "string") params.set("to", to);
   const qs = params.toString();
-  const raw = await core.get<CoreSlot[]>(`/offerings/${req.params.id}/slots${qs ? `?${qs}` : ""}`);
+  const raw = await core.get<CoreSlot[]>(
+    `/offerings/${encodeURIComponent(req.params.id ?? "")}/slots${qs ? `?${qs}` : ""}`,
+  );
   sendData(res, raw.map(reshapeSlot), z.array(AvailabilityOccurrenceSchema));
 }
