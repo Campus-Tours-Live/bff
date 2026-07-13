@@ -278,6 +278,9 @@ export interface CorePreviewDay {
   date: string;
   resultingWindows: CoreOccurrence[];
   trimmed: { kind: string; startLocal: string; windowMin: number }[];
+  /** True when the save won't materialize this date (out-of-horizon / past); passed through
+   *  from Core Contract B (`OverridePreviewResponse.DatePreview.inert`, CTL-54 v2.1). */
+  inert: boolean;
 }
 
 /** The Core `OverridePreviewResponse` shape (Contract B, CTL-54 v2.1): a read-only, non-
@@ -294,6 +297,9 @@ export interface OverridePreviewDayResponse {
   date: string;
   resultingWindows: OccurrenceResponse[];
   trimmed: { kind: string; startLocal: string; windowMin: number }[];
+  /** True for dates the save won't materialize (out-of-horizon / past); passed through from
+   *  Core verbatim (name-for-name with Contract B), no recompute. */
+  inert: boolean;
 }
 
 /** Contract-A override-preview response: same shape as Core's, with every day's
@@ -312,6 +318,7 @@ function reshapeOverridePreview(c: CoreOverridePreview): OverridePreviewResponse
       date: d.date,
       resultingWindows: d.resultingWindows.map(reshapeOccurrence),
       trimmed: d.trimmed,
+      inert: d.inert,
     })),
     valid: c.valid,
     message: c.message,

@@ -920,6 +920,13 @@ const OverridePreviewDaySchema = z.object({
       "Requested override fields (by `kind`) that were trimmed against an existing " +
       "conflict; empty when nothing was trimmed.",
   }),
+  inert: z.boolean().openapi({
+    description:
+      "True when saving the proposed override won't materialize this date — it falls outside " +
+      "the bookable horizon or is in the past (Core `OverridePreviewResponse.DatePreview.inert`, " +
+      "CTL-54 v2.1). Passed through from Core verbatim; the BFF does not recompute it.",
+    example: false,
+  }),
 });
 
 /** `GET /v1/availability/preview` — a read-only, non-persisting dry-run of a proposed

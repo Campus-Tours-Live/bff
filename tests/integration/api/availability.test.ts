@@ -438,6 +438,7 @@ describe("bff availability module", () => {
           { startAt: "2026-07-18T16:30:00.000Z", endAt: "2026-07-18T18:00:00.000Z" },
         ],
         trimmed: [{ kind: "UNAVAILABLE", startLocal: "09:30", windowMin: 90 }],
+        inert: false,
       };
       const mock = mockCoreByPath({
         "/availability/preview": coreRead({ days: [day], valid: true, message: null }),
@@ -462,6 +463,7 @@ describe("bff availability module", () => {
           date: "2026-07-18",
           resultingWindows: [{ startAt: "2026-07-18T16:30:00Z", endAt: "2026-07-18T18:00:00Z" }],
           trimmed: [{ kind: "UNAVAILABLE", startLocal: "09:30", windowMin: 90 }],
+          inert: false,
         },
       ]);
     });
@@ -474,6 +476,7 @@ describe("bff availability module", () => {
             { startAt: "2026-07-18T16:30:00.000Z", endAt: "2026-07-18T18:00:00.000Z" },
           ],
           trimmed: [],
+          inert: false,
         },
         {
           date: "2026-07-19",
@@ -481,6 +484,7 @@ describe("bff availability module", () => {
             { startAt: "2026-07-19T16:30:00+00:00", endAt: "2026-07-19T18:00:00+00:00" },
           ],
           trimmed: [{ kind: "UNAVAILABLE", startLocal: "09:30", windowMin: 90 }],
+          inert: false,
         },
       ];
       mockCoreByPath({
@@ -501,6 +505,35 @@ describe("bff availability module", () => {
       expect(res.body.data.days[1].trimmed).toEqual([
         { kind: "UNAVAILABLE", startLocal: "09:30", windowMin: 90 },
       ]);
+    });
+
+    it("carries each day's `inert` flag through Contract A unchanged (7a)", async () => {
+      const days = [
+        {
+          date: "2026-07-18",
+          resultingWindows: [],
+          trimmed: [],
+          inert: true, // out-of-horizon/past — the save won't materialize this date
+        },
+        {
+          date: "2026-07-19",
+          resultingWindows: [
+            { startAt: "2026-07-19T16:30:00.000Z", endAt: "2026-07-19T18:00:00.000Z" },
+          ],
+          trimmed: [],
+          inert: false,
+        },
+      ];
+      mockCoreByPath({
+        "/availability/preview": coreRead({ days, valid: true, message: null }),
+      });
+      const res = await request(app)
+        .get("/v1/availability/preview")
+        .query({ ...previewQuery, dateTo: "2026-07-19" })
+        .set("Cookie", cookie);
+      expect(res.status).toBe(200);
+      expect(res.body.data.days[0].inert).toBe(true);
+      expect(res.body.data.days[1].inert).toBe(false);
     });
 
     it("no cookie → 401 + Auth-Required", async () => {
@@ -554,6 +587,7 @@ describe("bff availability module", () => {
           { startAt: "2026-07-18T21:00:00.000Z", endAt: "2026-07-18T22:00:00.000Z" },
         ],
         trimmed: [{ kind: "ADDITIONAL", startLocal: "09:00", windowMin: 60 }],
+        inert: false,
       };
       const mock = mockCoreByPath({
         "/availability/preview": coreRead({ days: [day1], valid: true, message: null }),
@@ -577,6 +611,7 @@ describe("bff availability module", () => {
             { startAt: "2026-07-18T21:00:00Z", endAt: "2026-07-18T22:00:00Z" },
           ],
           trimmed: [{ kind: "ADDITIONAL", startLocal: "09:00", windowMin: 60 }],
+          inert: false,
         },
       ]);
     });
@@ -605,6 +640,7 @@ describe("bff availability module", () => {
             { startAt: "2026-07-18T16:00:00.000Z", endAt: "2026-07-18T17:00:00.000Z" },
           ],
           trimmed: [],
+          inert: false,
         },
         {
           date: "2026-07-19",
@@ -612,6 +648,7 @@ describe("bff availability module", () => {
             { startAt: "2026-07-19T16:00:00+00:00", endAt: "2026-07-19T17:00:00+00:00" },
           ],
           trimmed: [{ kind: "ADDITIONAL", startLocal: "09:00", windowMin: 60 }],
+          inert: false,
         },
       ];
       mockCoreByPath({

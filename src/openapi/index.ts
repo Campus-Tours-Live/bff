@@ -697,6 +697,7 @@ const overridePreviewExample = {
       date: "2026-07-18",
       resultingWindows: [{ startAt: "2026-07-18T16:00:00Z", endAt: "2026-07-18T16:30:00Z" }],
       trimmed: [{ kind: "ADDITIONAL", startLocal: "09:00", windowMin: 30 }],
+      inert: false,
     },
   ],
   valid: true,
@@ -775,6 +776,7 @@ const overrideMultiPreviewExample = {
         { startAt: "2026-07-18T21:00:00Z", endAt: "2026-07-18T22:00:00Z" },
       ],
       trimmed: [],
+      inert: false,
     },
     {
       date: "2026-07-19",
@@ -783,6 +785,7 @@ const overrideMultiPreviewExample = {
         { startAt: "2026-07-19T21:00:00Z", endAt: "2026-07-19T22:00:00Z" },
       ],
       trimmed: [],
+      inert: false,
     },
   ],
   valid: true,
