@@ -6,7 +6,6 @@ const coreBooking = {
   id: "b1",
   status: "WAITING_FOR_GUIDE",
   scheduledAt: "2026-08-01T15:00:00Z",
-  timezone: "America/Los_Angeles",
   offeringId: "o1",
   offeringTitle: "North Campus",
   guideName: "Maya",
@@ -64,7 +63,6 @@ describe("bff cart module", () => {
     const res = await request(app).post("/v1/cart/items").set("Cookie", cookie).send({
       tourOfferingId: "o1",
       scheduledStartAt: "2026-08-01T15:00:00Z",
-      displayTimezone: "UTC",
     });
     expect(res.status).toBe(200);
     expect(res.body.data.id).toBe("b3");
