@@ -16,6 +16,7 @@ import {
   getOverridePreview,
   getOverrideMultiPreview,
   replaceOverrides,
+  replaceRules,
 } from "./handlers.js";
 import { getSlots } from "./participant.js";
 
@@ -57,6 +58,16 @@ availabilityRoutes.get("/availability/rules", withSession(getRules));
 availabilityRoutes.post("/availability/rules", csrfGuard, withMutation(createRule));
 availabilityRoutes.patch("/availability/rules/:id", csrfGuard, withMutation(updateRule));
 availabilityRoutes.delete("/availability/rules/:id", csrfGuard, withMutation(deleteRule));
+
+// The atomic weekly-rule replace (CTL-56 v2.1 B2, Task 4): a STATE-MUTATING POST — the guide's
+// ACTIVE rules for one `dayOfWeek` are replaced by exactly the supplied windows in one Core
+// transaction (empty windows clears that weekday's rules; every other weekday is untouched). A
+// slash-action path (no colon, so `path-to-regexp` never treats a segment as a param — it is
+// never shadowed by nor shadows `/availability/rules/:id` above). Registered `csrfGuard` +
+// `withMutation` exactly like the create/patch/delete writes above: `csrfGuard` gives the CSRF
+// protection a mutating POST requires, `withMutation` relays a Core 4xx VERBATIM (status +
+// message). The weekly counterpart to `/availability/overrides/replace` below.
+availabilityRoutes.post("/availability/rules/replace", csrfGuard, withMutation(replaceRules));
 
 // The atomic single-day override replace (CTL-56 v2.1 B2): a STATE-MUTATING POST — the guide's
 // same-kind exceptions for the date are replaced by exactly the supplied windows in one Core

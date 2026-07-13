@@ -50,6 +50,7 @@ import {
   OverridePreviewResponseSchema,
   OverrideMultiPreviewRequestSchema,
   OverrideReplaceRequestSchema,
+  RulesReplaceRequestSchema,
 } from "./schemas.js";
 import {
   apiRoute,
@@ -364,6 +365,11 @@ const overrideReplaceRequestExample = {
   windows: [{ startLocal: "09:00", windowMin: 60 }],
 };
 
+const rulesReplaceRequestExample = {
+  dayOfWeek: 1,
+  windows: [{ startLocal: "09:00", windowMin: 60 }],
+};
+
 /** A read-side 4xx: the generic `withSession` mapping (real status, code `UPSTREAM_ERROR`). */
 const upstreamErrorProblem = (status: number, title: string) =>
   problemResponse(title, problem(status, title, "UPSTREAM_ERROR"));
@@ -465,6 +471,50 @@ apiRoute({
       "AVAILABILITY_RULE_NOT_FOUND",
       "Not found",
       "No rule exists with this id for the caller.",
+    ),
+  },
+});
+
+// POST /v1/availability/rules/replace
+apiRoute({
+  method: "post",
+  path: "/v1/availability/rules/replace",
+  tags: ["Availability"],
+  summary: "Atomically replace one weekday's recurring availability rules",
+  description:
+    "Atomically replaces the guide's ACTIVE recurring rules for a single `dayOfWeek` with " +
+    "exactly the supplied `windows`, in one Core transaction; every other weekday is left " +
+    "untouched. An EMPTY `windows` list clears that weekday's rules. Each inserted rule takes " +
+    "the guide's settings timezone, an open-ended effective range starting today, and is " +
+    "active — there is deliberately no `timezone`/`effectiveFrom`/`effectiveTo`/`kind` field on " +
+    "this request, unlike the rule create/patch routes above. Per-window validation (e.g. a " +
+    "window may not cross midnight) runs BEFORE any mutation; overlapping or touching windows " +
+    "are NOT rejected — they are accepted and coalesced (merged) into disjoint maximal rules, " +
+    "the same accept-and-resolve behavior as a single-rule create. The write may shift or " +
+    "invalidate existing bookings that no longer fit; those are reported in `affectedBookings` " +
+    "(a warning list, not an error). A Core 4xx relays VERBATIM.",
+  request: {
+    body: {
+      content: {
+        "application/json": {
+          schema: RulesReplaceRequestSchema,
+          example: rulesReplaceRequestExample,
+        },
+      },
+    },
+  },
+  responses: {
+    200: envelopedWrite(z.array(AvailabilityRuleResponseSchema), {
+      description: "The weekday's resulting active rules, plus any bookings affected.",
+      example: writeEnvelope([ruleExample], [affectedBookingExample]),
+    }),
+    422: problem422(
+      "AVAILABILITY_RULE_VALIDATION",
+      "Validation failed",
+      "dayOfWeek missing or out of range (0-6), or a window's startLocal/windowMin missing or " +
+        "invalid (including a window crossing midnight). Overlapping or touching windows are " +
+        "NOT a 422 — they are coalesced (merged) into disjoint rules and the replace succeeds " +
+        "(200). Rejected before any mutation, so prior rules are left intact.",
     ),
   },
 });

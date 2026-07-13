@@ -832,6 +832,44 @@ export const OverrideReplaceRequestSchema = z.object({
   }),
 });
 
+/** One time window (a wall-clock start + a length in minutes) within an atomic weekly-rule
+ *  replace (Core `RulesReplaceRequest.Window`, CTL-54 v2.1 B2). Wall-clock — no absolute
+ *  instant, so name-for-name with the backend record. */
+const RulesReplaceWindowSchema = z.object({
+  startLocal: z.string().openapi({
+    description: "Wall-clock start time of day, 24h `HH:mm`, in the guide's settings timezone.",
+    example: "09:00",
+  }),
+  windowMin: z.number().int().positive().openapi({
+    description: "Window length in minutes (> 0).",
+    example: 60,
+  }),
+});
+
+/**
+ * Request body for `POST /v1/availability/rules/replace` — an ATOMIC replace of ONE weekday's
+ * recurring availability rules (Core `RulesReplaceRequest`, CTL-54 v2.1 B2, the weekly
+ * counterpart to {@link OverrideReplaceRequestSchema}). The guide's existing ACTIVE rules for
+ * `dayOfWeek` are dropped and replaced by exactly `windows` in one transaction (other weekdays
+ * are untouched). An EMPTY `windows` list is allowed and means "clear this weekday's rules".
+ * Name-for-name with the backend record: deliberately no `timezone`/`effectiveFrom`/
+ * `effectiveTo`/`kind` field — every inserted rule takes the guide's settings timezone, an
+ * open-ended effective range starting today, and is active (the read-only-tz invariant).
+ * `guideId` is server-resolved from the session; never in the body.
+ */
+export const RulesReplaceRequestSchema = z.object({
+  dayOfWeek: z.number().int().min(0).max(6).openapi({
+    description: "Day of week whose rules are being replaced (0=Sunday .. 6=Saturday).",
+    example: 1,
+  }),
+  windows: z.array(RulesReplaceWindowSchema).openapi({
+    description:
+      "The time windows this weekday should have after the replace. MAY be empty — an empty " +
+      "list clears this weekday's rules. Overlapping or touching windows are accepted and " +
+      "merged (coalesced) into disjoint rules, not rejected.",
+  }),
+});
+
 /** A one-off date override to a guide's recurring rules (Core `AvailabilityExceptionResponse`). */
 export const AvailabilityExceptionResponseSchema = registry.register(
   "AvailabilityExceptionResponse",

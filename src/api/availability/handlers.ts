@@ -124,6 +124,27 @@ export async function deleteRule(req: Request, res: Response, core: CoreClient):
   sendWrite(res, data, affectedBookings);
 }
 
+/**
+ * Atomic weekly-rule replace (`POST /v1/availability/rules/replace`) — CTL-54 v2.1 remediation
+ * B2 (Task 4), the weekly counterpart to {@link replaceOverrides}. Forwards the body
+ * `{dayOfWeek, windows[]}` to Core's atomic replace of ONE weekday's ACTIVE recurring rules (an
+ * empty `windows` list clears that weekday's rules; every other weekday is untouched), then
+ * reshapes the write envelope to Contract A: `data` (the weekday's resulting rules) passes
+ * through unchanged (wall-clock/date fields carry no timezone ambiguity), and
+ * `affectedBookings` is normalized to canonical UTC `Z` by {@link sendWrite} (CTL-49). Core
+ * COALESCES self-overlapping or touching windows into disjoint rules rather than rejecting them
+ * (accept-and-resolve) — a Core 4xx (e.g. a window crossing midnight, or a bad `dayOfWeek`) is
+ * relayed VERBATIM (status + message) via `withMutation`; this is a state-mutating POST, so its
+ * route is CSRF-guarded like every other availability write.
+ */
+export async function replaceRules(req: Request, res: Response, core: CoreClient): Promise<void> {
+  const { data, affectedBookings } = await core.postFull<
+    CoreAvailabilityRule[],
+    CoreAffectedBooking
+  >("/availability/rules/replace", req.body, writeOpts(req, res));
+  sendWrite(res, data, affectedBookings);
+}
+
 // ---- Exceptions -----------------------------------------------------------------------------
 
 export async function getExceptions(_req: Request, res: Response, core: CoreClient): Promise<void> {
