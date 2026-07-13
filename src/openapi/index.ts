@@ -763,6 +763,7 @@ const overrideMultiPreviewRequestExample = {
     { startLocal: "09:00", windowMin: 60 },
     { startLocal: "14:00", windowMin: 60 },
   ],
+  replaceExisting: true,
 };
 
 const overrideMultiPreviewExample = {

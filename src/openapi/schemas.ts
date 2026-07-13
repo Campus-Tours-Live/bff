@@ -985,6 +985,15 @@ export const OverrideMultiPreviewRequestSchema = z.object({
   windows: z.array(OverrideMultiPreviewWindowSchema).min(1).openapi({
     description: "The proposed windows to apply together (non-empty).",
   }),
+  replaceExisting: z
+    .boolean()
+    .optional()
+    .openapi({
+      description:
+        "When true, replace this kind's existing overrides for the day with exactly these " +
+        "windows (empty windows clears them); when false or omitted, apply on top of existing.",
+      example: true,
+    }),
 });
 
 /** A booking whose schedule shifted or was cancelled as a side effect of an availability

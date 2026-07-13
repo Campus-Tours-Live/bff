@@ -577,6 +577,22 @@ describe("bff availability module", () => {
       ]);
     });
 
+    it("forwards replaceExisting:true to Core verbatim alongside the rest of the body", async () => {
+      const replaceBody = { ...multiWindowBody, replaceExisting: true };
+      const mock = mockCoreByPath({
+        "/availability/preview": coreRead({ days: [], valid: true, message: null }),
+      });
+      const res = await request(app)
+        .post("/v1/availability/preview")
+        .set("Cookie", cookie)
+        .send(replaceBody);
+      expect(res.status).toBe(200);
+      const [, init] = mock.mock.calls[0] as [string, RequestInit];
+      const forwarded = JSON.parse(init.body as string);
+      expect(forwarded).toEqual(replaceBody);
+      expect(forwarded.replaceExisting).toBe(true);
+    });
+
     it("multi-day: reshapes resultingWindows on every day entry", async () => {
       const days = [
         {
