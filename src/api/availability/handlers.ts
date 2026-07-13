@@ -2,6 +2,7 @@ import type { Request, Response } from "express";
 import { z } from "zod";
 import {
   sendData,
+  assertShapeInDev,
   writeOpts,
   toZ,
   reshapeAffectedBooking,
@@ -19,6 +20,7 @@ import {
   AvailabilitySettingsResponseSchema,
   ResolvedAvailabilityResponseSchema,
   OverridePreviewResponseSchema,
+  AffectedBookingSchema,
 } from "../../openapi/schemas.js";
 
 /**
@@ -82,11 +84,25 @@ function reshapeSettings(c: CoreGuideSettings): CoreGuideSettings {
  * settings-reshaped by the caller), `affectedBookings` normalized to UTC `Z`
  * ({@link reshapeAffectedBooking}), and a bff-owned `meta.requestId` (mirrors
  * `sendData`'s envelope, extended with the `affectedBookings` sibling field CTL-56 needs).
+ *
+ * **Shape guard (S3):** like {@link sendData}, this validates its outgoing payload in dev/test
+ * via {@link assertShapeInDev} — `affectedBookings` (a BFF-owned, reshaped field) always against
+ * {@link AffectedBookingSchema}, and `data` against the caller-supplied `dataSchema` when given —
+ * so a drifted write response is caught (warned in dev, thrown in test) rather than silently
+ * returned. Never runs in production.
  */
-function sendWrite(res: Response, data: unknown, affectedBookings: CoreAffectedBooking[]): void {
+function sendWrite(
+  res: Response,
+  data: unknown,
+  affectedBookings: CoreAffectedBooking[],
+  dataSchema?: z.ZodType,
+): void {
+  const reshaped = affectedBookings.map(reshapeAffectedBooking);
+  assertShapeInDev(data, dataSchema);
+  assertShapeInDev(reshaped, z.array(AffectedBookingSchema));
   const body: { data: unknown; affectedBookings: AffectedBookingResponse[]; meta: Json } = {
     data,
-    affectedBookings: affectedBookings.map(reshapeAffectedBooking),
+    affectedBookings: reshaped,
     meta: { requestId: res.getHeader("X-Request-Id")?.toString() },
   };
   res.type("application/json").send(JSON.stringify(body));
@@ -105,7 +121,7 @@ export async function createRule(req: Request, res: Response, core: CoreClient):
     req.body,
     writeOpts(req, res),
   );
-  sendWrite(res, data, affectedBookings);
+  sendWrite(res, data, affectedBookings, AvailabilityRuleResponseSchema);
 }
 
 export async function updateRule(req: Request, res: Response, core: CoreClient): Promise<void> {
@@ -113,7 +129,7 @@ export async function updateRule(req: Request, res: Response, core: CoreClient):
     CoreAvailabilityRule,
     CoreAffectedBooking
   >(`/availability/rules/${req.params.id}`, req.body, writeOpts(req, res));
-  sendWrite(res, data, affectedBookings);
+  sendWrite(res, data, affectedBookings, AvailabilityRuleResponseSchema);
 }
 
 export async function deleteRule(req: Request, res: Response, core: CoreClient): Promise<void> {
@@ -121,7 +137,7 @@ export async function deleteRule(req: Request, res: Response, core: CoreClient):
     CoreAvailabilityRule[],
     CoreAffectedBooking
   >(`/availability/rules/${req.params.id}`, writeOpts(req, res));
-  sendWrite(res, data, affectedBookings);
+  sendWrite(res, data, affectedBookings, z.array(AvailabilityRuleResponseSchema));
 }
 
 /**
@@ -142,7 +158,7 @@ export async function replaceRules(req: Request, res: Response, core: CoreClient
     CoreAvailabilityRule[],
     CoreAffectedBooking
   >("/availability/rules/replace", req.body, writeOpts(req, res));
-  sendWrite(res, data, affectedBookings);
+  sendWrite(res, data, affectedBookings, z.array(AvailabilityRuleResponseSchema));
 }
 
 // ---- Exceptions -----------------------------------------------------------------------------
@@ -161,7 +177,7 @@ export async function createException(
     CoreAvailabilityException,
     CoreAffectedBooking
   >("/availability/exceptions", req.body, writeOpts(req, res));
-  sendWrite(res, data, affectedBookings);
+  sendWrite(res, data, affectedBookings, AvailabilityExceptionResponseSchema);
 }
 
 export async function updateException(
@@ -173,7 +189,7 @@ export async function updateException(
     CoreAvailabilityException,
     CoreAffectedBooking
   >(`/availability/exceptions/${req.params.id}`, req.body, writeOpts(req, res));
-  sendWrite(res, data, affectedBookings);
+  sendWrite(res, data, affectedBookings, AvailabilityExceptionResponseSchema);
 }
 
 export async function deleteException(
@@ -185,7 +201,7 @@ export async function deleteException(
     CoreAvailabilityException[],
     CoreAffectedBooking
   >(`/availability/exceptions/${req.params.id}`, writeOpts(req, res));
-  sendWrite(res, data, affectedBookings);
+  sendWrite(res, data, affectedBookings, z.array(AvailabilityExceptionResponseSchema));
 }
 
 // ---- Atomic override replace (CTL-56 v2.1 B2) -----------------------------------------------
@@ -210,7 +226,7 @@ export async function replaceOverrides(
     CoreAvailabilityException[],
     CoreAffectedBooking
   >("/availability/overrides/replace", req.body, writeOpts(req, res));
-  sendWrite(res, data, affectedBookings);
+  sendWrite(res, data, affectedBookings, z.array(AvailabilityExceptionResponseSchema));
 }
 
 // ---- Settings -------------------------------------------------------------------------------
@@ -226,7 +242,7 @@ export async function updateSettings(req: Request, res: Response, core: CoreClie
     req.body,
     writeOpts(req, res),
   );
-  sendWrite(res, reshapeSettings(data), affectedBookings);
+  sendWrite(res, reshapeSettings(data), affectedBookings, AvailabilitySettingsResponseSchema);
 }
 
 // ---- Resolved read (Task 3 — the CTL-55 frontend contract) ----------------------------------

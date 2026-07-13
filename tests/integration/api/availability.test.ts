@@ -233,6 +233,39 @@ describe("bff availability module", () => {
     });
   });
 
+  describe("write-response shape guard (S3)", () => {
+    it("catches a malformed write response (bad affectedBookings) in dev/test → 500 INTERNAL", async () => {
+      // Core returns a write envelope whose affectedBookings entry is missing the required
+      // `bookingId` (a BFF-owned, reshaped field). `sendWrite` now runs `assertShapeInDev`, which
+      // THROWS under NODE_ENV=test, so the drift surfaces as a 500 instead of a malformed 200.
+      const malformedAffected = {
+        bookingNumber: "BK-001",
+        status: "CONFIRMED",
+        scheduledStartAt: "2026-08-01T15:00:00Z",
+        scheduledEndAt: "2026-08-01T16:00:00Z",
+      };
+      mockCoreByPath({ "/availability/rules": coreWrite(rule, [malformedAffected]) });
+      const res = await request(app)
+        .post("/v1/availability/rules")
+        .set("Cookie", cookie)
+        .send({ dayOfWeek: 1, startLocal: "09:00", windowMin: 120 });
+      expect(res.status).toBe(500);
+      expect(res.body.code).toBe("INTERNAL");
+    });
+
+    it("catches a malformed write response (bad data) in dev/test → 500 INTERNAL", async () => {
+      // `data` here is a single rule whose `dayOfWeek` violates the response schema (out of 0..6).
+      const malformedRule = { ...rule, dayOfWeek: 99 };
+      mockCoreByPath({ "/availability/rules": coreWrite(malformedRule, []) });
+      const res = await request(app)
+        .post("/v1/availability/rules")
+        .set("Cookie", cookie)
+        .send({ dayOfWeek: 1, startLocal: "09:00", windowMin: 120 });
+      expect(res.status).toBe(500);
+      expect(res.body.code).toBe("INTERNAL");
+    });
+  });
+
   it("relays a Core 422 verbatim (problem+json) on a write", async () => {
     mockCoreByPath({ "/availability/rules": problem(422, "Overlapping rule") });
     const res = await request(app)
