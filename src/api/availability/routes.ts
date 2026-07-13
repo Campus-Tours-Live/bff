@@ -15,6 +15,7 @@ import {
   getAvailability,
   getOverridePreview,
   getOverrideMultiPreview,
+  replaceOverrides,
 } from "./handlers.js";
 import { getSlots } from "./participant.js";
 
@@ -56,6 +57,19 @@ availabilityRoutes.get("/availability/rules", withSession(getRules));
 availabilityRoutes.post("/availability/rules", csrfGuard, withMutation(createRule));
 availabilityRoutes.patch("/availability/rules/:id", csrfGuard, withMutation(updateRule));
 availabilityRoutes.delete("/availability/rules/:id", csrfGuard, withMutation(deleteRule));
+
+// The atomic single-day override replace (CTL-56 v2.1 B2): a STATE-MUTATING POST — the guide's
+// same-kind exceptions for the date are replaced by exactly the supplied windows in one Core
+// transaction (empty windows clears that kind for the day). A slash-action path (no colon, so
+// `path-to-regexp` never treats a segment as a param). Registered `csrfGuard` + `withMutation`
+// exactly like the create/patch/delete writes below: `csrfGuard` gives the CSRF protection a
+// mutating POST requires, `withMutation` relays a Core 4xx VERBATIM (status + message). Contrast
+// the `/availability/preview` POST above, a READ that deliberately OMITS `csrfGuard`.
+availabilityRoutes.post(
+  "/availability/overrides/replace",
+  csrfGuard,
+  withMutation(replaceOverrides),
+);
 
 availabilityRoutes.get("/availability/exceptions", withSession(getExceptions));
 availabilityRoutes.post("/availability/exceptions", csrfGuard, withMutation(createException));

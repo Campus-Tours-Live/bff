@@ -167,6 +167,31 @@ export async function deleteException(
   sendWrite(res, data, affectedBookings);
 }
 
+// ---- Atomic override replace (CTL-56 v2.1 B2) -----------------------------------------------
+
+/**
+ * Atomic single-day override replace (`POST /v1/availability/overrides/replace`) — CTL-54 v2.1
+ * remediation B2. Forwards the body `{date, kind, windows[]}` to Core's atomic replace of ONE
+ * kind's date-specific overrides for `date` (an empty `windows` list clears that kind for the
+ * day), then reshapes the write envelope to Contract A: `data` (the resulting exception list)
+ * passes through unchanged (wall-clock/date fields carry no timezone ambiguity), and
+ * `affectedBookings` is normalized to canonical UTC `Z` by {@link sendWrite} (CTL-49). A Core
+ * 4xx (e.g. a window crossing midnight) is relayed VERBATIM (status + message) via
+ * `withMutation`; this is a state-mutating POST, so its route is CSRF-guarded like every other
+ * availability write.
+ */
+export async function replaceOverrides(
+  req: Request,
+  res: Response,
+  core: CoreClient,
+): Promise<void> {
+  const { data, affectedBookings } = await core.postFull<
+    CoreAvailabilityException[],
+    CoreAffectedBooking
+  >("/availability/overrides/replace", req.body, writeOpts(req, res));
+  sendWrite(res, data, affectedBookings);
+}
+
 // ---- Settings -------------------------------------------------------------------------------
 
 export async function getSettings(_req: Request, res: Response, core: CoreClient): Promise<void> {

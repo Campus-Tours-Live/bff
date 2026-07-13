@@ -49,6 +49,7 @@ import {
   ExceptionKindEnum,
   OverridePreviewResponseSchema,
   OverrideMultiPreviewRequestSchema,
+  OverrideReplaceRequestSchema,
 } from "./schemas.js";
 import {
   apiRoute,
@@ -357,6 +358,12 @@ const resolvedAvailabilityExample = {
   dstGapDays: ["2026-03-08"],
 };
 
+const overrideReplaceRequestExample = {
+  date: "2026-07-12",
+  kind: "UNAVAILABLE",
+  windows: [{ startLocal: "09:00", windowMin: 60 }],
+};
+
 /** A read-side 4xx: the generic `withSession` mapping (real status, code `UPSTREAM_ERROR`). */
 const upstreamErrorProblem = (status: number, title: string) =>
   problemResponse(title, problem(status, title, "UPSTREAM_ERROR"));
@@ -567,6 +574,46 @@ apiRoute({
       "AVAILABILITY_EXCEPTION_NOT_FOUND",
       "Not found",
       "No exception exists with this id for the caller.",
+    ),
+  },
+});
+
+// POST /v1/availability/overrides/replace
+apiRoute({
+  method: "post",
+  path: "/v1/availability/overrides/replace",
+  tags: ["Availability"],
+  summary: "Atomically replace one day's date-specific overrides for a kind",
+  description:
+    "Atomically replaces ONE kind's date-specific overrides for a single `date` with exactly " +
+    "the supplied `windows`, in one Core transaction. The guide's existing same-kind exceptions " +
+    "for the date are dropped and replaced (other-kind exceptions on that date are preserved, " +
+    "trimmed only where a new window overlaps); an EMPTY `windows` list clears that kind for the " +
+    "day. Unlike the exception create/patch routes there is deliberately NO date-range field — " +
+    "just a single `date` plus a `windows` list. The write may shift or invalidate existing " +
+    "bookings that no longer fit; those are reported in `affectedBookings` (a warning list, not " +
+    "an error). A Core 4xx (e.g. a window crossing midnight) relays VERBATIM.",
+  request: {
+    body: {
+      content: {
+        "application/json": {
+          schema: OverrideReplaceRequestSchema,
+          example: overrideReplaceRequestExample,
+        },
+      },
+    },
+  },
+  responses: {
+    200: envelopedWrite(z.array(AvailabilityExceptionResponseSchema), {
+      description: "The date's resulting overrides for the kind, plus any bookings affected.",
+      example: writeEnvelope([exceptionExample], [affectedBookingExample]),
+    }),
+    422: problem422(
+      "AVAILABILITY_OVERRIDE_VALIDATION",
+      "Validation failed",
+      "date/kind missing or invalid, or a window's startLocal/windowMin missing or invalid " +
+        "(including a window crossing midnight). Rejected before any mutation, so a prior " +
+        "override is left intact.",
     ),
   },
 });

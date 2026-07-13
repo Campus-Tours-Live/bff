@@ -790,6 +790,48 @@ export const CreateAvailabilityExceptionRequestSchema = z.object({
  */
 export const UpdateAvailabilityExceptionRequestSchema = CreateAvailabilityExceptionRequestSchema;
 
+/** One time window (a wall-clock start + a length in minutes) within an atomic override
+ *  replace (Core `OverrideReplaceRequest.Window`, CTL-54 v2.1 B2). Wall-clock — no absolute
+ *  instant, so name-for-name with the backend record. */
+const OverrideReplaceWindowSchema = z.object({
+  startLocal: z.string().openapi({
+    description: "Wall-clock start time of day, 24h `HH:mm`, in the guide's settings timezone.",
+    example: "09:00",
+  }),
+  windowMin: z.number().int().positive().openapi({
+    description: "Window length in minutes (> 0).",
+    example: 60,
+  }),
+});
+
+/**
+ * Request body for `POST /v1/availability/overrides/replace` — an ATOMIC single-day replace of
+ * ONE kind's date-specific overrides (Core `OverrideReplaceRequest`, CTL-54 v2.1 B2). The
+ * guide's existing same-kind exceptions for `date` are dropped and replaced by exactly `windows`
+ * in one transaction (other-kind exceptions on that date are preserved, trimmed only where a new
+ * window overlaps). An EMPTY `windows` list is allowed and means "clear this kind for the day".
+ * Name-for-name with the backend record: a single `date` (NOT `dateFrom`/`dateTo`) — there is
+ * deliberately no date-range field. `guideId` is server-resolved from the session; never in the body.
+ */
+export const OverrideReplaceRequestSchema = z.object({
+  date: z.string().openapi({
+    description: "ISO-8601 date whose same-kind overrides are being replaced.",
+    example: "2026-07-12",
+  }),
+  kind: ExceptionKindEnum.openapi({
+    description:
+      "Which kind of override to replace on this date. UNAVAILABLE removes availability; " +
+      "ADDITIONAL adds it. Only this kind's existing exceptions for the date are replaced.",
+    example: "UNAVAILABLE",
+  }),
+  windows: z.array(OverrideReplaceWindowSchema).openapi({
+    description:
+      "The time windows this kind should have on the date after the replace. MAY be empty — an " +
+      "empty list clears this kind for the day. Later windows trim earlier overlapping ones " +
+      "(newest-wins).",
+  }),
+});
+
 /** A one-off date override to a guide's recurring rules (Core `AvailabilityExceptionResponse`). */
 export const AvailabilityExceptionResponseSchema = registry.register(
   "AvailabilityExceptionResponse",

@@ -120,6 +120,7 @@ describe("OpenAPI contract — drift guard (Express routes ↔ spec)", () => {
         "post /v1/availability/rules",
         "patch /v1/availability/rules/{id}",
         "delete /v1/availability/rules/{id}",
+        "post /v1/availability/overrides/replace",
         "get /v1/availability/exceptions",
         "post /v1/availability/exceptions",
         "patch /v1/availability/exceptions/{id}",
