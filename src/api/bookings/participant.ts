@@ -15,7 +15,7 @@ export async function createBooking(req: Request, res: Response, core: CoreClien
 
 export async function cancelBooking(req: Request, res: Response, core: CoreClient): Promise<void> {
   const raw = await core.post<CoreBookingDetail>(
-    `/bookings/${req.params.id}/cancel`,
+    `/bookings/${encodeURIComponent(req.params.id ?? "")}/cancel`,
     req.body,
     writeOpts(req, res),
   );
