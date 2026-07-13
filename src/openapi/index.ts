@@ -48,6 +48,7 @@ import {
   ResolvedAvailabilityResponseSchema,
   ExceptionKindEnum,
   OverridePreviewResponseSchema,
+  OverrideMultiPreviewRequestSchema,
 } from "./schemas.js";
 import {
   apiRoute,
@@ -751,6 +752,82 @@ apiRoute({
     }),
     403: upstreamErrorProblem(403, "Non-guide caller"),
     422: upstreamErrorProblem(422, "Invalid preview params/range (e.g. a range over 366 dates)"),
+  },
+});
+
+const overrideMultiPreviewRequestExample = {
+  dateFrom: "2026-07-18",
+  dateTo: "2026-07-19",
+  kind: "ADDITIONAL",
+  windows: [
+    { startLocal: "09:00", windowMin: 60 },
+    { startLocal: "14:00", windowMin: 60 },
+  ],
+};
+
+const overrideMultiPreviewExample = {
+  days: [
+    {
+      date: "2026-07-18",
+      resultingWindows: [
+        { startAt: "2026-07-18T16:00:00Z", endAt: "2026-07-18T17:00:00Z" },
+        { startAt: "2026-07-18T21:00:00Z", endAt: "2026-07-18T22:00:00Z" },
+      ],
+      trimmed: [],
+    },
+    {
+      date: "2026-07-19",
+      resultingWindows: [
+        { startAt: "2026-07-19T16:00:00Z", endAt: "2026-07-19T17:00:00Z" },
+        { startAt: "2026-07-19T21:00:00Z", endAt: "2026-07-19T22:00:00Z" },
+      ],
+      trimmed: [],
+    },
+  ],
+  valid: true,
+  message: null,
+};
+
+// POST /v1/availability/preview
+apiRoute({
+  method: "post",
+  path: "/v1/availability/preview",
+  tags: ["Availability"],
+  summary: "Preview a proposed multi-window date-specific availability override (dry-run)",
+  description:
+    "Read-only, non-persisting dry-run of a proposed date-specific override built from MANY " +
+    "time windows applied together (`windows[]`) across `[dateFrom, dateTo]` — the multi-window " +
+    "sibling of `GET /v1/availability/preview` above, needed because a window list doesn't fit " +
+    "in a query string. `guideId` is server-resolved from the session; never part of the body. " +
+    "The response shape is IDENTICAL to the single-window GET preview's: each day's " +
+    "`resultingWindows` is reshaped to canonical UTC `Z` (CTL-49); `trimmed`/`valid`/`message` " +
+    "pass through unchanged. `dateFrom`/`dateTo`/`windows` are forwarded to Core verbatim, NOT " +
+    "widened or validated here — they are the EXACT proposal being previewed, and Core is the " +
+    "source of truth for a bad/empty `windows` array or an out-of-range span. Guide-only; role " +
+    "is enforced by Core.\n\n" +
+    "**No CSRF guard:** unlike this API's other POST routes, this one carries no CSRF check — " +
+    "it mutates no state (a dry-run), so a cross-site-triggered call can compute a result but " +
+    "not read it back (no CORS) and persists nothing.\n\n" +
+    "**4xx caveat:** this is the generic read-path relay (`withSession`), so a Core 4xx (e.g. " +
+    "empty `windows` or a cross-midnight span) surfaces with its real status but a generic " +
+    "`UPSTREAM_ERROR` body, not Core's message.",
+  request: {
+    body: {
+      content: {
+        "application/json": {
+          schema: OverrideMultiPreviewRequestSchema,
+          example: overrideMultiPreviewRequestExample,
+        },
+      },
+    },
+  },
+  responses: {
+    200: enveloped(OverridePreviewResponseSchema, {
+      description: "Per-date dry-run result of the proposed multi-window override.",
+      example: envelope(overrideMultiPreviewExample),
+    }),
+    403: upstreamErrorProblem(403, "Non-guide caller"),
+    422: upstreamErrorProblem(422, "Invalid windows/range (e.g. empty windows[], cross-midnight)"),
   },
 });
 

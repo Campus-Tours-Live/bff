@@ -14,6 +14,7 @@ import {
   updateSettings,
   getAvailability,
   getOverridePreview,
+  getOverrideMultiPreview,
 } from "./handlers.js";
 import { getSlots } from "./participant.js";
 
@@ -38,6 +39,13 @@ availabilityRoutes.get("/availability", withSession(getAvailability));
 // distinct literal path — `/availability/preview` is never shadowed by nor shadows the bare
 // `/availability` above or the `/availability/rules|exceptions|settings` sub-paths below.
 availabilityRoutes.get("/availability/preview", withSession(getOverridePreview));
+
+// The MULTI-window override dry-run preview (CTL-56 Phase 2): same read semantics as the
+// GET preview above, but `windows[]` doesn't fit a query string, so it travels as a POST
+// body. GET and POST coexist on this identical literal path (Express dispatches by method).
+// No `csrfGuard`, deliberately — this is a read (nothing is persisted), same as the GET
+// above; see the rationale on `getOverrideMultiPreview` in handlers.ts.
+availabilityRoutes.post("/availability/preview", withSession(getOverrideMultiPreview));
 
 availabilityRoutes.get("/availability/rules", withSession(getRules));
 availabilityRoutes.post("/availability/rules", csrfGuard, withMutation(createRule));

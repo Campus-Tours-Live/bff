@@ -531,6 +531,118 @@ describe("bff availability module", () => {
     });
   });
 
+  describe("multi-window override dry-run preview (POST /v1/availability/preview)", () => {
+    const multiWindowBody = {
+      dateFrom: "2026-07-18",
+      dateTo: "2026-07-19",
+      kind: "ADDITIONAL",
+      windows: [
+        { startLocal: "09:00", windowMin: 60 },
+        { startLocal: "14:00", windowMin: 60 },
+      ],
+    };
+
+    it("forwards the body to Core POST /availability/preview verbatim and reshapes resultingWindows to UTC Z", async () => {
+      const day1 = {
+        date: "2026-07-18",
+        resultingWindows: [
+          { startAt: "2026-07-18T16:00:00.000Z", endAt: "2026-07-18T17:00:00.000Z" },
+          { startAt: "2026-07-18T21:00:00.000Z", endAt: "2026-07-18T22:00:00.000Z" },
+        ],
+        trimmed: [{ kind: "ADDITIONAL", startLocal: "09:00", windowMin: 60 }],
+      };
+      const mock = mockCoreByPath({
+        "/availability/preview": coreRead({ days: [day1], valid: true, message: null }),
+      });
+      const res = await request(app)
+        .post("/v1/availability/preview")
+        .set("Cookie", cookie)
+        .send(multiWindowBody);
+      expect(res.status).toBe(200);
+      const [url, init] = mock.mock.calls[0] as [string, RequestInit];
+      expect(new URL(url).pathname).toBe("/availability/preview");
+      expect(init.method).toBe("POST");
+      expect(JSON.parse(init.body as string)).toEqual(multiWindowBody);
+      expect(res.body.data.valid).toBe(true);
+      expect(res.body.data.message).toBeNull();
+      expect(res.body.data.days).toEqual([
+        {
+          date: "2026-07-18",
+          resultingWindows: [
+            { startAt: "2026-07-18T16:00:00Z", endAt: "2026-07-18T17:00:00Z" },
+            { startAt: "2026-07-18T21:00:00Z", endAt: "2026-07-18T22:00:00Z" },
+          ],
+          trimmed: [{ kind: "ADDITIONAL", startLocal: "09:00", windowMin: 60 }],
+        },
+      ]);
+    });
+
+    it("multi-day: reshapes resultingWindows on every day entry", async () => {
+      const days = [
+        {
+          date: "2026-07-18",
+          resultingWindows: [
+            { startAt: "2026-07-18T16:00:00.000Z", endAt: "2026-07-18T17:00:00.000Z" },
+          ],
+          trimmed: [],
+        },
+        {
+          date: "2026-07-19",
+          resultingWindows: [
+            { startAt: "2026-07-19T16:00:00+00:00", endAt: "2026-07-19T17:00:00+00:00" },
+          ],
+          trimmed: [{ kind: "ADDITIONAL", startLocal: "09:00", windowMin: 60 }],
+        },
+      ];
+      mockCoreByPath({
+        "/availability/preview": coreRead({ days, valid: true, message: null }),
+      });
+      const res = await request(app)
+        .post("/v1/availability/preview")
+        .set("Cookie", cookie)
+        .send(multiWindowBody);
+      expect(res.status).toBe(200);
+      expect(res.body.data.days).toHaveLength(2);
+      expect(res.body.data.days[0].resultingWindows).toEqual([
+        { startAt: "2026-07-18T16:00:00Z", endAt: "2026-07-18T17:00:00Z" },
+      ]);
+      expect(res.body.data.days[1].resultingWindows).toEqual([
+        { startAt: "2026-07-19T16:00:00Z", endAt: "2026-07-19T17:00:00Z" },
+      ]);
+      expect(res.body.data.days[1].trimmed).toEqual([
+        { kind: "ADDITIONAL", startLocal: "09:00", windowMin: 60 },
+      ]);
+    });
+
+    it("no cookie → 401 + Auth-Required", async () => {
+      const res = await request(app).post("/v1/availability/preview").send(multiWindowBody);
+      expect(res.status).toBe(401);
+      expect(res.headers["auth-required"]).toBe("reauthenticate");
+    });
+
+    it("Core 422 (e.g. empty windows[] or cross-midnight) → surfaces the real status via the read-path relay", async () => {
+      mockCoreByPath({ "/availability/preview": coreErr(422) });
+      const res = await request(app)
+        .post("/v1/availability/preview")
+        .set("Cookie", cookie)
+        .send(multiWindowBody);
+      expect(res.status).toBe(422);
+      expect(res.body).toMatchObject({ code: "UPSTREAM_ERROR" });
+    });
+
+    it("is NOT blocked by the CSRF guard on a cross-site Origin (deliberate — a pure read, no state mutation)", async () => {
+      mockCoreByPath({
+        "/availability/preview": coreRead({ days: [], valid: true, message: null }),
+      });
+      const res = await request(app)
+        .post("/v1/availability/preview")
+        .set("Cookie", cookie)
+        .set("Origin", "https://evil.test")
+        .send(multiWindowBody);
+      expect(res.status).toBe(200);
+    });
+  });
+
   describe("participant slots read (GET /v1/offerings/:id/slots)", () => {
     const slot = { startAt: "2026-08-01T15:00:00.000Z", endAt: "2026-08-01T15:30:00.000Z" };
 

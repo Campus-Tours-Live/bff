@@ -350,3 +350,50 @@ export async function getOverridePreview(
   const raw = await core.get<CoreOverridePreview>(`/availability/preview${qs ? `?${qs}` : ""}`);
   sendData(res, reshapeOverridePreview(raw), OverridePreviewResponseSchema);
 }
+
+// ---- Multi-window override dry-run preview (CTL-56 Phase 2) ----------------------------------
+
+/**
+ * Request body for the multi-window override dry-run preview (`POST /availability/preview`,
+ * Core Phase 1): the net result of applying MANY proposed windows together across
+ * `[dateFrom, dateTo]`, in one shot — unlike {@link getOverridePreview}'s single
+ * `startLocal`/`windowMin` pair. `guideId` is server-resolved from the bearer token, so it is
+ * never part of this body. Forwarded to Core verbatim (no validation, no widening) — Core is
+ * the source of truth for a bad/empty `windows` array or an out-of-range date span (422).
+ */
+export interface CoreMultiPreviewBody {
+  dateFrom: string;
+  dateTo: string;
+  kind: "UNAVAILABLE" | "ADDITIONAL";
+  windows: { startLocal: string; windowMin: number }[];
+}
+
+/**
+ * Multi-window override dry-run preview (`POST /v1/availability/preview`) — CTL-56 Phase 2's
+ * read-only, non-persisting preview of a proposed date-specific override built from MANY time
+ * windows applied together (`windows[]`), as opposed to {@link getOverridePreview}'s single
+ * window. The response shape is IDENTICAL to the single-window preview's, so this reuses
+ * {@link CoreOverridePreview} / {@link reshapeOverridePreview} / {@link
+ * OverridePreviewResponseSchema} unchanged — reshapes each day's `resultingWindows` to
+ * canonical UTC `Z` (CTL-49); `date`/`trimmed`/`valid`/`message` pass through unchanged.
+ *
+ * **Why POST, and why no CSRF guard:** this is a read (a dry-run — nothing is persisted), but
+ * `windows[]` doesn't fit in a query string, so it travels as a POST body. Unlike this
+ * router's other POST routes (which mutate state and go through `csrfGuard` + `withMutation`),
+ * this one is registered with `withSession` alone, matching the GET preview above: a cross-site
+ * caller riding the session cookie can only trigger a computation whose result it cannot read
+ * (the browser blocks reading a cross-origin response body without CORS) and that changes no
+ * state, so there is nothing for CSRF defenses to protect against.
+ */
+export async function getOverrideMultiPreview(
+  req: Request,
+  res: Response,
+  core: CoreClient,
+): Promise<void> {
+  const raw = await core.post<CoreOverridePreview>(
+    "/availability/preview",
+    req.body,
+    writeOpts(req, res),
+  );
+  sendData(res, reshapeOverridePreview(raw), OverridePreviewResponseSchema);
+}

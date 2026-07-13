@@ -951,6 +951,42 @@ export const OverridePreviewResponseSchema = registry.register(
     }),
 );
 
+/** One proposed window within a multi-window override preview request (Core `POST
+ *  /availability/preview`, CTL-56 Phase 2 request body). Wall-clock, like {@link
+ *  OverridePreviewTrimmedItemSchema} — no absolute instant. */
+const OverrideMultiPreviewWindowSchema = z.object({
+  startLocal: z.string().openapi({
+    description: "Wall-clock start time of day, 24h `HH:mm`, in the guide's account timezone.",
+    example: "09:00",
+  }),
+  windowMin: z.number().int().positive().openapi({
+    description: "Window length in minutes (> 0).",
+    example: 60,
+  }),
+});
+
+/** Request body for `POST /v1/availability/preview` — the net result of applying MANY
+ *  proposed windows together across `[dateFrom, dateTo]` (Core Phase 1, CTL-56 Phase 2).
+ *  `guideId` is server-resolved from the session; never part of this body. */
+export const OverrideMultiPreviewRequestSchema = z.object({
+  dateFrom: z.string().openapi({
+    description: "ISO-8601 first date (inclusive) of the proposed override.",
+    example: "2026-07-18",
+  }),
+  dateTo: z.string().openapi({
+    description: "ISO-8601 last date (inclusive) of the proposed override.",
+    example: "2026-07-19",
+  }),
+  kind: ExceptionKindEnum.openapi({
+    description:
+      "UNAVAILABLE blocks the windows (or whole day); ADDITIONAL proposes extra windows.",
+    example: "ADDITIONAL",
+  }),
+  windows: z.array(OverrideMultiPreviewWindowSchema).min(1).openapi({
+    description: "The proposed windows to apply together (non-empty).",
+  }),
+});
+
 /** A booking whose schedule shifted or was cancelled as a side effect of an availability
  *  write (Core `AvailabilityWriteResponse.affectedBookings`, CTL-54). */
 export const AffectedBookingSchema = registry.register(
