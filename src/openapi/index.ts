@@ -518,8 +518,10 @@ apiRoute({
   tags: ["Availability"],
   summary: "Update an availability exception",
   description:
-    "Partially updates one of the guide's exceptions and returns it, plus any bookings " +
-    "affected by the change.",
+    "Replaces one of the guide's exceptions and returns it, plus any bookings affected by the " +
+    "change. This is NOT a partial patch — Core rebuilds the exception from the request, so " +
+    "`kind`/`startLocal`/`windowMin` are required exactly as on create, and the caller must " +
+    "supply EITHER `exceptionDate` OR both `dateFrom`/`dateTo`, never a mix.",
   request: {
     params: z.object({ id: z.string().openapi({ description: "Exception id.", example: "e1" }) }),
     body: {

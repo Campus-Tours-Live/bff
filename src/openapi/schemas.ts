@@ -780,9 +780,15 @@ export const CreateAvailabilityExceptionRequestSchema = z.object({
     }),
 });
 
-/** Request body to update an exception — every field optional (partial update). */
-export const UpdateAvailabilityExceptionRequestSchema =
-  CreateAvailabilityExceptionRequestSchema.partial();
+/**
+ * Request body to update an exception (Core `AvailabilityExceptionRequest`,
+ * `PATCH /availability/exceptions/{id}`; CTL-56 item 2 fix). This is NOT a partial patch: Core's
+ * `AvailabilityWriteService.updateException` deletes the existing row and rebuilds it via the
+ * SAME `validateExceptionInput` as create, so `kind`/`startLocal`/`windowMin` (and the
+ * exceptionDate-XOR-dateFrom/dateTo choice) are required exactly as they are on create — the
+ * shape is identical.
+ */
+export const UpdateAvailabilityExceptionRequestSchema = CreateAvailabilityExceptionRequestSchema;
 
 /** A one-off date override to a guide's recurring rules (Core `AvailabilityExceptionResponse`). */
 export const AvailabilityExceptionResponseSchema = registry.register(

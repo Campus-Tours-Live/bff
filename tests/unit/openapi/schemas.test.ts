@@ -1,5 +1,8 @@
 import { jest } from "@jest/globals";
-import { CreateAvailabilityExceptionRequestSchema } from "@/openapi/schemas.js";
+import {
+  CreateAvailabilityExceptionRequestSchema,
+  UpdateAvailabilityExceptionRequestSchema,
+} from "@/openapi/schemas.js";
 
 /**
  * `src/openapi/schemas.ts` re-derives `coreApiBaseUrl` from env (a deliberate duplicate of
@@ -66,5 +69,34 @@ describe("CreateAvailabilityExceptionRequestSchema (B4)", () => {
       kind: "UNAVAILABLE",
     });
     expect(result.success).toBe(false);
+  });
+});
+
+/**
+ * `UpdateAvailabilityExceptionRequestSchema` (CTL-56 item 2 remediation): PATCH
+ * `/availability/exceptions/{id}` is NOT a partial patch on Contract B — Core's
+ * `AvailabilityWriteService.updateException` deletes the existing row and rebuilds it via the
+ * SAME `validateExceptionInput` as create, reading `req.kind()`/`req.startLocal()`/
+ * `req.windowMin()` unconditionally. So the update body requires the same fields as create; a
+ * `.partial()` schema (the old shape) would wrongly accept a body missing `startLocal`/
+ * `windowMin` that Core rejects.
+ */
+describe("UpdateAvailabilityExceptionRequestSchema (CTL-56 item 2)", () => {
+  it("rejects a body missing the required startLocal/windowMin", () => {
+    const result = UpdateAvailabilityExceptionRequestSchema.safeParse({
+      exceptionDate: "2026-08-01",
+      kind: "UNAVAILABLE",
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it("accepts a full valid body (same shape as create)", () => {
+    const result = UpdateAvailabilityExceptionRequestSchema.safeParse({
+      exceptionDate: "2026-08-01",
+      kind: "UNAVAILABLE",
+      startLocal: "09:00",
+      windowMin: 60,
+    });
+    expect(result.success).toBe(true);
   });
 });
