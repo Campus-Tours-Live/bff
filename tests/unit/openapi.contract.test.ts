@@ -28,8 +28,8 @@ const INFRA_ROUTES = new Set(["/health", "/openapi.json"]);
 /** Recover the mount prefix (e.g. "/auth", "/v1") a sub-router was mounted at, from its regexp. */
 function mountPrefix(regexp?: { source?: string; fast_slash?: boolean }): string {
   if (!regexp || regexp.fast_slash || !regexp.source) return "";
-  const m = regexp.source.match(/^\^\\\/(.+?)\\\/\?/);
-  return m ? "/" + m[1].replace(/\\\//g, "/") : "";
+  const prefix = regexp.source.match(/^\^\\\/(.+?)\\\/\?/)?.[1];
+  return prefix ? "/" + prefix.replace(/\\\//g, "/") : "";
 }
 
 /**
