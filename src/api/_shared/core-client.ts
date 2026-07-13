@@ -71,7 +71,13 @@ export class CoreClient {
       throw new CoreError(502);
     }
     if (r.status === 401) throw new CoreAuthError();
-    if (!r.ok) throw new CoreError(r.status);
+    if (!r.ok) {
+      // Capture the raw body + content-type so a `withMutation`-wrapped read (e.g. the override
+      // preview, CTL-56 B3) can relay Core's 4xx status AND message verbatim. `withSession`
+      // consumers ignore these fields, so this is a safe, additive change to the read path.
+      const raw = await r.text().catch(() => "");
+      throw new CoreError(r.status, raw, r.headers.get("content-type") ?? undefined);
+    }
     const body = (await r.json().catch(() => null)) as { data?: T } | null;
     return CoreClient.unwrap<T>(body);
   }

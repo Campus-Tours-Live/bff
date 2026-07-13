@@ -520,14 +520,18 @@ describe("bff availability module", () => {
       expect(res.body.data.days).toEqual([]);
     });
 
-    it("Core 422 (e.g. cross-midnight/>366 override) → surfaces the real status, not a blanket 500", async () => {
-      mockCoreByPath({ "/availability/preview": coreErr(422) });
+    it("Core 422 (e.g. cross-midnight/>366 override) → relays the real status AND message verbatim", async () => {
+      mockCoreByPath({
+        "/availability/preview": coreErr(422, { message: "Windows cross midnight" }),
+      });
       const res = await request(app)
         .get("/v1/availability/preview")
         .query(previewQuery)
         .set("Cookie", cookie);
       expect(res.status).toBe(422);
-      expect(res.body).toMatchObject({ code: "UPSTREAM_ERROR" });
+      // The backend's specific reason reaches the guide verbatim — NOT a blanket UPSTREAM_ERROR.
+      expect(res.body.message).toMatch(/cross midnight/i);
+      expect(res.body.code).not.toBe("UPSTREAM_ERROR");
     });
   });
 
@@ -636,14 +640,18 @@ describe("bff availability module", () => {
       expect(res.headers["auth-required"]).toBe("reauthenticate");
     });
 
-    it("Core 422 (e.g. empty windows[] or cross-midnight) → surfaces the real status via the read-path relay", async () => {
-      mockCoreByPath({ "/availability/preview": coreErr(422) });
+    it("Core 422 (e.g. empty windows[] or cross-midnight) → relays the real status AND message verbatim", async () => {
+      mockCoreByPath({
+        "/availability/preview": coreErr(422, { message: "Windows cross midnight" }),
+      });
       const res = await request(app)
         .post("/v1/availability/preview")
         .set("Cookie", cookie)
         .send(multiWindowBody);
       expect(res.status).toBe(422);
-      expect(res.body).toMatchObject({ code: "UPSTREAM_ERROR" });
+      // The backend's specific reason reaches the guide verbatim — NOT a blanket UPSTREAM_ERROR.
+      expect(res.body.message).toMatch(/cross midnight/i);
+      expect(res.body.code).not.toBe("UPSTREAM_ERROR");
     });
 
     it("is NOT blocked by the CSRF guard on a cross-site Origin (deliberate — a pure read, no state mutation)", async () => {

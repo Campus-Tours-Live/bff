@@ -38,14 +38,19 @@ availabilityRoutes.get("/availability", withSession(getAvailability));
 // preview of a proposed override, reshaped the same way as the resolved read above. Another
 // distinct literal path — `/availability/preview` is never shadowed by nor shadows the bare
 // `/availability` above or the `/availability/rules|exceptions|settings` sub-paths below.
-availabilityRoutes.get("/availability/preview", withSession(getOverridePreview));
+// Uses `withMutation` (NOT `csrfGuard`) purely for its VERBATIM 4xx relay (B3): a Core preview
+// 422 (e.g. "windows cross midnight") reaches the guide with its real status AND message, not a
+// generic `UPSTREAM_ERROR`. `withMutation` adds no CSRF/mutation semantics — it only changes
+// error mapping — so it is safe on this read; `csrfGuard` would wrongly block legitimate previews.
+availabilityRoutes.get("/availability/preview", withMutation(getOverridePreview));
 
 // The MULTI-window override dry-run preview (CTL-56 Phase 2): same read semantics as the
 // GET preview above, but `windows[]` doesn't fit a query string, so it travels as a POST
 // body. GET and POST coexist on this identical literal path (Express dispatches by method).
-// No `csrfGuard`, deliberately — this is a read (nothing is persisted), same as the GET
-// above; see the rationale on `getOverrideMultiPreview` in handlers.ts.
-availabilityRoutes.post("/availability/preview", withSession(getOverrideMultiPreview));
+// `withMutation` (NOT `csrfGuard`) for the same reason as the GET above: verbatim 4xx relay
+// (B3) with no CSRF/mutation side-effects — this is a read (nothing is persisted), so adding
+// `csrfGuard` would block legitimate preview requests. See `getOverrideMultiPreview` in handlers.ts.
+availabilityRoutes.post("/availability/preview", withMutation(getOverrideMultiPreview));
 
 availabilityRoutes.get("/availability/rules", withSession(getRules));
 availabilityRoutes.post("/availability/rules", csrfGuard, withMutation(createRule));
