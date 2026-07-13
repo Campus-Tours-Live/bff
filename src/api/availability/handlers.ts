@@ -340,8 +340,8 @@ const PREVIEW_QUERY_PARAMS = ["dateFrom", "dateTo", "kind", "startLocal", "windo
  * EXACT override the caller is proposing to create, not a display window being resolved —
  * widening them would silently change what's being previewed. So this handler forwards all
  * five params verbatim; a malformed/out-of-range value (e.g. a >366-day span) reaches Core
- * unchanged and Core's 4xx is relayed with its real status via `withSession` (read-path
- * relay) — see the caveat in the CTL-56 v2.1 plan about the generic `UPSTREAM_ERROR` body.
+ * unchanged and Core's 4xx is relayed VERBATIM (status + message) via `withMutation` (B3),
+ * so the specific reason reaches the guide instead of a generic `UPSTREAM_ERROR`.
  */
 export async function getOverridePreview(
   req: Request,
@@ -387,7 +387,8 @@ export interface CoreMultiPreviewBody {
  * **Why POST, and why no CSRF guard:** this is a read (a dry-run — nothing is persisted), but
  * `windows[]` doesn't fit in a query string, so it travels as a POST body. Unlike this
  * router's other POST routes (which mutate state and go through `csrfGuard` + `withMutation`),
- * this one is registered with `withSession` alone, matching the GET preview above: a cross-site
+ * this one is registered with `withMutation` (verbatim error relay) but WITHOUT `csrfGuard`,
+ * matching the GET preview above: a cross-site
  * caller riding the session cookie can only trigger a computation whose result it cannot read
  * (the browser blocks reading a cross-origin response body without CORS) and that changes no
  * state, so there is nothing for CSRF defenses to protect against.
