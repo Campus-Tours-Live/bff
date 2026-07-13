@@ -12,7 +12,7 @@ import { sendProblem } from "../../util/problem.js";
  * intentionally loose on Core-forwarded fields and strict on BFF-owned ones (see
  * src/openapi/schemas.ts), so this only fires when the BFF's own contract actually drifts.
  */
-function assertShapeInDev(data: unknown, schema?: z.ZodType): void {
+export function assertShapeInDev(data: unknown, schema?: z.ZodType): void {
   if (!schema || process.env.NODE_ENV === "production") return;
   const result = schema.safeParse(data);
   if (result.success) return;

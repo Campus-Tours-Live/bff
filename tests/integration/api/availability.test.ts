@@ -1,0 +1,858 @@
+import request from "supertest";
+import { app } from "@/app.js";
+import { coreErr, mintSessionCookie, mockCoreByPath } from "../_helpers.js";
+
+const rule = {
+  id: "r1",
+  dayOfWeek: 1,
+  startLocal: "09:00",
+  windowMin: 120,
+  timezone: "America/Los_Angeles",
+  effectiveFrom: "2026-01-01",
+  effectiveTo: null,
+  active: true,
+};
+
+const exception = {
+  id: "e1",
+  exceptionDate: "2026-08-01",
+  kind: "UNAVAILABLE",
+  startLocal: "09:00",
+  windowMin: 60,
+  reason: "Holiday",
+};
+
+const settings = {
+  guideId: "g1",
+  acceptanceMode: "AUTO",
+  responseDeadlineMin: 60,
+  minNoticeMin: 120,
+  maxAdvanceDays: 30,
+  bufferBeforeMin: 10,
+  bufferAfterMin: 10,
+  durationsOffered: [30, 60],
+  timezone: "America/Los_Angeles",
+  updatedAt: "2026-07-01T12:00:00.000Z",
+};
+
+const affectedBooking = {
+  bookingId: "b1",
+  bookingNumber: "BK-001",
+  status: "CONFIRMED",
+  scheduledStartAt: "2026-08-01T15:00:00.500Z",
+  scheduledEndAt: "2026-08-01T16:00:00.500Z",
+};
+
+/** A Core success response for GET reads: plain `{ data, meta }` envelope. */
+const coreRead = (data: unknown): Response =>
+  ({
+    ok: true,
+    status: 200,
+    headers: new Headers({ "content-type": "application/json" }),
+    json: async () => ({ data, meta: { requestId: "r1", timestamp: "2026-01-01T00:00:00Z" } }),
+    text: async () =>
+      JSON.stringify({ data, meta: { requestId: "r1", timestamp: "2026-01-01T00:00:00Z" } }),
+  }) as unknown as Response;
+
+/** A Core success response for writes: `AvailabilityWriteResponse{ data, affectedBookings, meta }`. */
+const coreWrite = (data: unknown, affectedBookings: unknown[] = []): Response =>
+  ({
+    ok: true,
+    status: 200,
+    headers: new Headers({ "content-type": "application/json" }),
+    json: async () => ({
+      data,
+      affectedBookings,
+      meta: { requestId: "r1", timestamp: "2026-01-01T00:00:00Z" },
+    }),
+    text: async () =>
+      JSON.stringify({
+        data,
+        affectedBookings,
+        meta: { requestId: "r1", timestamp: "2026-01-01T00:00:00Z" },
+      }),
+  }) as unknown as Response;
+
+/** A Core problem+json error Response (text-only body, like a real 4xx). */
+const problem = (status: number, title: string) =>
+  ({
+    ok: false,
+    status,
+    headers: new Headers({ "content-type": "application/problem+json" }),
+    text: async () => JSON.stringify({ title, status }),
+  }) as unknown as Response;
+
+describe("bff availability module", () => {
+  let cookie: string;
+  beforeEach(() => (cookie = mintSessionCookie()));
+
+  describe("rules", () => {
+    it("GET /v1/availability/rules passes rules through unchanged", async () => {
+      mockCoreByPath({ "/availability/rules": coreRead([rule]) });
+      const res = await request(app).get("/v1/availability/rules").set("Cookie", cookie);
+      expect(res.status).toBe(200);
+      expect(res.body.data).toEqual([rule]);
+    });
+
+    it("POST /v1/availability/rules passes data through and reshapes affectedBookings", async () => {
+      mockCoreByPath({ "/availability/rules": coreWrite(rule, [affectedBooking]) });
+      const res = await request(app).post("/v1/availability/rules").set("Cookie", cookie).send({
+        dayOfWeek: 1,
+        startLocal: "09:00",
+        windowMin: 120,
+        timezone: "America/Los_Angeles",
+      });
+      expect(res.status).toBe(200);
+      expect(res.body.data).toEqual(rule);
+      expect(res.body.affectedBookings).toEqual([
+        {
+          bookingId: "b1",
+          bookingNumber: "BK-001",
+          status: "CONFIRMED",
+          scheduledStartAt: "2026-08-01T15:00:00Z",
+          scheduledEndAt: "2026-08-01T16:00:00Z",
+        },
+      ]);
+    });
+
+    it("PATCH /v1/availability/rules/:id forwards to Core with the id and reshapes the response", async () => {
+      const mock = mockCoreByPath({
+        "/availability/rules/r1": coreWrite({ ...rule, active: false }, []),
+      });
+      const res = await request(app)
+        .patch("/v1/availability/rules/r1")
+        .set("Cookie", cookie)
+        .send({ active: false });
+      expect(res.status).toBe(200);
+      expect(res.body.data.active).toBe(false);
+      expect(res.body.affectedBookings).toEqual([]);
+      const [url, init] = mock.mock.calls[0] as [string, RequestInit];
+      expect(new URL(url).pathname).toBe("/availability/rules/r1");
+      expect(init.method).toBe("PATCH");
+    });
+
+    it("DELETE /v1/availability/rules/:id returns the remaining rule list + reshaped affectedBookings", async () => {
+      mockCoreByPath({
+        "/availability/rules/r1": coreWrite([{ ...rule, id: "r2" }], [affectedBooking]),
+      });
+      const res = await request(app).delete("/v1/availability/rules/r1").set("Cookie", cookie);
+      expect(res.status).toBe(200);
+      expect(res.body.data).toEqual([{ ...rule, id: "r2" }]);
+      expect(res.body.affectedBookings[0].scheduledStartAt).toBe("2026-08-01T15:00:00Z");
+    });
+  });
+
+  describe("exceptions", () => {
+    it("GET /v1/availability/exceptions passes exceptions through unchanged", async () => {
+      mockCoreByPath({ "/availability/exceptions": coreRead([exception]) });
+      const res = await request(app).get("/v1/availability/exceptions").set("Cookie", cookie);
+      expect(res.status).toBe(200);
+      expect(res.body.data).toEqual([exception]);
+    });
+
+    it("POST /v1/availability/exceptions passes data through and reshapes affectedBookings", async () => {
+      mockCoreByPath({ "/availability/exceptions": coreWrite(exception, [affectedBooking]) });
+      const res = await request(app)
+        .post("/v1/availability/exceptions")
+        .set("Cookie", cookie)
+        .send({ exceptionDate: "2026-08-01", kind: "UNAVAILABLE" });
+      expect(res.status).toBe(200);
+      expect(res.body.data).toEqual(exception);
+      expect(res.body.affectedBookings[0].bookingId).toBe("b1");
+    });
+
+    it("POST /v1/availability/exceptions forwards a multi-day date-range body unchanged (CTL-56 v2.1 no-op confirmation)", async () => {
+      const mock = mockCoreByPath({
+        "/availability/exceptions": coreWrite({ ...exception, exceptionDate: "2026-08-01" }, []),
+      });
+      const multiDayBody = {
+        dateFrom: "2026-08-01",
+        dateTo: "2026-08-03",
+        kind: "UNAVAILABLE",
+        startLocal: "09:30",
+        windowMin: 90,
+      };
+      const res = await request(app)
+        .post("/v1/availability/exceptions")
+        .set("Cookie", cookie)
+        .send(multiDayBody);
+      expect(res.status).toBe(200);
+      const [, init] = mock.mock.calls[0] as [string, RequestInit];
+      expect(JSON.parse(init.body as string)).toEqual(multiDayBody);
+    });
+
+    it("PATCH /v1/availability/exceptions/:id forwards to Core with the id", async () => {
+      const mock = mockCoreByPath({
+        "/availability/exceptions/e1": coreWrite({ ...exception, reason: "Storm" }, []),
+      });
+      const res = await request(app)
+        .patch("/v1/availability/exceptions/e1")
+        .set("Cookie", cookie)
+        .send({ reason: "Storm" });
+      expect(res.status).toBe(200);
+      expect(res.body.data.reason).toBe("Storm");
+      const [url, init] = mock.mock.calls[0] as [string, RequestInit];
+      expect(new URL(url).pathname).toBe("/availability/exceptions/e1");
+      expect(init.method).toBe("PATCH");
+    });
+
+    it("DELETE /v1/availability/exceptions/:id returns the remaining exception list + reshaped affectedBookings", async () => {
+      mockCoreByPath({
+        "/availability/exceptions/e1": coreWrite([], [affectedBooking]),
+      });
+      const res = await request(app).delete("/v1/availability/exceptions/e1").set("Cookie", cookie);
+      expect(res.status).toBe(200);
+      expect(res.body.data).toEqual([]);
+      expect(res.body.affectedBookings).toHaveLength(1);
+    });
+  });
+
+  describe("settings", () => {
+    it("GET /v1/availability/settings reshapes updatedAt to canonical UTC Z", async () => {
+      mockCoreByPath({ "/availability/settings": coreRead(settings) });
+      const res = await request(app).get("/v1/availability/settings").set("Cookie", cookie);
+      expect(res.status).toBe(200);
+      expect(res.body.data.updatedAt).toBe("2026-07-01T12:00:00Z");
+      expect(res.body.data.guideId).toBe("g1");
+    });
+
+    it("PATCH /v1/availability/settings reshapes data.updatedAt and affectedBookings", async () => {
+      mockCoreByPath({
+        "/availability/settings": coreWrite({ ...settings, acceptanceMode: "MANUAL" }, [
+          affectedBooking,
+        ]),
+      });
+      const res = await request(app)
+        .patch("/v1/availability/settings")
+        .set("Cookie", cookie)
+        .send({ acceptanceMode: "MANUAL" });
+      expect(res.status).toBe(200);
+      expect(res.body.data.acceptanceMode).toBe("MANUAL");
+      expect(res.body.data.updatedAt).toBe("2026-07-01T12:00:00Z");
+      expect(res.body.affectedBookings[0].scheduledEndAt).toBe("2026-08-01T16:00:00Z");
+    });
+  });
+
+  describe("id encoding in the outbound Core URL (S5)", () => {
+    it("PATCH rules: encodes an id containing / and ? so it cannot inject path/query", async () => {
+      // Express decodes `req.params.id` to the raw `a/b?c`; interpolated raw it would split into
+      // extra path segments and a query string. encodeURIComponent keeps it one opaque segment.
+      const mock = mockCoreByPath({ "/availability/rules/a%2Fb%3Fc": coreWrite(rule, []) });
+      const res = await request(app)
+        .patch(`/v1/availability/rules/${encodeURIComponent("a/b?c")}`)
+        .set("Cookie", cookie)
+        .send({ active: false });
+      expect(res.status).toBe(200);
+      const [url] = mock.mock.calls[0] as [string, RequestInit];
+      const parsed = new URL(url);
+      expect(parsed.pathname).toBe("/availability/rules/a%2Fb%3Fc");
+      expect(parsed.search).toBe("");
+    });
+
+    it("DELETE exceptions: encodes an id containing / in the outbound Core URL", async () => {
+      const mock = mockCoreByPath({ "/availability/exceptions/x%2Fy": coreWrite([], []) });
+      const res = await request(app)
+        .delete(`/v1/availability/exceptions/${encodeURIComponent("x/y")}`)
+        .set("Cookie", cookie);
+      expect(res.status).toBe(200);
+      const [url] = mock.mock.calls[0] as [string, RequestInit];
+      expect(new URL(url).pathname).toBe("/availability/exceptions/x%2Fy");
+    });
+
+    it("GET slots: encodes an offering id containing / so `/slots` stays the trailing segment", async () => {
+      const mock = mockCoreByPath({ "/offerings/o%2Fp/slots": coreRead([]) });
+      const res = await request(app)
+        .get(`/v1/offerings/${encodeURIComponent("o/p")}/slots`)
+        .set("Cookie", cookie);
+      expect(res.status).toBe(200);
+      expect(new URL((mock.mock.calls[0] as [string, RequestInit])[0]).pathname).toBe(
+        "/offerings/o%2Fp/slots",
+      );
+    });
+  });
+
+  describe("write-response shape guard (S3)", () => {
+    it("catches a malformed write response (bad affectedBookings) in dev/test → 500 INTERNAL", async () => {
+      // Core returns a write envelope whose affectedBookings entry is missing the required
+      // `bookingId` (a BFF-owned, reshaped field). `sendWrite` now runs `assertShapeInDev`, which
+      // THROWS under NODE_ENV=test, so the drift surfaces as a 500 instead of a malformed 200.
+      const malformedAffected = {
+        bookingNumber: "BK-001",
+        status: "CONFIRMED",
+        scheduledStartAt: "2026-08-01T15:00:00Z",
+        scheduledEndAt: "2026-08-01T16:00:00Z",
+      };
+      mockCoreByPath({ "/availability/rules": coreWrite(rule, [malformedAffected]) });
+      const res = await request(app)
+        .post("/v1/availability/rules")
+        .set("Cookie", cookie)
+        .send({ dayOfWeek: 1, startLocal: "09:00", windowMin: 120 });
+      expect(res.status).toBe(500);
+      expect(res.body.code).toBe("INTERNAL");
+    });
+
+    it("catches a malformed write response (bad data) in dev/test → 500 INTERNAL", async () => {
+      // `data` here is a single rule whose `dayOfWeek` violates the response schema (out of 0..6).
+      const malformedRule = { ...rule, dayOfWeek: 99 };
+      mockCoreByPath({ "/availability/rules": coreWrite(malformedRule, []) });
+      const res = await request(app)
+        .post("/v1/availability/rules")
+        .set("Cookie", cookie)
+        .send({ dayOfWeek: 1, startLocal: "09:00", windowMin: 120 });
+      expect(res.status).toBe(500);
+      expect(res.body.code).toBe("INTERNAL");
+    });
+  });
+
+  it("relays a Core 422 verbatim (problem+json) on a write", async () => {
+    mockCoreByPath({ "/availability/rules": problem(422, "Overlapping rule") });
+    const res = await request(app)
+      .post("/v1/availability/rules")
+      .set("Cookie", cookie)
+      .send({ dayOfWeek: 1, startLocal: "09:00", windowMin: 120 });
+    expect(res.status).toBe(422);
+    expect(res.headers["content-type"]).toContain("application/problem+json");
+    expect(JSON.parse(res.text).title).toBe("Overlapping rule");
+  });
+
+  it("blocks a cross-site mutation with 403 (CSRF)", async () => {
+    const res = await request(app)
+      .post("/v1/availability/rules")
+      .set("Cookie", cookie)
+      .set("Origin", "https://evil.test")
+      .send({});
+    expect(res.status).toBe(403);
+    expect(res.body.code).toBe("CSRF_BLOCKED");
+  });
+
+  it("Core 401 on a write → 401 + Auth-Required (re-auth)", async () => {
+    mockCoreByPath({ "/availability/rules": coreErr(401) });
+    const res = await request(app)
+      .post("/v1/availability/rules")
+      .set("Cookie", cookie)
+      .send({ dayOfWeek: 1 });
+    expect(res.status).toBe(401);
+    expect(res.headers["auth-required"]).toBe("reauthenticate");
+    expect(res.body).toMatchObject({ status: 401, code: "SESSION_EXPIRED" });
+  });
+
+  it("no cookie on a read → 401 + Auth-Required", async () => {
+    const res = await request(app).get("/v1/availability/rules");
+    expect(res.status).toBe(401);
+    expect(res.headers["auth-required"]).toBe("reauthenticate");
+  });
+
+  describe("resolved read (GET /v1/availability)", () => {
+    const occurrence = { startAt: "2026-08-01T15:00:00.000Z", endAt: "2026-08-01T16:00:00.000Z" };
+    const resolved = {
+      rules: [rule],
+      occurrences: [occurrence],
+      dstGapDays: ["2026-03-08"],
+      bookable: true,
+      hasWeeklyHours: true,
+    };
+
+    it("reshapes occurrences to UTC Z and passes rules/dstGapDays through unchanged", async () => {
+      mockCoreByPath({ "/availability": coreRead(resolved) });
+      const res = await request(app).get("/v1/availability").set("Cookie", cookie);
+      expect(res.status).toBe(200);
+      expect(res.body.data.rules).toEqual([rule]);
+      expect(res.body.data.dstGapDays).toEqual(["2026-03-08"]);
+      expect(res.body.data.occurrences).toEqual([
+        { startAt: "2026-08-01T15:00:00Z", endAt: "2026-08-01T16:00:00Z" },
+      ]);
+      expect(res.body.meta).toBeDefined();
+    });
+
+    it("passes through bookable + hasWeeklyHours from Core unchanged (CTL-56 B1)", async () => {
+      mockCoreByPath({
+        "/availability": coreRead({ ...resolved, bookable: true, hasWeeklyHours: false }),
+      });
+      const res = await request(app).get("/v1/availability").set("Cookie", cookie);
+      expect(res.status).toBe(200);
+      expect(res.body.data).toMatchObject({ bookable: true, hasWeeklyHours: false });
+    });
+
+    it("forwards from/to to Core verbatim on each present side (no widening — CTL-54 7c)", async () => {
+      // Core parses from/to in the GUIDE's own timezone (backend CTL-54 7c), so it already
+      // returns exactly the requested guide-local `[from, to)` window. The bff no longer widens
+      // (a UTC-anchored workaround that is now redundant and would pull in out-of-window days
+      // the bff cannot correctly re-filter — it has no guide timezone in the resolved response);
+      // it forwards both bounds verbatim and lets Core do the correct guide-local filtering.
+      const mock = mockCoreByPath({ "/availability": coreRead(resolved) });
+      const res = await request(app)
+        .get("/v1/availability")
+        .query({ from: "2026-08-01", to: "2026-08-31" })
+        .set("Cookie", cookie);
+      expect(res.status).toBe(200);
+      const [url] = mock.mock.calls[0] as [string, RequestInit];
+      const parsed = new URL(url);
+      expect(parsed.pathname).toBe("/availability");
+      expect(parsed.searchParams.get("from")).toBe("2026-08-01");
+      expect(parsed.searchParams.get("to")).toBe("2026-08-31");
+    });
+
+    it("forwards only `from` verbatim when `to` is absent, leaving `to` unset", async () => {
+      const mock = mockCoreByPath({ "/availability": coreRead(resolved) });
+      const res = await request(app)
+        .get("/v1/availability")
+        .query({ from: "2026-08-01" })
+        .set("Cookie", cookie);
+      expect(res.status).toBe(200);
+      const [url] = mock.mock.calls[0] as [string, RequestInit];
+      const parsed = new URL(url);
+      expect(parsed.searchParams.get("from")).toBe("2026-08-01");
+      expect(parsed.searchParams.has("to")).toBe(false);
+    });
+
+    it("forwards only `to` verbatim when `from` is absent, leaving `from` unset", async () => {
+      const mock = mockCoreByPath({ "/availability": coreRead(resolved) });
+      const res = await request(app)
+        .get("/v1/availability")
+        .query({ to: "2026-08-31" })
+        .set("Cookie", cookie);
+      expect(res.status).toBe(200);
+      const [url] = mock.mock.calls[0] as [string, RequestInit];
+      const parsed = new URL(url);
+      expect(parsed.searchParams.get("to")).toBe("2026-08-31");
+      expect(parsed.searchParams.has("from")).toBe(false);
+    });
+
+    it("passes a guide-local edge occurrence Core returned for the requested window through unchanged", async () => {
+      // Core (guide-local aware, CTL-54 7c) already includes an occurrence whose UTC instant sits
+      // just outside a naive UTC-midnight window but whose guide-local date is inside `[from, to)`.
+      // The bff forwards `from` verbatim (no widening) and passes Core's result through, only
+      // normalizing the instant to canonical UTC `Z`.
+      const edgeOccurrence = {
+        startAt: "2026-07-14T19:00:00.000Z",
+        endAt: "2026-07-14T20:00:00.000Z",
+      };
+      const mock = mockCoreByPath({
+        "/availability": coreRead({
+          rules: [rule],
+          occurrences: [edgeOccurrence],
+          dstGapDays: [],
+          bookable: true,
+          hasWeeklyHours: true,
+        }),
+      });
+      const res = await request(app)
+        .get("/v1/availability")
+        .query({ from: "2026-07-15" })
+        .set("Cookie", cookie);
+      expect(res.status).toBe(200);
+      const [url] = mock.mock.calls[0] as [string, RequestInit];
+      expect(new URL(url).searchParams.get("from")).toBe("2026-07-15");
+      expect(res.body.data.occurrences).toEqual([
+        { startAt: "2026-07-14T19:00:00Z", endAt: "2026-07-14T20:00:00Z" },
+      ]);
+    });
+
+    it("does not crash on a malformed from/to and forwards it verbatim so Core can reject it", async () => {
+      const mock = mockCoreByPath({ "/availability": problem(422, "Invalid from") });
+      const res = await request(app)
+        .get("/v1/availability")
+        .query({ from: "not-a-date", to: "also-bad" })
+        .set("Cookie", cookie);
+      expect(res.status).toBe(422);
+      const [url] = mock.mock.calls[0] as [string, RequestInit];
+      const parsed = new URL(url);
+      expect(parsed.searchParams.get("from")).toBe("not-a-date");
+      expect(parsed.searchParams.get("to")).toBe("also-bad");
+    });
+
+    it("calls Core without a query string when from/to are absent", async () => {
+      const mock = mockCoreByPath({ "/availability": coreRead(resolved) });
+      const res = await request(app).get("/v1/availability").set("Cookie", cookie);
+      expect(res.status).toBe(200);
+      const [url] = mock.mock.calls[0] as [string, RequestInit];
+      expect(url).toBe(new URL(url).origin + "/availability");
+      expect(new URL(url).search).toBe("");
+    });
+
+    it("returns empty arrays when Core has no rules/occurrences/gap-days", async () => {
+      mockCoreByPath({
+        "/availability": coreRead({
+          rules: [],
+          occurrences: [],
+          dstGapDays: [],
+          bookable: false,
+          hasWeeklyHours: false,
+        }),
+      });
+      const res = await request(app).get("/v1/availability").set("Cookie", cookie);
+      expect(res.status).toBe(200);
+      expect(res.body.data).toEqual({
+        rules: [],
+        occurrences: [],
+        dstGapDays: [],
+        bookable: false,
+        hasWeeklyHours: false,
+      });
+    });
+
+    it("no cookie → 401 + Auth-Required", async () => {
+      const res = await request(app).get("/v1/availability");
+      expect(res.status).toBe(401);
+      expect(res.headers["auth-required"]).toBe("reauthenticate");
+    });
+
+    it("does not shadow the /v1/availability/rules sub-route", async () => {
+      mockCoreByPath({
+        "/availability": coreRead(resolved),
+        "/availability/rules": coreRead([rule]),
+      });
+      const bare = await request(app).get("/v1/availability").set("Cookie", cookie);
+      const sub = await request(app).get("/v1/availability/rules").set("Cookie", cookie);
+      expect(bare.status).toBe(200);
+      expect(sub.status).toBe(200);
+      expect(bare.body.data.rules).toEqual([rule]);
+      expect(sub.body.data).toEqual([rule]);
+    });
+  });
+
+  describe("override dry-run preview (GET /v1/availability/preview)", () => {
+    const previewQuery = {
+      dateFrom: "2026-07-18",
+      dateTo: "2026-07-18",
+      kind: "UNAVAILABLE",
+      startLocal: "09:30",
+      windowMin: "90",
+    };
+
+    it("forwards dateFrom/dateTo/kind/startLocal/windowMin to Core verbatim and reshapes resultingWindows to UTC Z", async () => {
+      const day = {
+        date: "2026-07-18",
+        resultingWindows: [
+          { startAt: "2026-07-18T16:30:00.000Z", endAt: "2026-07-18T18:00:00.000Z" },
+        ],
+        trimmed: [{ kind: "UNAVAILABLE", startLocal: "09:30", windowMin: 90 }],
+        inert: false,
+      };
+      const mock = mockCoreByPath({
+        "/availability/preview": coreRead({ days: [day], valid: true, message: null }),
+      });
+      const res = await request(app)
+        .get("/v1/availability/preview")
+        .query(previewQuery)
+        .set("Cookie", cookie);
+      expect(res.status).toBe(200);
+      const [url] = mock.mock.calls[0] as [string, RequestInit];
+      const parsed = new URL(url);
+      expect(parsed.pathname).toBe("/availability/preview");
+      expect(parsed.searchParams.get("dateFrom")).toBe("2026-07-18");
+      expect(parsed.searchParams.get("dateTo")).toBe("2026-07-18");
+      expect(parsed.searchParams.get("kind")).toBe("UNAVAILABLE");
+      expect(parsed.searchParams.get("startLocal")).toBe("09:30");
+      expect(parsed.searchParams.get("windowMin")).toBe("90");
+      expect(res.body.data.valid).toBe(true);
+      expect(res.body.data.message).toBeNull();
+      expect(res.body.data.days).toEqual([
+        {
+          date: "2026-07-18",
+          resultingWindows: [{ startAt: "2026-07-18T16:30:00Z", endAt: "2026-07-18T18:00:00Z" }],
+          trimmed: [{ kind: "UNAVAILABLE", startLocal: "09:30", windowMin: 90 }],
+          inert: false,
+        },
+      ]);
+    });
+
+    it("multi-day: reshapes resultingWindows on every day entry", async () => {
+      const days = [
+        {
+          date: "2026-07-18",
+          resultingWindows: [
+            { startAt: "2026-07-18T16:30:00.000Z", endAt: "2026-07-18T18:00:00.000Z" },
+          ],
+          trimmed: [],
+          inert: false,
+        },
+        {
+          date: "2026-07-19",
+          resultingWindows: [
+            { startAt: "2026-07-19T16:30:00+00:00", endAt: "2026-07-19T18:00:00+00:00" },
+          ],
+          trimmed: [{ kind: "UNAVAILABLE", startLocal: "09:30", windowMin: 90 }],
+          inert: false,
+        },
+      ];
+      mockCoreByPath({
+        "/availability/preview": coreRead({ days, valid: true, message: null }),
+      });
+      const res = await request(app)
+        .get("/v1/availability/preview")
+        .query({ ...previewQuery, dateTo: "2026-07-19" })
+        .set("Cookie", cookie);
+      expect(res.status).toBe(200);
+      expect(res.body.data.days).toHaveLength(2);
+      expect(res.body.data.days[0].resultingWindows).toEqual([
+        { startAt: "2026-07-18T16:30:00Z", endAt: "2026-07-18T18:00:00Z" },
+      ]);
+      expect(res.body.data.days[1].resultingWindows).toEqual([
+        { startAt: "2026-07-19T16:30:00Z", endAt: "2026-07-19T18:00:00Z" },
+      ]);
+      expect(res.body.data.days[1].trimmed).toEqual([
+        { kind: "UNAVAILABLE", startLocal: "09:30", windowMin: 90 },
+      ]);
+    });
+
+    it("carries each day's `inert` flag through Contract A unchanged (7a)", async () => {
+      const days = [
+        {
+          date: "2026-07-18",
+          resultingWindows: [],
+          trimmed: [],
+          inert: true, // out-of-horizon/past — the save won't materialize this date
+        },
+        {
+          date: "2026-07-19",
+          resultingWindows: [
+            { startAt: "2026-07-19T16:30:00.000Z", endAt: "2026-07-19T18:00:00.000Z" },
+          ],
+          trimmed: [],
+          inert: false,
+        },
+      ];
+      mockCoreByPath({
+        "/availability/preview": coreRead({ days, valid: true, message: null }),
+      });
+      const res = await request(app)
+        .get("/v1/availability/preview")
+        .query({ ...previewQuery, dateTo: "2026-07-19" })
+        .set("Cookie", cookie);
+      expect(res.status).toBe(200);
+      expect(res.body.data.days[0].inert).toBe(true);
+      expect(res.body.data.days[1].inert).toBe(false);
+    });
+
+    it("no cookie → 401 + Auth-Required", async () => {
+      const res = await request(app).get("/v1/availability/preview").query(previewQuery);
+      expect(res.status).toBe(401);
+      expect(res.headers["auth-required"]).toBe("reauthenticate");
+    });
+
+    it("calls Core without a query string when no preview params are present", async () => {
+      const mock = mockCoreByPath({
+        "/availability/preview": coreRead({ days: [], valid: true, message: null }),
+      });
+      const res = await request(app).get("/v1/availability/preview").set("Cookie", cookie);
+      expect(res.status).toBe(200);
+      const [url] = mock.mock.calls[0] as [string, RequestInit];
+      expect(new URL(url).search).toBe("");
+      expect(res.body.data.days).toEqual([]);
+    });
+
+    it("Core 422 (e.g. cross-midnight/>366 override) → relays the real status AND message verbatim", async () => {
+      mockCoreByPath({
+        "/availability/preview": coreErr(422, { message: "Windows cross midnight" }),
+      });
+      const res = await request(app)
+        .get("/v1/availability/preview")
+        .query(previewQuery)
+        .set("Cookie", cookie);
+      expect(res.status).toBe(422);
+      // The backend's specific reason reaches the guide verbatim — NOT a blanket UPSTREAM_ERROR.
+      expect(res.body.message).toMatch(/cross midnight/i);
+      expect(res.body.code).not.toBe("UPSTREAM_ERROR");
+    });
+  });
+
+  describe("multi-window override dry-run preview (POST /v1/availability/preview)", () => {
+    const multiWindowBody = {
+      dateFrom: "2026-07-18",
+      dateTo: "2026-07-19",
+      kind: "ADDITIONAL",
+      windows: [
+        { startLocal: "09:00", windowMin: 60 },
+        { startLocal: "14:00", windowMin: 60 },
+      ],
+    };
+
+    it("forwards the body to Core POST /availability/preview verbatim and reshapes resultingWindows to UTC Z", async () => {
+      const day1 = {
+        date: "2026-07-18",
+        resultingWindows: [
+          { startAt: "2026-07-18T16:00:00.000Z", endAt: "2026-07-18T17:00:00.000Z" },
+          { startAt: "2026-07-18T21:00:00.000Z", endAt: "2026-07-18T22:00:00.000Z" },
+        ],
+        trimmed: [{ kind: "ADDITIONAL", startLocal: "09:00", windowMin: 60 }],
+        inert: false,
+      };
+      const mock = mockCoreByPath({
+        "/availability/preview": coreRead({ days: [day1], valid: true, message: null }),
+      });
+      const res = await request(app)
+        .post("/v1/availability/preview")
+        .set("Cookie", cookie)
+        .send(multiWindowBody);
+      expect(res.status).toBe(200);
+      const [url, init] = mock.mock.calls[0] as [string, RequestInit];
+      expect(new URL(url).pathname).toBe("/availability/preview");
+      expect(init.method).toBe("POST");
+      expect(JSON.parse(init.body as string)).toEqual(multiWindowBody);
+      expect(res.body.data.valid).toBe(true);
+      expect(res.body.data.message).toBeNull();
+      expect(res.body.data.days).toEqual([
+        {
+          date: "2026-07-18",
+          resultingWindows: [
+            { startAt: "2026-07-18T16:00:00Z", endAt: "2026-07-18T17:00:00Z" },
+            { startAt: "2026-07-18T21:00:00Z", endAt: "2026-07-18T22:00:00Z" },
+          ],
+          trimmed: [{ kind: "ADDITIONAL", startLocal: "09:00", windowMin: 60 }],
+          inert: false,
+        },
+      ]);
+    });
+
+    it("forwards replaceExisting:true to Core verbatim alongside the rest of the body", async () => {
+      const replaceBody = { ...multiWindowBody, replaceExisting: true };
+      const mock = mockCoreByPath({
+        "/availability/preview": coreRead({ days: [], valid: true, message: null }),
+      });
+      const res = await request(app)
+        .post("/v1/availability/preview")
+        .set("Cookie", cookie)
+        .send(replaceBody);
+      expect(res.status).toBe(200);
+      const [, init] = mock.mock.calls[0] as [string, RequestInit];
+      const forwarded = JSON.parse(init.body as string);
+      expect(forwarded).toEqual(replaceBody);
+      expect(forwarded.replaceExisting).toBe(true);
+    });
+
+    it("multi-day: reshapes resultingWindows on every day entry", async () => {
+      const days = [
+        {
+          date: "2026-07-18",
+          resultingWindows: [
+            { startAt: "2026-07-18T16:00:00.000Z", endAt: "2026-07-18T17:00:00.000Z" },
+          ],
+          trimmed: [],
+          inert: false,
+        },
+        {
+          date: "2026-07-19",
+          resultingWindows: [
+            { startAt: "2026-07-19T16:00:00+00:00", endAt: "2026-07-19T17:00:00+00:00" },
+          ],
+          trimmed: [{ kind: "ADDITIONAL", startLocal: "09:00", windowMin: 60 }],
+          inert: false,
+        },
+      ];
+      mockCoreByPath({
+        "/availability/preview": coreRead({ days, valid: true, message: null }),
+      });
+      const res = await request(app)
+        .post("/v1/availability/preview")
+        .set("Cookie", cookie)
+        .send(multiWindowBody);
+      expect(res.status).toBe(200);
+      expect(res.body.data.days).toHaveLength(2);
+      expect(res.body.data.days[0].resultingWindows).toEqual([
+        { startAt: "2026-07-18T16:00:00Z", endAt: "2026-07-18T17:00:00Z" },
+      ]);
+      expect(res.body.data.days[1].resultingWindows).toEqual([
+        { startAt: "2026-07-19T16:00:00Z", endAt: "2026-07-19T17:00:00Z" },
+      ]);
+      expect(res.body.data.days[1].trimmed).toEqual([
+        { kind: "ADDITIONAL", startLocal: "09:00", windowMin: 60 },
+      ]);
+    });
+
+    it("no cookie → 401 + Auth-Required", async () => {
+      const res = await request(app).post("/v1/availability/preview").send(multiWindowBody);
+      expect(res.status).toBe(401);
+      expect(res.headers["auth-required"]).toBe("reauthenticate");
+    });
+
+    it("Core 422 (e.g. empty windows[] or cross-midnight) → relays the real status AND message verbatim", async () => {
+      mockCoreByPath({
+        "/availability/preview": coreErr(422, { message: "Windows cross midnight" }),
+      });
+      const res = await request(app)
+        .post("/v1/availability/preview")
+        .set("Cookie", cookie)
+        .send(multiWindowBody);
+      expect(res.status).toBe(422);
+      // The backend's specific reason reaches the guide verbatim — NOT a blanket UPSTREAM_ERROR.
+      expect(res.body.message).toMatch(/cross midnight/i);
+      expect(res.body.code).not.toBe("UPSTREAM_ERROR");
+    });
+
+    it("is NOT blocked by the CSRF guard on a cross-site Origin (deliberate — a pure read, no state mutation)", async () => {
+      mockCoreByPath({
+        "/availability/preview": coreRead({ days: [], valid: true, message: null }),
+      });
+      const res = await request(app)
+        .post("/v1/availability/preview")
+        .set("Cookie", cookie)
+        .set("Origin", "https://evil.test")
+        .send(multiWindowBody);
+      expect(res.status).toBe(200);
+    });
+  });
+
+  describe("participant slots read (GET /v1/offerings/:id/slots)", () => {
+    const slot = { startAt: "2026-08-01T15:00:00.000Z", endAt: "2026-08-01T15:30:00.000Z" };
+
+    it("reshapes each slot's startAt/endAt to canonical UTC Z", async () => {
+      mockCoreByPath({ "/offerings/off1/slots": coreRead([slot]) });
+      const res = await request(app).get("/v1/offerings/off1/slots").set("Cookie", cookie);
+      expect(res.status).toBe(200);
+      expect(res.body.data).toEqual([
+        { startAt: "2026-08-01T15:00:00Z", endAt: "2026-08-01T15:30:00Z" },
+      ]);
+      expect(res.body.meta).toBeDefined();
+    });
+
+    it("forwards the :id path param and from/to query params to the correct Core path", async () => {
+      const mock = mockCoreByPath({ "/offerings/off1/slots": coreRead([slot]) });
+      const res = await request(app)
+        .get("/v1/offerings/off1/slots")
+        .query({ from: "2026-08-01", to: "2026-08-31" })
+        .set("Cookie", cookie);
+      expect(res.status).toBe(200);
+      const [url] = mock.mock.calls[0] as [string, RequestInit];
+      const parsed = new URL(url);
+      expect(parsed.pathname).toBe("/offerings/off1/slots");
+      expect(parsed.searchParams.get("from")).toBe("2026-08-01");
+      expect(parsed.searchParams.get("to")).toBe("2026-08-31");
+    });
+
+    it("calls Core without a query string when from/to are absent", async () => {
+      const mock = mockCoreByPath({ "/offerings/off1/slots": coreRead([slot]) });
+      const res = await request(app).get("/v1/offerings/off1/slots").set("Cookie", cookie);
+      expect(res.status).toBe(200);
+      const [url] = mock.mock.calls[0] as [string, RequestInit];
+      expect(new URL(url).search).toBe("");
+    });
+
+    it("returns an empty array when Core has no bookable slots", async () => {
+      mockCoreByPath({ "/offerings/off1/slots": coreRead([]) });
+      const res = await request(app).get("/v1/offerings/off1/slots").set("Cookie", cookie);
+      expect(res.status).toBe(200);
+      expect(res.body.data).toEqual([]);
+    });
+
+    it("no cookie → 401 + Auth-Required", async () => {
+      const res = await request(app).get("/v1/offerings/off1/slots");
+      expect(res.status).toBe(401);
+      expect(res.headers["auth-required"]).toBe("reauthenticate");
+    });
+
+    it("Core 404 (offering not found/inactive) → surfaces the real 404", async () => {
+      mockCoreByPath({ "/offerings/off1/slots": coreErr(404) });
+      const res = await request(app).get("/v1/offerings/off1/slots").set("Cookie", cookie);
+      expect(res.status).toBe(404);
+      expect(res.body).toMatchObject({ code: "UPSTREAM_ERROR" });
+    });
+
+    it("Core 403 (non-participant) → surfaces the real 403", async () => {
+      mockCoreByPath({ "/offerings/off1/slots": coreErr(403) });
+      const res = await request(app).get("/v1/offerings/off1/slots").set("Cookie", cookie);
+      expect(res.status).toBe(403);
+      expect(res.body).toMatchObject({ code: "UPSTREAM_ERROR" });
+    });
+  });
+});

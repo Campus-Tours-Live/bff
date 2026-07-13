@@ -7,6 +7,15 @@ export interface WriteOpts {
   correlationId?: string;
 }
 
+/** Core's `AvailabilityWriteResponse<T>` wire shape (Contract B, CTL-54): a write's `data`
+ *  alongside the `affectedBookings` warning list. Used by {@link CoreClient.postFull} /
+ *  {@link CoreClient.patchFull} / {@link CoreClient.delFull} for endpoints whose write
+ *  response is not the plain `{ data }` envelope (see CTL-56 availability writes). */
+export interface CoreWriteEnvelope<T, A> {
+  data: T;
+  affectedBookings: A[];
+}
+
 /**
  * Client for the one downstream the BFF talks to — the Core API. Holds the forward
  * Bearer so handlers don't thread it through every call, and unwraps the Core's
@@ -62,21 +71,47 @@ export class CoreClient {
       throw new CoreError(502);
     }
     if (r.status === 401) throw new CoreAuthError();
-    if (!r.ok) throw new CoreError(r.status);
+    if (!r.ok) {
+      // Capture the raw body + content-type so a `withMutation`-wrapped read (e.g. the override
+      // preview, CTL-56 B3) can relay Core's 4xx status AND message verbatim. `withSession`
+      // consumers ignore these fields, so this is a safe, additive change to the read path.
+      const raw = await r.text().catch(() => "");
+      throw new CoreError(r.status, raw, r.headers.get("content-type") ?? undefined);
+    }
     const body = (await r.json().catch(() => null)) as { data?: T } | null;
     return CoreClient.unwrap<T>(body);
   }
 
   post<T>(path: string, body: unknown, opts: WriteOpts): Promise<T> {
-    return this.write<T>("POST", path, body, opts);
+    return this.write<{ data?: T }>("POST", path, body, opts).then((b) => CoreClient.unwrap<T>(b));
   }
 
   del<T>(path: string, opts: WriteOpts): Promise<T> {
-    return this.write<T>("DELETE", path, undefined, opts);
+    return this.write<{ data?: T }>("DELETE", path, undefined, opts).then((b) =>
+      CoreClient.unwrap<T>(b),
+    );
+  }
+
+  /**
+   * Full-envelope write variants (POST/PATCH/DELETE) for endpoints whose write response is
+   * NOT the plain `{ data }` envelope but Core's `AvailabilityWriteResponse{ data,
+   * affectedBookings, meta }` (CTL-56) — callers need `affectedBookings` alongside `data`, so
+   * these skip the `data`-only unwrap that {@link post}/{@link del} apply.
+   */
+  postFull<T, A>(path: string, body: unknown, opts: WriteOpts): Promise<CoreWriteEnvelope<T, A>> {
+    return this.write<CoreWriteEnvelope<T, A>>("POST", path, body, opts);
+  }
+
+  patchFull<T, A>(path: string, body: unknown, opts: WriteOpts): Promise<CoreWriteEnvelope<T, A>> {
+    return this.write<CoreWriteEnvelope<T, A>>("PATCH", path, body, opts);
+  }
+
+  delFull<T, A>(path: string, opts: WriteOpts): Promise<CoreWriteEnvelope<T, A>> {
+    return this.write<CoreWriteEnvelope<T, A>>("DELETE", path, undefined, opts);
   }
 
   private async write<T>(
-    method: "POST" | "DELETE",
+    method: "POST" | "PATCH" | "DELETE",
     path: string,
     body: unknown,
     opts: WriteOpts,
@@ -103,7 +138,6 @@ export class CoreClient {
       const raw = await r.text().catch(() => "");
       throw new CoreError(r.status, raw, r.headers.get("content-type") ?? undefined);
     }
-    const parsed = JSON.parse((await r.text().catch(() => "")) || "null") as { data?: T } | null;
-    return CoreClient.unwrap<T>(parsed);
+    return JSON.parse((await r.text().catch(() => "")) || "null") as T;
   }
 }

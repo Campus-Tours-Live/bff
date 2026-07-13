@@ -633,6 +633,575 @@ export const CancelBookingRequestSchema = z.object({
   reason: z.string().max(1000).optional(),
 });
 
+// --- Availability schemas (Contract A for CTL-56: rules/exceptions/settings + slots) ---
+//
+// Wall-clock rule/exception/settings fields (`startLocal`, `windowMin`, `effectiveFrom`/
+// `effectiveTo`, `exceptionDate`) carry no absolute instant and pass through from Core
+// unchanged (CTL-49 only normalizes absolute instants). Only `settings.updatedAt` and the
+// occurrence/slot `startAt`/`endAt` are absolute instants — reshaped to canonical UTC `Z`
+// by src/api/_shared/reshape.ts before these schemas ever see them.
+
+/** `kind` of a one-off availability exception. */
+export const ExceptionKindEnum = z.enum(["UNAVAILABLE", "ADDITIONAL"]);
+
+/** Whether a guide's bookings auto-confirm or require manual approval. */
+export const AcceptanceModeEnum = z.enum(["AUTO", "MANUAL"]);
+
+/** Request body to create a weekly recurring availability rule. */
+export const CreateAvailabilityRuleRequestSchema = z.object({
+  dayOfWeek: z.number().int().min(0).max(6).openapi({
+    description: "Day of week the rule applies to (0=Sunday .. 6=Saturday).",
+    example: 1,
+  }),
+  startLocal: z.string().openapi({
+    description: "Wall-clock start time of day, 24h `HH:mm`, in the guide's account timezone.",
+    example: "09:00",
+  }),
+  windowMin: z.number().int().positive().openapi({
+    description: "Window length in minutes (> 0).",
+    example: 120,
+  }),
+  effectiveFrom: z.string().optional().openapi({
+    description: "First date (inclusive, ISO-8601) the rule is active; omitted = always.",
+    example: "2026-01-01",
+  }),
+  effectiveTo: z.string().optional().openapi({
+    description: "Last date (inclusive, ISO-8601) the rule is active; omitted = open-ended.",
+    example: "2026-12-31",
+  }),
+  active: z.boolean().optional().openapi({
+    description: "Whether the rule is enabled; omitted defaults to true.",
+    example: true,
+  }),
+});
+
+/** Request body to update a rule — every field optional (partial update). */
+export const UpdateAvailabilityRuleRequestSchema = CreateAvailabilityRuleRequestSchema.partial();
+
+/** A guide's weekly recurring availability window (Core `AvailabilityRuleResponse`). */
+export const AvailabilityRuleResponseSchema = registry.register(
+  "AvailabilityRuleResponse",
+  z
+    .object({
+      id: z.string().openapi({ description: "Rule id.", example: "r1" }),
+      dayOfWeek: z.number().int().min(0).max(6).openapi({
+        description: "Day of week the rule applies to (0=Sunday .. 6=Saturday).",
+        example: 1,
+      }),
+      startLocal: z.string().openapi({
+        description: "Wall-clock start time of day, 24h `HH:mm`.",
+        example: "09:00",
+      }),
+      windowMin: z.number().int().positive().openapi({
+        description: "Window length in minutes (> 0).",
+        example: 120,
+      }),
+      timezone: z.string().openapi({
+        description:
+          "The guide's account timezone the wall-clock fields are relative to (IANA name).",
+        example: "America/Los_Angeles",
+      }),
+      effectiveFrom: z.string().nullable().openapi({
+        description: "First date (inclusive) the rule is active; null = always.",
+        example: "2026-01-01",
+      }),
+      effectiveTo: z.string().nullable().openapi({
+        description: "Last date (inclusive) the rule is active; null = open-ended.",
+        example: null,
+      }),
+      active: z
+        .boolean()
+        .openapi({ description: "Whether the rule is currently enabled.", example: true }),
+    })
+    .openapi("AvailabilityRuleResponse", {
+      description: "A guide's weekly recurring availability window.",
+    }),
+);
+
+/**
+ * Request body to create a one-off availability exception (Core `AvailabilityExceptionRequest`,
+ * `POST /availability/exceptions`; CTL-56 B4 fix). The caller supplies EITHER `exceptionDate` (a
+ * single date) OR both `dateFrom`/`dateTo` (an inclusive multi-day range, CTL-54 v2.1 Task 3) —
+ * never a mix; `kind`/`startLocal`/`windowMin` are always required (Core
+ * `AvailabilityWriteService.validateExceptionInput`). There is no separate ALL_DAY kind — an
+ * all-day UNAVAILABLE block is expressed as `startLocal: "00:00"`, `windowMin: 1440`, not by
+ * omitting the fields.
+ */
+export const CreateAvailabilityExceptionRequestSchema = z.object({
+  exceptionDate: z
+    .string()
+    .optional()
+    .openapi({
+      description:
+        "ISO-8601 date this exception applies to (single-date form). Mutually exclusive with " +
+        "`dateFrom`/`dateTo`; required if those are omitted.",
+      example: "2026-08-01",
+    }),
+  kind: ExceptionKindEnum.openapi({
+    description:
+      "UNAVAILABLE blocks the window (or whole day); ADDITIONAL adds an extra one-off window.",
+    example: "UNAVAILABLE",
+  }),
+  startLocal: z.string().openapi({
+    description:
+      "Wall-clock start time `HH:mm`. Always required — an all-day UNAVAILABLE block is " +
+      '`"00:00"` with `windowMin: 1440`, not an omitted value.',
+    example: "09:00",
+  }),
+  windowMin: z.number().int().positive().openapi({
+    description: "Window length in minutes (> 0). Always required.",
+    example: 60,
+  }),
+  reason: z.string().optional().openapi({
+    description: "Free-text reason, shown to the guide only.",
+    example: "Holiday",
+  }),
+  dateFrom: z
+    .string()
+    .optional()
+    .openapi({
+      description:
+        "ISO-8601 inclusive start date of a multi-day override. Requires `dateTo`; mutually " +
+        "exclusive with `exceptionDate`. Capped at 366 days from `dateTo`.",
+      example: "2026-08-01",
+    }),
+  dateTo: z
+    .string()
+    .optional()
+    .openapi({
+      description:
+        "ISO-8601 inclusive end date of a multi-day override. Requires `dateFrom`; mutually " +
+        "exclusive with `exceptionDate`.",
+      example: "2026-08-03",
+    }),
+});
+
+/**
+ * Request body to update an exception (Core `AvailabilityExceptionRequest`,
+ * `PATCH /availability/exceptions/{id}`; CTL-56 item 2 fix). This is NOT a partial patch: Core's
+ * `AvailabilityWriteService.updateException` deletes the existing row and rebuilds it via the
+ * SAME `validateExceptionInput` as create, so `kind`/`startLocal`/`windowMin` (and the
+ * exceptionDate-XOR-dateFrom/dateTo choice) are required exactly as they are on create — the
+ * shape is identical.
+ */
+export const UpdateAvailabilityExceptionRequestSchema = CreateAvailabilityExceptionRequestSchema;
+
+/** One time window (a wall-clock start + a length in minutes) within an atomic override
+ *  replace (Core `OverrideReplaceRequest.Window`, CTL-54 v2.1 B2). Wall-clock — no absolute
+ *  instant, so name-for-name with the backend record. */
+const OverrideReplaceWindowSchema = z.object({
+  startLocal: z.string().openapi({
+    description: "Wall-clock start time of day, 24h `HH:mm`, in the guide's settings timezone.",
+    example: "09:00",
+  }),
+  windowMin: z.number().int().positive().openapi({
+    description: "Window length in minutes (> 0).",
+    example: 60,
+  }),
+});
+
+/**
+ * Request body for `POST /v1/availability/overrides/replace` — an ATOMIC single-day replace of
+ * ONE kind's date-specific overrides (Core `OverrideReplaceRequest`, CTL-54 v2.1 B2). The
+ * guide's existing same-kind exceptions for `date` are dropped and replaced by exactly `windows`
+ * in one transaction (other-kind exceptions on that date are preserved, trimmed only where a new
+ * window overlaps). An EMPTY `windows` list is allowed and means "clear this kind for the day".
+ * Name-for-name with the backend record: a single `date` (NOT `dateFrom`/`dateTo`) — there is
+ * deliberately no date-range field. `guideId` is server-resolved from the session; never in the body.
+ */
+export const OverrideReplaceRequestSchema = z.object({
+  date: z.string().openapi({
+    description: "ISO-8601 date whose same-kind overrides are being replaced.",
+    example: "2026-07-12",
+  }),
+  kind: ExceptionKindEnum.openapi({
+    description:
+      "Which kind of override to replace on this date. UNAVAILABLE removes availability; " +
+      "ADDITIONAL adds it. Only this kind's existing exceptions for the date are replaced.",
+    example: "UNAVAILABLE",
+  }),
+  windows: z.array(OverrideReplaceWindowSchema).openapi({
+    description:
+      "The time windows this kind should have on the date after the replace. MAY be empty — an " +
+      "empty list clears this kind for the day. Later windows trim earlier overlapping ones " +
+      "(newest-wins).",
+  }),
+});
+
+/** One time window (a wall-clock start + a length in minutes) within an atomic weekly-rule
+ *  replace (Core `RulesReplaceRequest.Window`, CTL-54 v2.1 B2). Wall-clock — no absolute
+ *  instant, so name-for-name with the backend record. */
+const RulesReplaceWindowSchema = z.object({
+  startLocal: z.string().openapi({
+    description: "Wall-clock start time of day, 24h `HH:mm`, in the guide's settings timezone.",
+    example: "09:00",
+  }),
+  windowMin: z.number().int().positive().openapi({
+    description: "Window length in minutes (> 0).",
+    example: 60,
+  }),
+});
+
+/**
+ * Request body for `POST /v1/availability/rules/replace` — an ATOMIC replace of ONE weekday's
+ * recurring availability rules (Core `RulesReplaceRequest`, CTL-54 v2.1 B2, the weekly
+ * counterpart to {@link OverrideReplaceRequestSchema}). The guide's existing ACTIVE rules for
+ * `dayOfWeek` are dropped and replaced by exactly `windows` in one transaction (other weekdays
+ * are untouched). An EMPTY `windows` list is allowed and means "clear this weekday's rules".
+ * Name-for-name with the backend record: deliberately no `timezone`/`effectiveFrom`/
+ * `effectiveTo`/`kind` field — every inserted rule takes the guide's settings timezone, an
+ * open-ended effective range starting today, and is active (the read-only-tz invariant).
+ * `guideId` is server-resolved from the session; never in the body.
+ */
+export const RulesReplaceRequestSchema = z.object({
+  dayOfWeek: z.number().int().min(0).max(6).openapi({
+    description: "Day of week whose rules are being replaced (0=Sunday .. 6=Saturday).",
+    example: 1,
+  }),
+  windows: z.array(RulesReplaceWindowSchema).openapi({
+    description:
+      "The time windows this weekday should have after the replace. MAY be empty — an empty " +
+      "list clears this weekday's rules. Overlapping or touching windows are accepted and " +
+      "merged (coalesced) into disjoint rules, not rejected.",
+  }),
+});
+
+/** A one-off date override to a guide's recurring rules (Core `AvailabilityExceptionResponse`). */
+export const AvailabilityExceptionResponseSchema = registry.register(
+  "AvailabilityExceptionResponse",
+  z
+    .object({
+      id: z.string().openapi({ description: "Exception id.", example: "e1" }),
+      exceptionDate: z.string().openapi({
+        description: "ISO-8601 date this exception applies to.",
+        example: "2026-08-01",
+      }),
+      kind: ExceptionKindEnum.openapi({
+        description:
+          "UNAVAILABLE blocks the window (or whole day); ADDITIONAL adds an extra window.",
+        example: "UNAVAILABLE",
+      }),
+      startLocal: z.string().openapi({
+        description:
+          "Wall-clock start time `HH:mm`. Always present — Core encodes an all-day block as `00:00`, never null.",
+        example: "09:00",
+      }),
+      windowMin: z.number().int().positive().openapi({
+        description:
+          "Window length in minutes. Always present — Core encodes an all-day block as `1440`, never null.",
+        example: 60,
+      }),
+      reason: z
+        .string()
+        .nullable()
+        .openapi({ description: "Free-text reason (nullable).", example: "Holiday" }),
+    })
+    .openapi("AvailabilityExceptionResponse", {
+      description: "A one-off date override to the guide's recurring rules.",
+    }),
+);
+
+/** A guide's booking-acceptance and scheduling-window settings (Core `GuideBookingSettingsResponse`). */
+export const AvailabilitySettingsResponseSchema = registry.register(
+  "AvailabilitySettingsResponse",
+  z
+    .object({
+      guideId: z.string().openapi({ description: "Guide's user id.", example: "g1" }),
+      acceptanceMode: AcceptanceModeEnum.openapi({
+        description: "Whether bookings auto-confirm (AUTO) or require guide approval (MANUAL).",
+        example: "AUTO",
+      }),
+      responseDeadlineMin: z.number().int().openapi({
+        description: "Minutes a guide has to respond to a pending booking (MANUAL mode).",
+        example: 60,
+      }),
+      minNoticeMin: z.number().int().openapi({
+        description: "Minimum lead time (minutes) a booking must be made ahead of its start.",
+        example: 120,
+      }),
+      maxAdvanceDays: z.number().int().openapi({
+        description: "How far in advance (days) a booking can be made.",
+        example: 30,
+      }),
+      bufferBeforeMin: z.number().int().openapi({
+        description: "Buffer (minutes) blocked immediately before each booking.",
+        example: 10,
+      }),
+      bufferAfterMin: z.number().int().openapi({
+        description: "Buffer (minutes) blocked immediately after each booking.",
+        example: 10,
+      }),
+      durationsOffered: z.array(z.number().int()).openapi({
+        description: "Tour durations (minutes) the guide offers.",
+        example: [30, 60],
+      }),
+      timezone: z.string().openapi({
+        description: "The guide's account timezone (IANA name).",
+        example: "America/Los_Angeles",
+      }),
+      updatedAt: z.string().openapi({
+        description: "Last-updated timestamp, canonical UTC `Z` (CTL-49).",
+        example: "2026-07-01T12:00:00Z",
+      }),
+    })
+    .openapi("AvailabilitySettingsResponse", {
+      description: "A guide's booking-acceptance and scheduling-window settings.",
+    }),
+);
+
+/** Request body to update settings — every field optional except the read-only `guideId`/`updatedAt`. */
+export const UpdateAvailabilitySettingsRequestSchema = AvailabilitySettingsResponseSchema.omit({
+  guideId: true,
+  updatedAt: true,
+}).partial();
+
+/** A single resolved bookable window: an absolute UTC instant interval (CTL-49). Shared shape
+ *  for the resolved-availability read's `occurrences` and the participant slots read. */
+export const AvailabilityOccurrenceSchema = registry.register(
+  "AvailabilityOccurrence",
+  z
+    .object({
+      startAt: z.string().openapi({
+        description: "Occurrence/slot start, canonical UTC `Z` (CTL-49).",
+        example: "2026-08-01T15:00:00Z",
+      }),
+      endAt: z.string().openapi({
+        description: "Occurrence/slot end, canonical UTC `Z` (CTL-49).",
+        example: "2026-08-01T16:00:00Z",
+      }),
+    })
+    .openapi("AvailabilityOccurrence", {
+      description: "A single resolved bookable window (absolute UTC instant interval).",
+    }),
+);
+
+/** `GET /v1/availability` — a guide's active rules + coalesced occurrences + DST gap-days. */
+export const ResolvedAvailabilityResponseSchema = registry.register(
+  "ResolvedAvailabilityResponse",
+  z
+    .object({
+      rules: z
+        .array(AvailabilityRuleResponseSchema)
+        .openapi({ description: "The guide's active recurring rules." }),
+      occurrences: z.array(AvailabilityOccurrenceSchema).openapi({
+        description:
+          "Coalesced, disjoint, ascending bookable occurrences over the requested window.",
+      }),
+      dstGapDays: z.array(z.string()).openapi({
+        description:
+          "ISO dates a DST spring-forward eliminates (zero wall-clock occurrences that day " +
+          "even though a rule would otherwise apply).",
+        example: ["2026-03-08"],
+      }),
+      bookable: z.boolean().openapi({
+        description:
+          "Derived readiness signal, passed through verbatim from backend (no recompute): " +
+          "true iff the guide has at least one materialized occurrence that has not yet " +
+          "ended, i.e. a participant could book right now.",
+        example: true,
+      }),
+      hasWeeklyHours: z.boolean().openapi({
+        description:
+          "Derived readiness signal, passed through verbatim from backend (no recompute): " +
+          "true iff the guide has at least one active weekly rule (an expired-but-active " +
+          "rule still counts; a soft-deleted/inactive rule does not).",
+        example: true,
+      }),
+    })
+    .openapi("ResolvedAvailabilityResponse", {
+      description:
+        "The guide's resolved availability: rules + coalesced occurrences + DST gap-days.",
+    }),
+);
+
+/** One field of the proposed override that a day's dry-run preview trimmed against an
+ *  existing conflict (Core `OverridePreviewResponse.days[].trimmed`, CTL-54 v2.1). Wall-clock
+ *  fields — no absolute instant, so CTL-49 does not touch this shape (same rationale as
+ *  {@link AvailabilityExceptionResponseSchema}). */
+const OverridePreviewTrimmedItemSchema = z.object({
+  kind: ExceptionKindEnum.openapi({
+    description: "Which side of the proposed override this trimmed entry names.",
+    example: "ADDITIONAL",
+  }),
+  startLocal: z.string().openapi({
+    description: "Wall-clock start time `HH:mm` of the (possibly trimmed) window.",
+    example: "09:00",
+  }),
+  windowMin: z.number().int().positive().openapi({
+    description: "Window length in minutes (> 0) after trimming against the conflict.",
+    example: 30,
+  }),
+});
+
+/** A single date's dry-run result within the override preview (Core
+ *  `OverridePreviewResponse.days[]`, CTL-54 v2.1): the occurrences that date resolves to
+ *  after applying the proposed override, and which requested fields got trimmed. */
+const OverridePreviewDaySchema = z.object({
+  date: z.string().openapi({
+    description: "ISO-8601 date this day's dry-run result applies to.",
+    example: "2026-07-18",
+  }),
+  resultingWindows: z.array(AvailabilityOccurrenceSchema).openapi({
+    description:
+      "Bookable windows this date resolves to after applying the proposed override, " +
+      "canonical UTC `Z` (CTL-49).",
+  }),
+  trimmed: z.array(OverridePreviewTrimmedItemSchema).openapi({
+    description:
+      "Requested override fields (by `kind`) that were trimmed against an existing " +
+      "conflict; empty when nothing was trimmed.",
+  }),
+  inert: z.boolean().openapi({
+    description:
+      "True when saving the proposed override won't materialize this date — it falls outside " +
+      "the bookable horizon or is in the past (Core `OverridePreviewResponse.DatePreview.inert`, " +
+      "CTL-54 v2.1). Passed through from Core verbatim; the BFF does not recompute it.",
+    example: false,
+  }),
+});
+
+/** `GET /v1/availability/preview` — a read-only, non-persisting dry-run of a proposed
+ *  date-specific override across `[dateFrom, dateTo]` (Core `OverridePreviewResponse`,
+ *  CTL-54 v2.1). */
+export const OverridePreviewResponseSchema = registry.register(
+  "OverridePreviewResponse",
+  z
+    .object({
+      days: z.array(OverridePreviewDaySchema).openapi({
+        description: "Per-date dry-run results across the requested `[dateFrom, dateTo]` range.",
+      }),
+      valid: z.boolean().openapi({
+        description:
+          "Whether the proposed override is valid. This preview is valid=true-always on " +
+          "content (trimming, not rejection, resolves conflicts) — it only reports invalid on " +
+          "a bad param/range.",
+        example: true,
+      }),
+      message: z.string().nullable().openapi({
+        description: "Human-readable detail; null when `valid` is true.",
+        example: null,
+      }),
+    })
+    .openapi("OverridePreviewResponse", {
+      description:
+        "Read-only, non-persisting dry-run preview of a proposed date-specific availability " +
+        "override.",
+    }),
+);
+
+/** One proposed window within a multi-window override preview request (Core `POST
+ *  /availability/preview`, CTL-56 Phase 2 request body). Wall-clock, like {@link
+ *  OverridePreviewTrimmedItemSchema} — no absolute instant. */
+const OverrideMultiPreviewWindowSchema = z.object({
+  startLocal: z.string().openapi({
+    description: "Wall-clock start time of day, 24h `HH:mm`, in the guide's account timezone.",
+    example: "09:00",
+  }),
+  windowMin: z.number().int().positive().openapi({
+    description: "Window length in minutes (> 0).",
+    example: 60,
+  }),
+});
+
+/** Request body for `POST /v1/availability/preview` — the net result of applying MANY
+ *  proposed windows together across `[dateFrom, dateTo]` (Core Phase 1, CTL-56 Phase 2).
+ *  `guideId` is server-resolved from the session; never part of this body. */
+export const OverrideMultiPreviewRequestSchema = z.object({
+  dateFrom: z.string().openapi({
+    description: "ISO-8601 first date (inclusive) of the proposed override.",
+    example: "2026-07-18",
+  }),
+  dateTo: z.string().openapi({
+    description: "ISO-8601 last date (inclusive) of the proposed override.",
+    example: "2026-07-19",
+  }),
+  kind: ExceptionKindEnum.openapi({
+    description:
+      "UNAVAILABLE blocks the windows (or whole day); ADDITIONAL proposes extra windows.",
+    example: "ADDITIONAL",
+  }),
+  windows: z.array(OverrideMultiPreviewWindowSchema).openapi({
+    description:
+      "The proposed windows to apply together — non-empty unless replaceExisting is true " +
+      "(empty windows clears that kind for the day).",
+  }),
+  replaceExisting: z
+    .boolean()
+    .optional()
+    .openapi({
+      description:
+        "When true, replace this kind's existing overrides for the day with exactly these " +
+        "windows (empty windows clears them); when false or omitted, apply on top of existing.",
+      example: true,
+    }),
+});
+
+/** A booking whose schedule shifted or was cancelled as a side effect of an availability
+ *  write (Core `AvailabilityWriteResponse.affectedBookings`, CTL-54). */
+export const AffectedBookingSchema = registry.register(
+  "AffectedBooking",
+  z
+    .object({
+      bookingId: z.string().openapi({ description: "Affected booking id.", example: "b1" }),
+      bookingNumber: z
+        .string()
+        .openapi({ description: "Human-facing booking number.", example: "BK-001" }),
+      status: z.string().openapi({
+        description: "The booking's status after the side effect.",
+        example: "CONFIRMED",
+      }),
+      scheduledStartAt: z.string().openapi({
+        description: "The booking's (possibly shifted) start, canonical UTC `Z` (CTL-49).",
+        example: "2026-08-01T15:00:00Z",
+      }),
+      scheduledEndAt: z.string().openapi({
+        description: "The booking's (possibly shifted) end, canonical UTC `Z` (CTL-49).",
+        example: "2026-08-01T16:00:00Z",
+      }),
+    })
+    .openapi("AffectedBooking", {
+      description:
+        "A booking whose schedule shifted or that was cancelled as a side effect of this " +
+        "availability write — a warning list, not an error.",
+    }),
+);
+
+/**
+ * The write-response envelope an availability write returns: `data` (the written resource,
+ * or its list on delete) alongside `affectedBookings`, both under the standard `meta`.
+ * Distinct from the plain `{ data, meta }` read envelope ({@link Envelope}) — availability
+ * writes are the only BFF routes that carry this sibling field (Core's
+ * `AvailabilityWriteResponse`, CTL-54).
+ */
+export function WriteEnvelope<T extends z.ZodTypeAny>(
+  data: T,
+): z.ZodObject<{
+  data: T;
+  affectedBookings: z.ZodArray<typeof AffectedBookingSchema>;
+  meta: typeof Meta;
+}> {
+  return z.object({
+    data: data.openapi({ description: "The written resource (or its list on delete)." }),
+    affectedBookings: z.array(AffectedBookingSchema).openapi({
+      description:
+        "Bookings whose schedule shifted or were cancelled as a side effect of this write.",
+    }),
+    meta: Meta,
+  });
+}
+
+/** Wrap a payload example in the `{ data, affectedBookings, meta }` write envelope. */
+export function writeEnvelope<T>(
+  data: T,
+  affectedBookings: z.infer<typeof AffectedBookingSchema>[] = [],
+): {
+  data: T;
+  affectedBookings: z.infer<typeof AffectedBookingSchema>[];
+  meta: { requestId: string };
+} {
+  return { data, affectedBookings, meta: { requestId: REQUEST_ID_EXAMPLE } };
+}
+
 // --- Runtime response-shape contracts (loose on Core passthrough, strict on BFF-owned) ---
 //
 // These are used by the dev-only assertion in src/api/_shared/envelope.ts and by the

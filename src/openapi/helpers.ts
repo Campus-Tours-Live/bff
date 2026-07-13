@@ -17,6 +17,7 @@ import type { z } from "zod";
 import type { ResponseConfig, RouteConfig } from "@asteasolutions/zod-to-openapi";
 import {
   Envelope,
+  WriteEnvelope,
   Problem,
   problem,
   registry,
@@ -58,6 +59,22 @@ export function enveloped(
   return {
     description,
     content: { "application/json": { schema: Envelope(dataSchema), ...bodies } },
+  };
+}
+
+/**
+ * A `200` response whose body is the availability write envelope `{ data, affectedBookings,
+ * meta }` (see {@link WriteEnvelope}) around `dataSchema` — distinct from {@link enveloped}'s
+ * plain `{ data, meta }`, used ONLY by the availability write routes (CTL-56).
+ */
+export function envelopedWrite(
+  dataSchema: z.ZodTypeAny,
+  opts: { description: string } & BodyExamples,
+): ResponseConfig {
+  const { description, ...bodies } = opts;
+  return {
+    description,
+    content: { "application/json": { schema: WriteEnvelope(dataSchema), ...bodies } },
   };
 }
 

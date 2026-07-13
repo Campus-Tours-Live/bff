@@ -31,20 +31,38 @@ import {
   guideProgressExample,
   participantProgressExample,
   envelope,
+  writeEnvelope,
   BookingResponseSchema,
   BookingListSchema,
   CreateBookingRequestSchema,
   CancelBookingRequestSchema,
+  CreateAvailabilityRuleRequestSchema,
+  UpdateAvailabilityRuleRequestSchema,
+  AvailabilityRuleResponseSchema,
+  CreateAvailabilityExceptionRequestSchema,
+  UpdateAvailabilityExceptionRequestSchema,
+  AvailabilityExceptionResponseSchema,
+  UpdateAvailabilitySettingsRequestSchema,
+  AvailabilitySettingsResponseSchema,
+  AvailabilityOccurrenceSchema,
+  ResolvedAvailabilityResponseSchema,
+  ExceptionKindEnum,
+  OverridePreviewResponseSchema,
+  OverrideMultiPreviewRequestSchema,
+  OverrideReplaceRequestSchema,
+  RulesReplaceRequestSchema,
 } from "./schemas.js";
 import {
   apiRoute,
   enveloped,
+  envelopedWrite,
   problem400,
   problem401,
   problem404,
   problem409,
   problem422,
   problem502,
+  problemResponse,
 } from "./helpers.js";
 
 // Re-export the schema surface so consumers (handlers, tests) have one import site.
@@ -283,6 +301,645 @@ apiRoute({
   },
 });
 
+// --- Availability (guide CRUD + resolved read; participant slots) — CTL-56 ---
+//
+// Generic routes: role is enforced by Core's authz, not this router, so these carry no
+// audience prefix (mirrors the Booking/cart module above). Reads use the framework's generic
+// read-error mapping (any Core 4xx surfaces with its real status and code `UPSTREAM_ERROR`,
+// via withSession) — see the slots 403/404 examples below; writes relay a Core 4xx verbatim
+// (via withMutation), so the 404/422 examples below illustrate Core's real error shape.
+
+const ruleExample = {
+  id: "r1",
+  dayOfWeek: 1,
+  startLocal: "09:00",
+  windowMin: 120,
+  timezone: "America/Los_Angeles",
+  effectiveFrom: "2026-01-01",
+  effectiveTo: null,
+  active: true,
+};
+
+const exceptionExample = {
+  id: "e1",
+  exceptionDate: "2026-08-01",
+  kind: "UNAVAILABLE",
+  startLocal: "09:00",
+  windowMin: 60,
+  reason: "Holiday",
+};
+
+const settingsExample = {
+  guideId: "g1",
+  acceptanceMode: "AUTO",
+  responseDeadlineMin: 60,
+  minNoticeMin: 120,
+  maxAdvanceDays: 30,
+  bufferBeforeMin: 10,
+  bufferAfterMin: 10,
+  durationsOffered: [30, 60],
+  timezone: "America/Los_Angeles",
+  updatedAt: "2026-07-01T12:00:00Z",
+};
+
+const occurrenceExample = { startAt: "2026-08-01T15:00:00Z", endAt: "2026-08-01T16:00:00Z" };
+
+const affectedBookingExample = {
+  bookingId: "b1",
+  bookingNumber: "BK-001",
+  status: "CONFIRMED",
+  scheduledStartAt: "2026-08-01T15:00:00Z",
+  scheduledEndAt: "2026-08-01T16:00:00Z",
+};
+
+const resolvedAvailabilityExample = {
+  rules: [ruleExample],
+  occurrences: [occurrenceExample],
+  dstGapDays: ["2026-03-08"],
+  bookable: true,
+  hasWeeklyHours: true,
+};
+
+const overrideReplaceRequestExample = {
+  date: "2026-07-12",
+  kind: "UNAVAILABLE",
+  windows: [{ startLocal: "09:00", windowMin: 60 }],
+};
+
+const rulesReplaceRequestExample = {
+  dayOfWeek: 1,
+  windows: [{ startLocal: "09:00", windowMin: 60 }],
+};
+
+/** A read-side 4xx: the generic `withSession` mapping (real status, code `UPSTREAM_ERROR`). */
+const upstreamErrorProblem = (status: number, title: string) =>
+  problemResponse(title, problem(status, title, "UPSTREAM_ERROR"));
+
+// GET /v1/availability/rules
+apiRoute({
+  method: "get",
+  path: "/v1/availability/rules",
+  tags: ["Availability"],
+  summary: "List a guide's recurring availability rules",
+  description:
+    "Returns the guide's weekly recurring availability windows, forwarded from Core " +
+    "unchanged — the wall-clock fields (`startLocal`, `windowMin`, `effectiveFrom`/`effectiveTo`) " +
+    "carry no absolute instant, so CTL-49 does not touch this shape. Guide-only; role is " +
+    "enforced by Core.",
+  responses: {
+    200: enveloped(z.array(AvailabilityRuleResponseSchema), {
+      description: "The guide's availability rules.",
+      example: envelope([ruleExample]),
+    }),
+  },
+});
+
+// POST /v1/availability/rules
+apiRoute({
+  method: "post",
+  path: "/v1/availability/rules",
+  tags: ["Availability"],
+  summary: "Create a recurring availability rule",
+  description:
+    "Creates a new weekly recurring availability window. The write may shift or invalidate " +
+    "existing bookings that no longer fit the guide's availability — those are reported back " +
+    "in `affectedBookings` (a warning list, not an error).",
+  request: {
+    body: { content: { "application/json": { schema: CreateAvailabilityRuleRequestSchema } } },
+  },
+  responses: {
+    200: envelopedWrite(AvailabilityRuleResponseSchema, {
+      description: "The created rule, plus any bookings affected by the change.",
+      example: writeEnvelope(ruleExample),
+    }),
+    422: problem422(
+      "AVAILABILITY_RULE_VALIDATION",
+      "Validation failed",
+      "Bad fields, or the rule overlaps an existing one.",
+    ),
+  },
+});
+
+// PATCH /v1/availability/rules/{id}
+apiRoute({
+  method: "patch",
+  path: "/v1/availability/rules/{id}",
+  tags: ["Availability"],
+  summary: "Update a recurring availability rule",
+  description:
+    "Partially updates one of the guide's recurring rules and returns it, plus any bookings " +
+    "affected by the change.",
+  request: {
+    params: z.object({ id: z.string().openapi({ description: "Rule id.", example: "r1" }) }),
+    body: { content: { "application/json": { schema: UpdateAvailabilityRuleRequestSchema } } },
+  },
+  responses: {
+    200: envelopedWrite(AvailabilityRuleResponseSchema, {
+      description: "The updated rule, plus any bookings affected by the change.",
+      example: writeEnvelope({ ...ruleExample, active: false }),
+    }),
+    404: problem404(
+      "AVAILABILITY_RULE_NOT_FOUND",
+      "Not found",
+      "No rule exists with this id for the caller.",
+    ),
+    422: problem422(
+      "AVAILABILITY_RULE_VALIDATION",
+      "Validation failed",
+      "Bad fields, or the update overlaps an existing rule.",
+    ),
+  },
+});
+
+// DELETE /v1/availability/rules/{id}
+apiRoute({
+  method: "delete",
+  path: "/v1/availability/rules/{id}",
+  tags: ["Availability"],
+  summary: "Delete a recurring availability rule",
+  description:
+    "Deletes one of the guide's recurring rules and returns the remaining rules, plus any " +
+    "bookings affected by the change.",
+  request: {
+    params: z.object({ id: z.string().openapi({ description: "Rule id.", example: "r1" }) }),
+  },
+  responses: {
+    200: envelopedWrite(z.array(AvailabilityRuleResponseSchema), {
+      description: "The remaining rules, plus any bookings affected by the deletion.",
+      example: writeEnvelope([], [affectedBookingExample]),
+    }),
+    404: problem404(
+      "AVAILABILITY_RULE_NOT_FOUND",
+      "Not found",
+      "No rule exists with this id for the caller.",
+    ),
+  },
+});
+
+// POST /v1/availability/rules/replace
+apiRoute({
+  method: "post",
+  path: "/v1/availability/rules/replace",
+  tags: ["Availability"],
+  summary: "Atomically replace one weekday's recurring availability rules",
+  description:
+    "Atomically replaces the guide's ACTIVE recurring rules for a single `dayOfWeek` with " +
+    "exactly the supplied `windows`, in one Core transaction; every other weekday is left " +
+    "untouched. An EMPTY `windows` list clears that weekday's rules. Each inserted rule takes " +
+    "the guide's settings timezone, an open-ended effective range starting today, and is " +
+    "active — there is deliberately no `timezone`/`effectiveFrom`/`effectiveTo`/`kind` field on " +
+    "this request, unlike the rule create/patch routes above. Per-window validation (e.g. a " +
+    "window may not cross midnight) runs BEFORE any mutation; overlapping or touching windows " +
+    "are NOT rejected — they are accepted and coalesced (merged) into disjoint maximal rules, " +
+    "the same accept-and-resolve behavior as a single-rule create. The write may shift or " +
+    "invalidate existing bookings that no longer fit; those are reported in `affectedBookings` " +
+    "(a warning list, not an error). A Core 4xx relays VERBATIM.",
+  request: {
+    body: {
+      content: {
+        "application/json": {
+          schema: RulesReplaceRequestSchema,
+          example: rulesReplaceRequestExample,
+        },
+      },
+    },
+  },
+  responses: {
+    200: envelopedWrite(z.array(AvailabilityRuleResponseSchema), {
+      description: "The weekday's resulting active rules, plus any bookings affected.",
+      example: writeEnvelope([ruleExample], [affectedBookingExample]),
+    }),
+    422: problem422(
+      "AVAILABILITY_RULE_VALIDATION",
+      "Validation failed",
+      "dayOfWeek missing or out of range (0-6), or a window's startLocal/windowMin missing or " +
+        "invalid (including a window crossing midnight). Overlapping or touching windows are " +
+        "NOT a 422 — they are coalesced (merged) into disjoint rules and the replace succeeds " +
+        "(200). Rejected before any mutation, so prior rules are left intact.",
+    ),
+  },
+});
+
+// GET /v1/availability/exceptions
+apiRoute({
+  method: "get",
+  path: "/v1/availability/exceptions",
+  tags: ["Availability"],
+  summary: "List a guide's availability exceptions",
+  description:
+    "Returns the guide's one-off date overrides (blocked or extra windows), forwarded from " +
+    "Core unchanged — same wall-clock rationale as the rules above. Guide-only; role is " +
+    "enforced by Core.",
+  responses: {
+    200: enveloped(z.array(AvailabilityExceptionResponseSchema), {
+      description: "The guide's availability exceptions.",
+      example: envelope([exceptionExample]),
+    }),
+  },
+});
+
+// POST /v1/availability/exceptions
+apiRoute({
+  method: "post",
+  path: "/v1/availability/exceptions",
+  tags: ["Availability"],
+  summary: "Create a one-off availability exception",
+  description:
+    "Creates a one-off date override (UNAVAILABLE blocks a window or the whole day; " +
+    "ADDITIONAL adds an extra one-off window) and returns it, plus any bookings affected by " +
+    "the change. The caller supplies EITHER `exceptionDate` (a single date) OR both " +
+    "`dateFrom`/`dateTo` (an inclusive multi-day range, capped at 366 days) — never a mix; " +
+    "`kind`/`startLocal`/`windowMin` are always required (there is no separate ALL_DAY kind — " +
+    'an all-day block is `startLocal: "00:00"`, `windowMin: 1440`).',
+  request: {
+    body: {
+      content: { "application/json": { schema: CreateAvailabilityExceptionRequestSchema } },
+    },
+  },
+  responses: {
+    200: envelopedWrite(AvailabilityExceptionResponseSchema, {
+      description: "The created exception, plus any bookings affected by the change.",
+      example: writeEnvelope(exceptionExample),
+    }),
+    422: problem422(
+      "AVAILABILITY_EXCEPTION_VALIDATION",
+      "Validation failed",
+      "Bad fields, e.g. a missing `startLocal`/`windowMin` on an ADDITIONAL exception.",
+    ),
+  },
+});
+
+// PATCH /v1/availability/exceptions/{id}
+apiRoute({
+  method: "patch",
+  path: "/v1/availability/exceptions/{id}",
+  tags: ["Availability"],
+  summary: "Update an availability exception",
+  description:
+    "Replaces one of the guide's exceptions and returns it, plus any bookings affected by the " +
+    "change. This is NOT a partial patch — Core rebuilds the exception from the request, so " +
+    "`kind`/`startLocal`/`windowMin` are required exactly as on create, and the caller must " +
+    "supply EITHER `exceptionDate` OR both `dateFrom`/`dateTo`, never a mix.",
+  request: {
+    params: z.object({ id: z.string().openapi({ description: "Exception id.", example: "e1" }) }),
+    body: {
+      content: { "application/json": { schema: UpdateAvailabilityExceptionRequestSchema } },
+    },
+  },
+  responses: {
+    200: envelopedWrite(AvailabilityExceptionResponseSchema, {
+      description: "The updated exception, plus any bookings affected by the change.",
+      example: writeEnvelope({ ...exceptionExample, reason: "Storm" }),
+    }),
+    404: problem404(
+      "AVAILABILITY_EXCEPTION_NOT_FOUND",
+      "Not found",
+      "No exception exists with this id for the caller.",
+    ),
+    422: problem422(
+      "AVAILABILITY_EXCEPTION_VALIDATION",
+      "Validation failed",
+      "Bad fields on the update.",
+    ),
+  },
+});
+
+// DELETE /v1/availability/exceptions/{id}
+apiRoute({
+  method: "delete",
+  path: "/v1/availability/exceptions/{id}",
+  tags: ["Availability"],
+  summary: "Delete an availability exception",
+  description:
+    "Deletes one of the guide's exceptions and returns the remaining exceptions, plus any " +
+    "bookings affected by the change.",
+  request: {
+    params: z.object({ id: z.string().openapi({ description: "Exception id.", example: "e1" }) }),
+  },
+  responses: {
+    200: envelopedWrite(z.array(AvailabilityExceptionResponseSchema), {
+      description: "The remaining exceptions, plus any bookings affected by the deletion.",
+      example: writeEnvelope([], [affectedBookingExample]),
+    }),
+    404: problem404(
+      "AVAILABILITY_EXCEPTION_NOT_FOUND",
+      "Not found",
+      "No exception exists with this id for the caller.",
+    ),
+  },
+});
+
+// POST /v1/availability/overrides/replace
+apiRoute({
+  method: "post",
+  path: "/v1/availability/overrides/replace",
+  tags: ["Availability"],
+  summary: "Atomically replace one day's date-specific overrides for a kind",
+  description:
+    "Atomically replaces ONE kind's date-specific overrides for a single `date` with exactly " +
+    "the supplied `windows`, in one Core transaction. The guide's existing same-kind exceptions " +
+    "for the date are dropped and replaced (other-kind exceptions on that date are preserved, " +
+    "trimmed only where a new window overlaps); an EMPTY `windows` list clears that kind for the " +
+    "day. Unlike the exception create/patch routes there is deliberately NO date-range field — " +
+    "just a single `date` plus a `windows` list. The write may shift or invalidate existing " +
+    "bookings that no longer fit; those are reported in `affectedBookings` (a warning list, not " +
+    "an error). A Core 4xx (e.g. a window crossing midnight) relays VERBATIM.",
+  request: {
+    body: {
+      content: {
+        "application/json": {
+          schema: OverrideReplaceRequestSchema,
+          example: overrideReplaceRequestExample,
+        },
+      },
+    },
+  },
+  responses: {
+    200: envelopedWrite(z.array(AvailabilityExceptionResponseSchema), {
+      description: "The date's resulting overrides for the kind, plus any bookings affected.",
+      example: writeEnvelope([exceptionExample], [affectedBookingExample]),
+    }),
+    422: problem422(
+      "AVAILABILITY_OVERRIDE_VALIDATION",
+      "Validation failed",
+      "date/kind missing or invalid, or a window's startLocal/windowMin missing or invalid " +
+        "(including a window crossing midnight). Rejected before any mutation, so a prior " +
+        "override is left intact.",
+    ),
+  },
+});
+
+// GET /v1/availability/settings
+apiRoute({
+  method: "get",
+  path: "/v1/availability/settings",
+  tags: ["Availability"],
+  summary: "Get a guide's booking-acceptance and scheduling-window settings",
+  description:
+    "Returns the guide's settings; `updatedAt` is normalized to canonical UTC `Z` (CTL-49), " +
+    "every other field forwarded from Core unchanged.",
+  responses: {
+    200: enveloped(AvailabilitySettingsResponseSchema, {
+      description: "The guide's settings.",
+      example: envelope(settingsExample),
+    }),
+  },
+});
+
+// PATCH /v1/availability/settings
+apiRoute({
+  method: "patch",
+  path: "/v1/availability/settings",
+  tags: ["Availability"],
+  summary: "Update a guide's booking-acceptance and scheduling-window settings",
+  description:
+    "Partially updates the guide's settings and returns them (`updatedAt` reshaped to UTC " +
+    "`Z`), plus any bookings affected by the change (e.g. a shrunk notice/buffer window).",
+  request: {
+    body: {
+      content: { "application/json": { schema: UpdateAvailabilitySettingsRequestSchema } },
+    },
+  },
+  responses: {
+    200: envelopedWrite(AvailabilitySettingsResponseSchema, {
+      description: "The updated settings, plus any bookings affected by the change.",
+      example: writeEnvelope({ ...settingsExample, acceptanceMode: "MANUAL" }, [
+        affectedBookingExample,
+      ]),
+    }),
+    422: problem422(
+      "AVAILABILITY_SETTINGS_VALIDATION",
+      "Validation failed",
+      "Bad fields, e.g. a non-positive duration or deadline.",
+    ),
+  },
+});
+
+// GET /v1/availability
+apiRoute({
+  method: "get",
+  path: "/v1/availability",
+  tags: ["Availability"],
+  summary: "Get a guide's resolved availability",
+  description:
+    "Resolves the guide's active rules against exceptions and existing bookings into " +
+    "coalesced, disjoint, ascending occurrences over the requested window (`occurrences` " +
+    "reshaped to canonical UTC `Z`, CTL-49) and reports any DST gap-days (a local calendar " +
+    "day a spring-forward transition eliminates). Core's `from`/`to` window is " +
+    "UTC-midnight-anchored, not guide-local, so this bff widens whichever of `from`/`to` is " +
+    "present by 1 calendar day on that side before forwarding to Core, to avoid silently " +
+    "cutting a guide-local edge occurrence at the UTC-midnight boundary — the response may " +
+    "therefore include a few occurrences just outside the exact requested window (precise " +
+    "guide-local re-anchoring is a tracked follow-up). Also carries the backend-derived " +
+    "readiness flags `bookable`/`hasWeeklyHours` (CTL-54 B1) verbatim — this bff never " +
+    "recomputes availability. This is the CTL-55 frontend contract.",
+  request: {
+    query: z.object({
+      from: z
+        .string()
+        .optional()
+        .openapi({
+          description:
+            "Inclusive window start (ISO date). Widened by 1 day earlier before hitting Core " +
+            "to avoid a UTC-midnight edge-cut; see the endpoint description.",
+          example: "2026-08-01",
+        }),
+      to: z
+        .string()
+        .optional()
+        .openapi({
+          description:
+            "Inclusive window end (ISO date). Widened by 1 day later before hitting Core to " +
+            "avoid a UTC-midnight edge-cut; see the endpoint description.",
+          example: "2026-08-31",
+        }),
+    }),
+  },
+  responses: {
+    200: enveloped(ResolvedAvailabilityResponseSchema, {
+      description: "The guide's resolved availability.",
+      example: envelope(resolvedAvailabilityExample),
+    }),
+  },
+});
+
+// GET /v1/offerings/{id}/slots
+apiRoute({
+  method: "get",
+  path: "/v1/offerings/{id}/slots",
+  tags: ["Availability"],
+  summary: "List an offering's bookable slots",
+  description:
+    "Participant-facing bookable slots for a tour offering, reshaped to canonical UTC `Z` " +
+    "(CTL-49). `from`/`to` are forwarded to Core verbatim (same caveat as the resolved-" +
+    "availability read above). Role PARTICIPANT is enforced by Core.",
+  request: {
+    params: z.object({ id: z.string().openapi({ description: "Offering id.", example: "off1" }) }),
+    query: z.object({
+      from: z.string().optional().openapi({
+        description: "Inclusive window start (ISO date), forwarded to Core verbatim.",
+        example: "2026-08-01",
+      }),
+      to: z.string().optional().openapi({
+        description: "Inclusive window end (ISO date), forwarded to Core verbatim.",
+        example: "2026-08-31",
+      }),
+    }),
+  },
+  responses: {
+    200: enveloped(z.array(AvailabilityOccurrenceSchema), {
+      description: "The offering's bookable slots.",
+      example: envelope([occurrenceExample]),
+    }),
+    403: upstreamErrorProblem(403, "Non-participant caller"),
+    404: upstreamErrorProblem(404, "Offering not found or inactive"),
+  },
+});
+
+const overridePreviewExample = {
+  days: [
+    {
+      date: "2026-07-18",
+      resultingWindows: [{ startAt: "2026-07-18T16:00:00Z", endAt: "2026-07-18T16:30:00Z" }],
+      trimmed: [{ kind: "ADDITIONAL", startLocal: "09:00", windowMin: 30 }],
+      inert: false,
+    },
+  ],
+  valid: true,
+  message: null,
+};
+
+// GET /v1/availability/preview
+apiRoute({
+  method: "get",
+  path: "/v1/availability/preview",
+  tags: ["Availability"],
+  summary: "Preview a proposed date-specific availability override (dry-run)",
+  description:
+    "Read-only, non-persisting dry-run of a proposed date-specific override (`kind`/" +
+    "`startLocal`/`windowMin`) across `[dateFrom, dateTo]` (CTL-54 v2.1) — does not create " +
+    "anything. Each day's `resultingWindows` is reshaped to canonical UTC `Z` (CTL-49); " +
+    "`trimmed`/`valid`/`message` pass through unchanged. Unlike the resolved-availability read " +
+    "above, `dateFrom`/`dateTo` are forwarded to Core verbatim, NOT widened — they are the " +
+    "EXACT range the caller is proposing to create, so widening them would silently change " +
+    "what's being previewed. Guide-only; role is enforced by Core.\n\n" +
+    "**4xx caveat:** this is the generic read-path relay (`withSession`), so a Core 4xx (e.g. " +
+    "a range over 366 dates) surfaces with its real status but a generic `UPSTREAM_ERROR` body, " +
+    "not Core's message.",
+  request: {
+    query: z.object({
+      dateFrom: z.string().openapi({
+        description: "ISO-8601 first date (inclusive) of the proposed override.",
+        example: "2026-07-18",
+      }),
+      dateTo: z.string().openapi({
+        description: "ISO-8601 last date (inclusive) of the proposed override.",
+        example: "2026-07-18",
+      }),
+      kind: ExceptionKindEnum.openapi({
+        description:
+          "UNAVAILABLE blocks the window (or whole day); ADDITIONAL proposes an extra window.",
+        example: "ADDITIONAL",
+      }),
+      startLocal: z.string().openapi({
+        description: "Wall-clock start time of day, 24h `HH:mm`, in the guide's account timezone.",
+        example: "09:00",
+      }),
+      windowMin: z.string().openapi({
+        description: "Window length in minutes (> 0), as a query-string integer.",
+        example: "60",
+      }),
+    }),
+  },
+  responses: {
+    200: enveloped(OverridePreviewResponseSchema, {
+      description: "Per-date dry-run result of the proposed override.",
+      example: envelope(overridePreviewExample),
+    }),
+    403: upstreamErrorProblem(403, "Non-guide caller"),
+    422: upstreamErrorProblem(422, "Invalid preview params/range (e.g. a range over 366 dates)"),
+  },
+});
+
+const overrideMultiPreviewRequestExample = {
+  dateFrom: "2026-07-18",
+  dateTo: "2026-07-19",
+  kind: "ADDITIONAL",
+  windows: [
+    { startLocal: "09:00", windowMin: 60 },
+    { startLocal: "14:00", windowMin: 60 },
+  ],
+  replaceExisting: true,
+};
+
+const overrideMultiPreviewExample = {
+  days: [
+    {
+      date: "2026-07-18",
+      resultingWindows: [
+        { startAt: "2026-07-18T16:00:00Z", endAt: "2026-07-18T17:00:00Z" },
+        { startAt: "2026-07-18T21:00:00Z", endAt: "2026-07-18T22:00:00Z" },
+      ],
+      trimmed: [],
+      inert: false,
+    },
+    {
+      date: "2026-07-19",
+      resultingWindows: [
+        { startAt: "2026-07-19T16:00:00Z", endAt: "2026-07-19T17:00:00Z" },
+        { startAt: "2026-07-19T21:00:00Z", endAt: "2026-07-19T22:00:00Z" },
+      ],
+      trimmed: [],
+      inert: false,
+    },
+  ],
+  valid: true,
+  message: null,
+};
+
+// POST /v1/availability/preview
+apiRoute({
+  method: "post",
+  path: "/v1/availability/preview",
+  tags: ["Availability"],
+  summary: "Preview a proposed multi-window date-specific availability override (dry-run)",
+  description:
+    "Read-only, non-persisting dry-run of a proposed date-specific override built from MANY " +
+    "time windows applied together (`windows[]`) across `[dateFrom, dateTo]` — the multi-window " +
+    "sibling of `GET /v1/availability/preview` above, needed because a window list doesn't fit " +
+    "in a query string. `guideId` is server-resolved from the session; never part of the body. " +
+    "The response shape is IDENTICAL to the single-window GET preview's: each day's " +
+    "`resultingWindows` is reshaped to canonical UTC `Z` (CTL-49); `trimmed`/`valid`/`message` " +
+    "pass through unchanged. `dateFrom`/`dateTo`/`windows` are forwarded to Core verbatim, NOT " +
+    "widened or validated here — they are the EXACT proposal being previewed, and Core is the " +
+    "source of truth for a bad/empty `windows` array or an out-of-range span. Guide-only; role " +
+    "is enforced by Core.\n\n" +
+    "**No CSRF guard:** unlike this API's other POST routes, this one carries no CSRF check — " +
+    "it mutates no state (a dry-run), so a cross-site-triggered call can compute a result but " +
+    "not read it back (no CORS) and persists nothing.\n\n" +
+    "**4xx caveat:** this is the generic read-path relay (`withSession`), so a Core 4xx (e.g. " +
+    "empty `windows` or a cross-midnight span) surfaces with its real status but a generic " +
+    "`UPSTREAM_ERROR` body, not Core's message.",
+  request: {
+    body: {
+      content: {
+        "application/json": {
+          schema: OverrideMultiPreviewRequestSchema,
+          example: overrideMultiPreviewRequestExample,
+        },
+      },
+    },
+  },
+  responses: {
+    200: enveloped(OverridePreviewResponseSchema, {
+      description: "Per-date dry-run result of the proposed multi-window override.",
+      example: envelope(overrideMultiPreviewExample),
+    }),
+    403: upstreamErrorProblem(403, "Non-guide caller"),
+    422: upstreamErrorProblem(422, "Invalid windows/range (e.g. empty windows[], cross-midnight)"),
+  },
+});
+
 // GET /auth/login
 apiRoute({
   method: "get",
@@ -468,6 +1125,12 @@ export const openapiSpec = generator.generateDocument({
     { name: "Dashboard", description: "Role-shaped signed-in home aggregate." },
     { name: "Onboarding", description: "Per-role onboarding progress aggregate." },
     { name: "Booking", description: "Participant booking and cart operations." },
+    {
+      name: "Availability",
+      description:
+        "Guide recurring-rule/exception/settings CRUD, the resolved-availability read, and " +
+        "participant offering slots.",
+    },
   ],
   externalDocs: {
     url: `${coreApiBaseUrl}/v3/api-docs`,

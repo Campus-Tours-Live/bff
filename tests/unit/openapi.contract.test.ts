@@ -28,8 +28,8 @@ const INFRA_ROUTES = new Set(["/health", "/openapi.json"]);
 /** Recover the mount prefix (e.g. "/auth", "/v1") a sub-router was mounted at, from its regexp. */
 function mountPrefix(regexp?: { source?: string; fast_slash?: boolean }): string {
   if (!regexp || regexp.fast_slash || !regexp.source) return "";
-  const m = regexp.source.match(/^\^\\\/(.+?)\\\/\?/);
-  return m ? "/" + m[1].replace(/\\\//g, "/") : "";
+  const prefix = regexp.source.match(/^\^\\\/(.+?)\\\/\?/)?.[1];
+  return prefix ? "/" + prefix.replace(/\\\//g, "/") : "";
 }
 
 /**
@@ -116,6 +116,22 @@ describe("OpenAPI contract — drift guard (Express routes ↔ spec)", () => {
         "post /v1/cart/items",
         "delete /v1/cart/items/{id}",
         "post /v1/cart/checkout",
+        "get /v1/availability/rules",
+        "post /v1/availability/rules",
+        "patch /v1/availability/rules/{id}",
+        "delete /v1/availability/rules/{id}",
+        "post /v1/availability/rules/replace",
+        "post /v1/availability/overrides/replace",
+        "get /v1/availability/exceptions",
+        "post /v1/availability/exceptions",
+        "patch /v1/availability/exceptions/{id}",
+        "delete /v1/availability/exceptions/{id}",
+        "get /v1/availability/settings",
+        "patch /v1/availability/settings",
+        "get /v1/availability",
+        "get /v1/availability/preview",
+        "post /v1/availability/preview",
+        "get /v1/offerings/{id}/slots",
       ].sort(),
     );
   });

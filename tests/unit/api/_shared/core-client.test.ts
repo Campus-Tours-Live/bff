@@ -76,16 +76,32 @@ describe("CoreClient.get", () => {
     await expect(new CoreClient("t").get("/userinfo")).rejects.toBeInstanceOf(CoreAuthError);
   });
 
-  it("throws CoreError carrying the status on other non-ok responses (404)", async () => {
-    (global.fetch as jest.Mock<typeof fetch>).mockResolvedValue(jsonResponse(404, {}));
+  it("throws CoreError carrying the status, body, and content-type on other non-ok responses (404)", async () => {
+    global.fetch = (async () =>
+      ({
+        ok: false,
+        status: 404,
+        headers: new Headers({ "content-type": "application/problem+json" }),
+        text: async () => '{"message":"No such guide"}',
+      }) as Response) as unknown as typeof fetch;
+    // The read error path now captures the raw body + content-type (CTL-56 B3) so a
+    // `withMutation`-wrapped read can relay Core's 4xx message verbatim.
     await expect(new CoreClient("t").get("/userinfo")).rejects.toMatchObject({
       name: "CoreError",
       status: 404,
+      body: '{"message":"No such guide"}',
+      contentType: "application/problem+json",
     });
   });
 
   it("throws CoreError(500) for a 500 response", async () => {
-    (global.fetch as jest.Mock<typeof fetch>).mockResolvedValue(jsonResponse(500, {}));
+    global.fetch = (async () =>
+      ({
+        ok: false,
+        status: 500,
+        headers: new Headers({ "content-type": "application/json" }),
+        text: async () => "",
+      }) as Response) as unknown as typeof fetch;
     await expect(new CoreClient("t").get("/userinfo")).rejects.toMatchObject({
       name: "CoreError",
       status: 500,
