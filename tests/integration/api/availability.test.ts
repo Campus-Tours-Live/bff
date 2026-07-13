@@ -302,7 +302,12 @@ describe("bff availability module", () => {
       expect(res.body.data).toMatchObject({ bookable: true, hasWeeklyHours: false });
     });
 
-    it("widens from/to query params sent to Core by 1 day on each present side", async () => {
+    it("forwards from/to to Core verbatim on each present side (no widening — CTL-54 7c)", async () => {
+      // Core parses from/to in the GUIDE's own timezone (backend CTL-54 7c), so it already
+      // returns exactly the requested guide-local `[from, to)` window. The bff no longer widens
+      // (a UTC-anchored workaround that is now redundant and would pull in out-of-window days
+      // the bff cannot correctly re-filter — it has no guide timezone in the resolved response);
+      // it forwards both bounds verbatim and lets Core do the correct guide-local filtering.
       const mock = mockCoreByPath({ "/availability": coreRead(resolved) });
       const res = await request(app)
         .get("/v1/availability")
@@ -312,13 +317,11 @@ describe("bff availability module", () => {
       const [url] = mock.mock.calls[0] as [string, RequestInit];
       const parsed = new URL(url);
       expect(parsed.pathname).toBe("/availability");
-      // Widened by 1 calendar day on each side vs. what the caller requested (2026-08-01 /
-      // 2026-08-31), so Core's UTC-midnight-anchored window can't cut a guide-local edge day.
-      expect(parsed.searchParams.get("from")).toBe("2026-07-31");
-      expect(parsed.searchParams.get("to")).toBe("2026-09-01");
+      expect(parsed.searchParams.get("from")).toBe("2026-08-01");
+      expect(parsed.searchParams.get("to")).toBe("2026-08-31");
     });
 
-    it("widens only `from` when `to` is absent, leaving `to` unset", async () => {
+    it("forwards only `from` verbatim when `to` is absent, leaving `to` unset", async () => {
       const mock = mockCoreByPath({ "/availability": coreRead(resolved) });
       const res = await request(app)
         .get("/v1/availability")
@@ -327,11 +330,11 @@ describe("bff availability module", () => {
       expect(res.status).toBe(200);
       const [url] = mock.mock.calls[0] as [string, RequestInit];
       const parsed = new URL(url);
-      expect(parsed.searchParams.get("from")).toBe("2026-07-31");
+      expect(parsed.searchParams.get("from")).toBe("2026-08-01");
       expect(parsed.searchParams.has("to")).toBe(false);
     });
 
-    it("widens only `to` when `from` is absent, leaving `from` unset", async () => {
+    it("forwards only `to` verbatim when `from` is absent, leaving `from` unset", async () => {
       const mock = mockCoreByPath({ "/availability": coreRead(resolved) });
       const res = await request(app)
         .get("/v1/availability")
@@ -340,15 +343,15 @@ describe("bff availability module", () => {
       expect(res.status).toBe(200);
       const [url] = mock.mock.calls[0] as [string, RequestInit];
       const parsed = new URL(url);
-      expect(parsed.searchParams.get("to")).toBe("2026-09-01");
+      expect(parsed.searchParams.get("to")).toBe("2026-08-31");
       expect(parsed.searchParams.has("from")).toBe(false);
     });
 
-    it("does not cut an edge occurrence just outside the UTC-midnight-anchored `from` boundary", async () => {
-      // A UTC+13 guide's local day 2026-07-15 begins at 2026-07-14T11:00Z. An occurrence at
-      // 2026-07-14T19:00Z is still within that guide-local 2026-07-15, but a naive
-      // from=2026-07-15 (Core's UTC-midnight anchor = 2026-07-15T00:00Z) would exclude it.
-      // Widening `from` to 2026-07-14 pulls Core's window back far enough to include it.
+    it("passes a guide-local edge occurrence Core returned for the requested window through unchanged", async () => {
+      // Core (guide-local aware, CTL-54 7c) already includes an occurrence whose UTC instant sits
+      // just outside a naive UTC-midnight window but whose guide-local date is inside `[from, to)`.
+      // The bff forwards `from` verbatim (no widening) and passes Core's result through, only
+      // normalizing the instant to canonical UTC `Z`.
       const edgeOccurrence = {
         startAt: "2026-07-14T19:00:00.000Z",
         endAt: "2026-07-14T20:00:00.000Z",
@@ -368,7 +371,7 @@ describe("bff availability module", () => {
         .set("Cookie", cookie);
       expect(res.status).toBe(200);
       const [url] = mock.mock.calls[0] as [string, RequestInit];
-      expect(new URL(url).searchParams.get("from")).toBe("2026-07-14");
+      expect(new URL(url).searchParams.get("from")).toBe("2026-07-15");
       expect(res.body.data.occurrences).toEqual([
         { startAt: "2026-07-14T19:00:00Z", endAt: "2026-07-14T20:00:00Z" },
       ]);
@@ -385,20 +388,6 @@ describe("bff availability module", () => {
       const parsed = new URL(url);
       expect(parsed.searchParams.get("from")).toBe("not-a-date");
       expect(parsed.searchParams.get("to")).toBe("also-bad");
-    });
-
-    it("forwards a shape-valid but value-invalid date (e.g. month 13) verbatim, unwidened", async () => {
-      // `2026-13-01` passes the yyyy-MM-dd shape regex but is not a real date, so Date.parse
-      // returns NaN and widening is skipped — the original string is forwarded to Core verbatim
-      // (Core validates it and rejects with a 4xx, which we relay).
-      const mock = mockCoreByPath({ "/availability": problem(422, "Invalid from") });
-      const res = await request(app)
-        .get("/v1/availability")
-        .query({ from: "2026-13-01" })
-        .set("Cookie", cookie);
-      expect(res.status).toBe(422);
-      const [url] = mock.mock.calls[0] as [string, RequestInit];
-      expect(new URL(url).searchParams.get("from")).toBe("2026-13-01");
     });
 
     it("calls Core without a query string when from/to are absent", async () => {
