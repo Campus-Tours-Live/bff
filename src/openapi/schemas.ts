@@ -995,6 +995,20 @@ export const ResolvedAvailabilityResponseSchema = registry.register(
           "even though a rule would otherwise apply).",
         example: ["2026-03-08"],
       }),
+      bookable: z.boolean().openapi({
+        description:
+          "Derived readiness signal, passed through verbatim from backend (no recompute): " +
+          "true iff the guide has at least one materialized occurrence that has not yet " +
+          "ended, i.e. a participant could book right now.",
+        example: true,
+      }),
+      hasWeeklyHours: z.boolean().openapi({
+        description:
+          "Derived readiness signal, passed through verbatim from backend (no recompute): " +
+          "true iff the guide has at least one active weekly rule (an expired-but-active " +
+          "rule still counts; a soft-deleted/inactive rule does not).",
+        example: true,
+      }),
     })
     .openapi("ResolvedAvailabilityResponse", {
       description:

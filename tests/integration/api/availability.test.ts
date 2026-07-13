@@ -277,6 +277,8 @@ describe("bff availability module", () => {
       rules: [rule],
       occurrences: [occurrence],
       dstGapDays: ["2026-03-08"],
+      bookable: true,
+      hasWeeklyHours: true,
     };
 
     it("reshapes occurrences to UTC Z and passes rules/dstGapDays through unchanged", async () => {
@@ -289,6 +291,15 @@ describe("bff availability module", () => {
         { startAt: "2026-08-01T15:00:00Z", endAt: "2026-08-01T16:00:00Z" },
       ]);
       expect(res.body.meta).toBeDefined();
+    });
+
+    it("passes through bookable + hasWeeklyHours from Core unchanged (CTL-56 B1)", async () => {
+      mockCoreByPath({
+        "/availability": coreRead({ ...resolved, bookable: true, hasWeeklyHours: false }),
+      });
+      const res = await request(app).get("/v1/availability").set("Cookie", cookie);
+      expect(res.status).toBe(200);
+      expect(res.body.data).toMatchObject({ bookable: true, hasWeeklyHours: false });
     });
 
     it("widens from/to query params sent to Core by 1 day on each present side", async () => {
@@ -343,7 +354,13 @@ describe("bff availability module", () => {
         endAt: "2026-07-14T20:00:00.000Z",
       };
       const mock = mockCoreByPath({
-        "/availability": coreRead({ rules: [rule], occurrences: [edgeOccurrence], dstGapDays: [] }),
+        "/availability": coreRead({
+          rules: [rule],
+          occurrences: [edgeOccurrence],
+          dstGapDays: [],
+          bookable: true,
+          hasWeeklyHours: true,
+        }),
       });
       const res = await request(app)
         .get("/v1/availability")
@@ -395,11 +412,23 @@ describe("bff availability module", () => {
 
     it("returns empty arrays when Core has no rules/occurrences/gap-days", async () => {
       mockCoreByPath({
-        "/availability": coreRead({ rules: [], occurrences: [], dstGapDays: [] }),
+        "/availability": coreRead({
+          rules: [],
+          occurrences: [],
+          dstGapDays: [],
+          bookable: false,
+          hasWeeklyHours: false,
+        }),
       });
       const res = await request(app).get("/v1/availability").set("Cookie", cookie);
       expect(res.status).toBe(200);
-      expect(res.body.data).toEqual({ rules: [], occurrences: [], dstGapDays: [] });
+      expect(res.body.data).toEqual({
+        rules: [],
+        occurrences: [],
+        dstGapDays: [],
+        bookable: false,
+        hasWeeklyHours: false,
+      });
     });
 
     it("no cookie → 401 + Auth-Required", async () => {

@@ -241,15 +241,25 @@ export interface CoreResolvedAvailability {
   rules: CoreAvailabilityRule[];
   occurrences: CoreOccurrence[];
   dstGapDays: string[];
+  /** Derived readiness signal (backend CTL-54 B1): true iff the guide has at least one
+   *  materialized occurrence that has not yet ended. Passed through verbatim — bff never
+   *  recomputes availability. */
+  bookable: boolean;
+  /** Derived readiness signal (backend CTL-54 B1): true iff the guide has at least one active
+   *  weekly rule. Passed through verbatim — bff never recomputes availability. */
+  hasWeeklyHours: boolean;
 }
 
 /** Contract-A resolved-availability shape: `occurrences` normalized to canonical UTC `Z`
- *  (CTL-49); `rules` (wall-clock) and `dstGapDays` (ISO dates, not instants) pass through
- *  unchanged — mirrors the rationale on {@link CoreAvailabilityRule}. */
+ *  (CTL-49); `rules` (wall-clock), `dstGapDays` (ISO dates, not instants), and the two
+ *  backend-derived readiness flags `bookable`/`hasWeeklyHours` pass through unchanged — mirrors
+ *  the rationale on {@link CoreAvailabilityRule}. */
 export interface ResolvedAvailabilityResponse {
   rules: CoreAvailabilityRule[];
   occurrences: OccurrenceResponse[];
   dstGapDays: string[];
+  bookable: boolean;
+  hasWeeklyHours: boolean;
 }
 
 function reshapeResolvedAvailability(c: CoreResolvedAvailability): ResolvedAvailabilityResponse {
@@ -257,6 +267,8 @@ function reshapeResolvedAvailability(c: CoreResolvedAvailability): ResolvedAvail
     rules: c.rules,
     occurrences: c.occurrences.map(reshapeOccurrence),
     dstGapDays: c.dstGapDays,
+    bookable: c.bookable,
+    hasWeeklyHours: c.hasWeeklyHours,
   };
 }
 

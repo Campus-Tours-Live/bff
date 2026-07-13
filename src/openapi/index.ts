@@ -357,6 +357,8 @@ const resolvedAvailabilityExample = {
   rules: [ruleExample],
   occurrences: [occurrenceExample],
   dstGapDays: ["2026-03-08"],
+  bookable: true,
+  hasWeeklyHours: true,
 };
 
 const overrideReplaceRequestExample = {
@@ -729,7 +731,9 @@ apiRoute({
     "present by 1 calendar day on that side before forwarding to Core, to avoid silently " +
     "cutting a guide-local edge occurrence at the UTC-midnight boundary — the response may " +
     "therefore include a few occurrences just outside the exact requested window (precise " +
-    "guide-local re-anchoring is a tracked follow-up). This is the CTL-55 frontend contract.",
+    "guide-local re-anchoring is a tracked follow-up). Also carries the backend-derived " +
+    "readiness flags `bookable`/`hasWeeklyHours` (CTL-54 B1) verbatim — this bff never " +
+    "recomputes availability. This is the CTL-55 frontend contract.",
   request: {
     query: z.object({
       from: z
