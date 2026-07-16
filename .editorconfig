@@ -1,0 +1,25 @@
+# Shared editor baseline for frontend / bff / backend — keep this file identical in all three.
+# The formatters stay the source of truth and win in CI (Prettier for TS/JS/etc., Spotless
+# google-java-format AOSP for Java); this only aligns editors (VS Code, IntelliJ, …) so their
+# defaults match and nobody fights the formatter. Per-language indent below matches each formatter.
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+indent_style = space
+indent_size = 2
+
+# Java: google-java-format AOSP profile (backend).
+[*.java]
+indent_size = 4
+
+# Maven keeps pom.xml tab-indented (backend); inert where there's no XML.
+[{pom.xml,*.xml}]
+indent_style = tab
+
+# Markdown uses trailing spaces for hard line breaks.
+[*.md]
+trim_trailing_whitespace = false

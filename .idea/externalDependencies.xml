@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="ExternalDependencies">
+    <!-- Makes IntelliJ / WebStorm prompt to install/enable the Prettier plugin so it formats to the
+         project's .prettierrc. Formatting is still enforced by CI (npm run format:check). -->
+    <plugin id="intellij.prettierJS" />
+  </component>
+</project>

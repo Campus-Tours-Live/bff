@@ -27,3 +27,8 @@ coverage
 
 # Claude Code — personal settings (do not commit); share .claude/settings.json
 .claude/settings.local.json
+
+# --- IntelliJ / WebStorm — ignore user-specific config, keep the shared bits ---
+.idea/*
+!.idea/externalDependencies.xml
+*.iml
