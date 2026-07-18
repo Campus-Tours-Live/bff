@@ -22,10 +22,10 @@
     "lint:fix": "eslint . --fix",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "test": "NODE_OPTIONS=--experimental-vm-modules jest",
-    "test:unit": "NODE_OPTIONS=--experimental-vm-modules jest tests/unit",
-    "test:integration": "NODE_OPTIONS=--experimental-vm-modules jest tests/integration",
-    "test:coverage": "NODE_OPTIONS=--experimental-vm-modules jest --coverage",
+    "test": "node --experimental-vm-modules ./node_modules/jest/bin/jest.js",
+    "test:unit": "node --experimental-vm-modules ./node_modules/jest/bin/jest.js tests/unit",
+    "test:integration": "node --experimental-vm-modules ./node_modules/jest/bin/jest.js tests/integration",
+    "test:coverage": "node --experimental-vm-modules ./node_modules/jest/bin/jest.js --coverage",
     "prepare": "husky"
   },
   "lint-staged": {

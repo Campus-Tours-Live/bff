@@ -73,22 +73,67 @@ export * from "./schemas.js";
 // --- Public marketplace discovery ---
 //
 // These two reads intentionally relay Core's discovery envelope verbatim instead of reshaping it.
-// Keep their schemas loose here: the Core OpenAPI document remains the field-level contract owner.
-const CoreTourSummarySchema = z
-  .record(z.string(), z.unknown())
-  .openapi({ description: "A marketplace tour summary forwarded verbatim from Core." });
-const CoreTourDetailSchema = z
-  .record(z.string(), z.unknown())
-  .openapi({ description: "A marketplace tour detail forwarded verbatim from Core." });
+const CoreTourSummarySchema = z.object({
+  id: z.string().uuid().openapi({ description: "Tour offering UUID." }),
+  title: z.string().openapi({ description: "Public tour title." }),
+  slug: z.string().openapi({ description: "URL-safe tour slug." }),
+  topic: z.string().openapi({ description: "Controlled tour-topic code." }),
+  universityId: z.string().uuid().openapi({ description: "University UUID." }),
+  universityName: z.string().openapi({ description: "University display name." }),
+  guideId: z.string().uuid().openapi({ description: "Guide profile UUID." }),
+  guideDisplayName: z.string().openapi({ description: "Guide's public display name." }),
+  durationMin: z.number().int().positive().openapi({ description: "Tour duration in minutes." }),
+  priceCents: z.number().int().nonnegative().openapi({ description: "Price in minor units." }),
+  currency: z.string().length(3).openapi({ description: "ISO 4217 currency code." }),
+  avgRating: z.number().openapi({ description: "Average review rating." }),
+  reviewCount: z.number().int().nonnegative().openapi({ description: "Number of reviews." }),
+});
+
+const CoreTourDetailSchema = CoreTourSummarySchema.extend({
+  description: z.string().nullable().openapi({ description: "Public tour description." }),
+  languages: z.array(z.string()).openapi({ description: "BCP-47 tour language tags." }),
+  universitySlug: z.string().openapi({ description: "University URL-safe slug." }),
+  universityCity: z.string().nullable().openapi({ description: "University city." }),
+  universityRegion: z.string().nullable().openapi({ description: "University region or state." }),
+  guideBio: z.string().nullable().openapi({ description: "Guide's public biography." }),
+});
+
+const CoreTourMetaSchema = z.object({
+  requestId: z.string().openapi({ description: "Core response correlation id." }),
+  timestamp: z.string().openapi({ description: "Core response timestamp in UTC." }),
+});
+
+function coreEnvelope<T extends z.ZodType>(data: T) {
+  return z.object({
+    data,
+    meta: CoreTourMetaSchema,
+  });
+}
+
+function coreEnvelopeExample<T>(data: T) {
+  return {
+    data,
+    meta: {
+      requestId: "4b9cb75a-2c07-4dd6-9f38-437d0c49f6f5",
+      timestamp: "2026-07-18T21:00:00Z",
+    },
+  };
+}
 
 const tourSummaryExample = {
   id: "8cc1d6ed-dad7-45bc-b0f1-6e1c8b177ec3",
   title: "North Campus highlights",
+  slug: "north-campus-highlights",
+  topic: "GENERAL_CAMPUS",
+  universityId: "4cc1d6ed-dad7-45bc-b0f1-6e1c8b177ec3",
   universityName: "North Coast University",
+  guideId: "6cc1d6ed-dad7-45bc-b0f1-6e1c8b177ec3",
   guideDisplayName: "Maya Chen",
   durationMin: 60,
   priceCents: 4200,
   currency: "USD",
+  avgRating: 4.8,
+  reviewCount: 24,
 };
 
 const tourDetailExample = {
@@ -96,7 +141,30 @@ const tourDetailExample = {
   description: "A student-led walk through North Coast University's most popular landmarks.",
   languages: ["en-US"],
   universitySlug: "north-coast",
+  universityCity: "Arcata",
+  universityRegion: "CA",
   guideBio: "Computer science student and campus ambassador.",
+};
+
+// Public tour reads relay Core validation problems verbatim; unlike BFF-generated problems,
+// these do not carry a BFF `code` or `requestId` field.
+const invalidTourQueryExample = {
+  type: "about:blank",
+  title: "Invalid sort: NEWEST",
+  status: 422,
+};
+
+const invalidTourIdExample = {
+  type: "about:blank",
+  title: "Validation failed",
+  status: 422,
+  detail: "Invalid value for 'tourId'",
+};
+
+const tourNotFoundExample = {
+  type: "about:blank",
+  title: "Tour not found",
+  status: 404,
 };
 
 apiRoute({
@@ -122,17 +190,22 @@ apiRoute({
         .enum(["RECOMMENDED", "PRICE_ASC", "PRICE_DESC", "RATING"])
         .optional()
         .openapi({ description: "Marketplace sort order." }),
-      limit: z.coerce.number().int().positive().max(50).optional().openapi({
-        description: "Maximum number of results to return.",
+      limit: z.coerce.number().int().optional().openapi({
+        description: "Maximum number of results to return; Core clamps integer values to 1-50.",
       }),
     }),
   },
   responses: {
-    200: enveloped(z.array(CoreTourSummarySchema), {
+    200: {
       description: "Core's marketplace summary envelope, relayed verbatim.",
-      example: envelope([tourSummaryExample]),
-    }),
-    422: problemResponse("Core rejected a discovery query parameter."),
+      content: {
+        "application/json": {
+          schema: coreEnvelope(z.array(CoreTourSummarySchema)),
+          example: coreEnvelopeExample([tourSummaryExample]),
+        },
+      },
+    },
+    422: problemResponse("Core rejected a discovery query parameter.", invalidTourQueryExample),
     502: problem502("The Core API was unreachable."),
   },
 });
@@ -153,12 +226,17 @@ apiRoute({
     }),
   },
   responses: {
-    200: enveloped(CoreTourDetailSchema, {
+    200: {
       description: "Core's marketplace detail envelope, relayed verbatim.",
-      example: envelope(tourDetailExample),
-    }),
-    404: problem404("TOUR_NOT_FOUND", "Not found", "No discoverable tour has this id."),
-    422: problemResponse("Core rejected the tour id."),
+      content: {
+        "application/json": {
+          schema: coreEnvelope(CoreTourDetailSchema),
+          example: coreEnvelopeExample(tourDetailExample),
+        },
+      },
+    },
+    404: problemResponse("No discoverable tour has this id.", tourNotFoundExample),
+    422: problemResponse("Core rejected the tour id.", invalidTourIdExample),
     502: problem502("The Core API was unreachable."),
   },
 });
@@ -1217,6 +1295,7 @@ export const openapiSpec = generator.generateDocument({
     { name: "Auth", description: "Google sign-in session lifecycle (`/auth/*`)." },
     { name: "Dashboard", description: "Role-shaped signed-in home aggregate." },
     { name: "Onboarding", description: "Per-role onboarding progress aggregate." },
+    { name: "Tours", description: "Anonymous marketplace tour discovery." },
     { name: "Booking", description: "Participant booking and cart operations." },
     {
       name: "Availability",

@@ -163,6 +163,44 @@ describe("OpenAPI contract — public /v1 discovery operations", () => {
       expect({ path, has502: Boolean(op.responses["502"]) }).toEqual({ path, has502: true });
     }
   });
+
+  it("documents the relayed Core tour fields and metadata", () => {
+    type Schema = {
+      properties?: Record<string, Schema>;
+      items?: Schema;
+    };
+    const catalog = paths["/v1/tours"]?.get as Operation;
+    const detail = paths["/v1/tours/{tourId}"]?.get as Operation;
+    const catalogSchema = catalog.responses["200"]?.content?.["application/json"]?.schema as Schema;
+    const detailSchema = detail.responses["200"]?.content?.["application/json"]?.schema as Schema;
+
+    expect(Object.keys(catalogSchema.properties?.data?.items?.properties ?? {})).toEqual(
+      expect.arrayContaining([
+        "id",
+        "slug",
+        "topic",
+        "universityId",
+        "guideId",
+        "durationMin",
+        "priceCents",
+        "avgRating",
+        "reviewCount",
+      ]),
+    );
+    expect(Object.keys(detailSchema.properties?.data?.properties ?? {})).toEqual(
+      expect.arrayContaining([
+        "description",
+        "languages",
+        "universitySlug",
+        "universityCity",
+        "universityRegion",
+        "guideBio",
+      ]),
+    );
+    expect(Object.keys(catalogSchema.properties?.meta?.properties ?? {})).toEqual(
+      expect.arrayContaining(["requestId", "timestamp"]),
+    );
+  });
 });
 
 describe("OpenAPI contract — every operation is self-describing", () => {
