@@ -70,6 +70,99 @@ export * from "./schemas.js";
 
 // --- Paths (all registered via the helper DSL) ---
 
+// --- Public marketplace discovery ---
+//
+// These two reads intentionally relay Core's discovery envelope verbatim instead of reshaping it.
+// Keep their schemas loose here: the Core OpenAPI document remains the field-level contract owner.
+const CoreTourSummarySchema = z
+  .record(z.string(), z.unknown())
+  .openapi({ description: "A marketplace tour summary forwarded verbatim from Core." });
+const CoreTourDetailSchema = z
+  .record(z.string(), z.unknown())
+  .openapi({ description: "A marketplace tour detail forwarded verbatim from Core." });
+
+const tourSummaryExample = {
+  id: "8cc1d6ed-dad7-45bc-b0f1-6e1c8b177ec3",
+  title: "North Campus highlights",
+  universityName: "North Coast University",
+  guideDisplayName: "Maya Chen",
+  durationMin: 60,
+  priceCents: 4200,
+  currency: "USD",
+};
+
+const tourDetailExample = {
+  ...tourSummaryExample,
+  description: "A student-led walk through North Coast University's most popular landmarks.",
+  languages: ["en-US"],
+  universitySlug: "north-coast",
+  guideBio: "Computer science student and campus ambassador.",
+};
+
+apiRoute({
+  method: "get",
+  path: "/v1/tours",
+  protected: false,
+  tags: ["Tours"],
+  summary: "Search public marketplace tours",
+  description:
+    "Anonymous marketplace discovery. Relays Core's ACTIVE offerings from APPROVED guides " +
+    "without reading or forwarding a BFF session. Query filters are passed through verbatim; " +
+    "see the Core API specification for the field-level response contract.",
+  request: {
+    query: z.object({
+      universityId: z
+        .string()
+        .uuid()
+        .optional()
+        .openapi({ description: "University UUID filter." }),
+      topic: z.string().optional().openapi({ description: "Tour topic-code filter." }),
+      q: z.string().optional().openapi({ description: "Free-text search query." }),
+      sort: z
+        .enum(["RECOMMENDED", "PRICE_ASC", "PRICE_DESC", "RATING"])
+        .optional()
+        .openapi({ description: "Marketplace sort order." }),
+      limit: z.coerce.number().int().positive().max(50).optional().openapi({
+        description: "Maximum number of results to return.",
+      }),
+    }),
+  },
+  responses: {
+    200: enveloped(z.array(CoreTourSummarySchema), {
+      description: "Core's marketplace summary envelope, relayed verbatim.",
+      example: envelope([tourSummaryExample]),
+    }),
+    422: problemResponse("Core rejected a discovery query parameter."),
+    502: problem502("The Core API was unreachable."),
+  },
+});
+
+apiRoute({
+  method: "get",
+  path: "/v1/tours/{tourId}",
+  protected: false,
+  tags: ["Tours"],
+  summary: "Get a public marketplace tour",
+  description:
+    "Anonymous marketplace detail read. Relays Core's discoverable ACTIVE offering detail " +
+    "without reading or forwarding a BFF session. It does not expose availability, slots, " +
+    "or booking data.",
+  request: {
+    params: z.object({
+      tourId: z.string().uuid().openapi({ description: "Tour offering UUID." }),
+    }),
+  },
+  responses: {
+    200: enveloped(CoreTourDetailSchema, {
+      description: "Core's marketplace detail envelope, relayed verbatim.",
+      example: envelope(tourDetailExample),
+    }),
+    404: problem404("TOUR_NOT_FOUND", "Not found", "No discoverable tour has this id."),
+    422: problemResponse("Core rejected the tour id."),
+    502: problem502("The Core API was unreachable."),
+  },
+});
+
 // GET /v1/dashboard
 apiRoute({
   method: "get",
