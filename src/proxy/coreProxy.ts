@@ -6,6 +6,16 @@ import { requireReauth, resolveBearer } from "../api/_shared/index.js";
 import { isCrossSiteMutation } from "../util/csrf.js";
 
 /**
+ * Public marketplace reads — the tour catalog + reference-data lookups are readable without a
+ * session (Core permits these GETs anonymously). Everything else requires a bearer.
+ */
+function isPublicGet(req: Request): boolean {
+  if (req.method !== "GET" && req.method !== "HEAD") return false;
+  const path = req.originalUrl.replace(/^\/v1/, "").split("?")[0];
+  return path === "/tours" || path.startsWith("/tours/") || path.startsWith("/meta/");
+}
+
+/**
  * Proxy /v1/* to the Core API. The BFF strips the /v1 prefix (Core owns the bare
  * resource paths), attaches the Bearer token, a correlation id, and an
  * Idempotency-Key for mutations, and normalises transport errors to problem+json.
@@ -16,8 +26,10 @@ export async function coreProxy(req: Request, res: Response): Promise<void> {
     return;
   }
 
-  const bearer = await resolveBearer(req, res);
-  if (!bearer) {
+  // Public reads forward anonymously (no session needed); everything else requires a bearer.
+  const publicGet = isPublicGet(req);
+  const bearer = publicGet ? null : await resolveBearer(req, res);
+  if (!bearer && !publicGet) {
     // No session / silent refresh failed → genuine re-auth required.
     requireReauth(res);
     return;
@@ -29,10 +41,10 @@ export async function coreProxy(req: Request, res: Response): Promise<void> {
   const requestId = res.getHeader("X-Request-Id")?.toString() ?? crypto.randomUUID();
 
   const headers: Record<string, string> = {
-    Authorization: `Bearer ${bearer}`,
     "X-Request-Id": requestId,
     Accept: "application/json",
   };
+  if (bearer) headers["Authorization"] = `Bearer ${bearer}`;
   if (req.method !== "GET" && req.method !== "HEAD") {
     headers["Content-Type"] = "application/json";
     // Idempotency-Key: forward the client's, else generate one — lets the Core dedupe a
