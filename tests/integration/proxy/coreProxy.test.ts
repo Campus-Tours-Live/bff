@@ -51,6 +51,38 @@ describe("coreProxy (/v1/* passthrough)", () => {
       expect(url).toBe("http://core.test/universities?q=mit");
     });
 
+    it("passes universityImageUrl through the /v1/tours proxy verbatim (public read, no session)", async () => {
+      // CTL-16 (Contract A honesty): the bff proxies /v1/tours transparently — it never
+      // parses/reshapes the Core response — so a new Core field just needs to survive the
+      // round trip unchanged. Uses the real Core PagedResponse<TourSummaryResponse> shape
+      // (items/page/size/totalElements/totalPages) so a future re-wrap of GET /v1/tours
+      // would break this test rather than silently drop the field.
+      const mock = mockCoreByPath({
+        "/tours": coreOk({
+          items: [
+            {
+              id: "o1",
+              universityImageUrl: "https://r2.example/Yale%20University.png",
+            },
+          ],
+          page: 0,
+          size: 1,
+          totalElements: 1,
+          totalPages: 1,
+        }),
+      });
+
+      // Deliberately no `.set("Cookie", cookie)` — GET /v1/tours is a public read
+      // (isPublicGet), so this also pins that no session is required.
+      const res = await request(app).get("/v1/tours");
+
+      expect(res.status).toBe(200);
+      expect(res.body.data.items[0].universityImageUrl).toBe(
+        "https://r2.example/Yale%20University.png",
+      );
+      expect(mock).toHaveBeenCalledTimes(1);
+    });
+
     it("no session → 401 + Auth-Required (no Core call)", async () => {
       mockCoreByPath({});
 
