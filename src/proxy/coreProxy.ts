@@ -11,7 +11,7 @@ import { isCrossSiteMutation } from "../util/csrf.js";
  */
 function isPublicGet(req: Request): boolean {
   if (req.method !== "GET" && req.method !== "HEAD") return false;
-  const path = req.originalUrl.replace(/^\/v1/, "").split("?")[0];
+  const path = req.originalUrl.replace(/^\/v1/, "").replace(/\?.*$/, "");
   return path === "/tours" || path.startsWith("/tours/") || path.startsWith("/meta/");
 }
 

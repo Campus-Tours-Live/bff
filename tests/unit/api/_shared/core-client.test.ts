@@ -115,6 +115,38 @@ describe("CoreClient.get", () => {
       status: 502,
     });
   });
+
+  it("read 4xx: falls back to an empty body when the response text() rejects", async () => {
+    global.fetch = (async () =>
+      ({
+        ok: false,
+        status: 400,
+        headers: new Headers(),
+        text: async () => {
+          throw new Error("stream aborted");
+        },
+      }) as unknown as Response) as unknown as typeof fetch;
+    await expect(new CoreClient("t").get("/userinfo")).rejects.toMatchObject({
+      status: 400,
+      body: "",
+    });
+  });
+
+  it("throws CoreError with contentType undefined when a read 4xx has no content-type header", async () => {
+    global.fetch = (async () =>
+      ({
+        ok: false,
+        status: 400,
+        headers: new Headers(),
+        text: async () => "bad request",
+      }) as Response) as unknown as typeof fetch;
+    await expect(new CoreClient("t").get("/userinfo")).rejects.toMatchObject({
+      name: "CoreError",
+      status: 400,
+      body: "bad request",
+      contentType: undefined,
+    });
+  });
 });
 
 describe("CoreClient convenience methods", () => {
@@ -207,6 +239,15 @@ describe("CoreClient.post/del", () => {
     );
   });
 
+  it("del() sends DELETE with no body and unwraps {data} like post()", async () => {
+    let seen: RequestInit | undefined;
+    mockFetch(ok({ removed: true }, (i) => (seen = i)));
+    const out = await new CoreClient("tok").del<{ removed: boolean }>("/cart/items/x", {});
+    expect(out).toEqual({ removed: true });
+    expect(seen!.method).toBe("DELETE");
+    expect(seen!.body).toBeUndefined();
+  });
+
   it("generates an Idempotency-Key when none is supplied", async () => {
     let seen: RequestInit | undefined;
     mockFetch(ok({ ok: true }, (i) => (seen = i)));
@@ -271,5 +312,62 @@ describe("CoreClient.post/del", () => {
       }) as unknown as Response) as unknown as typeof fetch;
     const result = await new CoreClient("t").post("/x", {}, {});
     expect(result).toBeNull();
+  });
+});
+
+describe("CoreClient.postFull/patchFull/delFull", () => {
+  function mockFetch(res: Partial<Response> & { _capture?: (i: RequestInit) => void }) {
+    global.fetch = (async (_url: string, init: RequestInit) => {
+      res._capture?.(init);
+      return res as Response;
+    }) as unknown as typeof fetch;
+  }
+  const okEnvelope = (
+    data: unknown,
+    affectedBookings: unknown[],
+    capture?: (i: RequestInit) => void,
+  ) =>
+    ({
+      ok: true,
+      status: 200,
+      text: async () => JSON.stringify({ data, affectedBookings }),
+      _capture: capture,
+    }) as never;
+
+  it("postFull POSTs and returns the raw write envelope (data + affectedBookings), unwrapped", async () => {
+    let seen: RequestInit | undefined;
+    mockFetch(okEnvelope({ id: "r1" }, [{ bookingId: "b1" }], (i) => (seen = i)));
+    const out = await new CoreClient("tok").postFull<{ id: string }, { bookingId: string }>(
+      "/availability/rules",
+      { dayOfWeek: 1 },
+      {},
+    );
+    expect(out).toEqual({ data: { id: "r1" }, affectedBookings: [{ bookingId: "b1" }] });
+    expect(seen!.method).toBe("POST");
+    expect(seen!.body).toBe(JSON.stringify({ dayOfWeek: 1 }));
+  });
+
+  it("patchFull PATCHes and returns the raw write envelope", async () => {
+    let seen: RequestInit | undefined;
+    mockFetch(okEnvelope({ id: "r1", active: false }, [], (i) => (seen = i)));
+    const out = await new CoreClient("tok").patchFull<{ id: string }, unknown>(
+      "/availability/rules/r1",
+      { active: false },
+      {},
+    );
+    expect(out).toEqual({ data: { id: "r1", active: false }, affectedBookings: [] });
+    expect(seen!.method).toBe("PATCH");
+  });
+
+  it("delFull DELETEs with no body and returns the raw write envelope", async () => {
+    let seen: RequestInit | undefined;
+    mockFetch(okEnvelope([], [{ bookingId: "b1" }], (i) => (seen = i)));
+    const out = await new CoreClient("tok").delFull<unknown[], { bookingId: string }>(
+      "/availability/rules/r1",
+      {},
+    );
+    expect(out).toEqual({ data: [], affectedBookings: [{ bookingId: "b1" }] });
+    expect(seen!.method).toBe("DELETE");
+    expect(seen!.body).toBeUndefined();
   });
 });
