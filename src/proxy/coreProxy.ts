@@ -9,10 +9,31 @@ import { isCrossSiteMutation } from "../util/csrf.js";
  * Public marketplace reads — the tour catalog + reference-data lookups are readable without a
  * session (Core permits these GETs anonymously). Everything else requires a bearer.
  */
+/** The `/v1`-stripped request path with any query string removed — the canonical form used for
+ *  both the public-GET check and the cacheability check (a `?cache-buster` must not change either
+ *  decision). */
+function strippedPath(req: Request): string {
+  return req.originalUrl.replace(/^\/v1/, "").replace(/\?.*$/, "");
+}
+
 function isPublicGet(req: Request): boolean {
   if (req.method !== "GET" && req.method !== "HEAD") return false;
-  const path = req.originalUrl.replace(/^\/v1/, "").replace(/\?.*$/, "");
+  const path = strippedPath(req);
   return path === "/tours" || path.startsWith("/tours/") || path.startsWith("/meta/");
+}
+
+/**
+ * Static, single-key reference vocabularies (Phase 1B of the meta-api-call-reduction plan): public
+ * and near-immutable, so their 200 responses are safe for the browser to cache by path.
+ * `universities?q=` / `majors?schoolId=` are deliberately excluded (high-cardinality + mutable); a
+ * query string bypasses too, since a parameterised request is not the static resource.
+ */
+const CACHEABLE_STATIC_META = new Set(["/meta/tour-topics", "/meta/tour-features"]);
+
+function isCacheableStaticMeta(req: Request): boolean {
+  if (req.method !== "GET") return false;
+  if (req.originalUrl.includes("?")) return false;
+  return CACHEABLE_STATIC_META.has(strippedPath(req));
 }
 
 /**
@@ -73,6 +94,12 @@ export async function coreProxy(req: Request, res: Response): Promise<void> {
     res.status(upstream.status);
     const contentType = upstream.headers.get("content-type");
     if (contentType) res.type(contentType);
+    // Let the browser cache the static reference vocabularies (Phase 1B). Deterministically owns
+    // the policy for these paths (overrides any upstream Cache-Control). Browser leg only for now —
+    // s-maxage/CDN + a BFF in-memory cache are deferred until a shared cache actually exists.
+    if (upstream.status === 200 && isCacheableStaticMeta(req)) {
+      res.setHeader("Cache-Control", "public, max-age=300");
+    }
     res.send(text);
   } catch {
     sendProblem(res, 502, "Upstream service unavailable", { code: "CORE_UNAVAILABLE" });

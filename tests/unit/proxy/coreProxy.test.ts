@@ -155,3 +155,68 @@ describe("coreProxy (unit) — /v1/tours query passthrough", () => {
     expect(res.send).toHaveBeenCalledWith(problemBody);
   });
 });
+
+describe("coreProxy (unit) — static-meta Cache-Control (Phase 1B)", () => {
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
+
+  function runGet(originalUrl: string, status = 200, method = "GET") {
+    const fetchMock = jest.fn<typeof fetch>(
+      async () =>
+        ({
+          status,
+          text: async () => "[]",
+          headers: { get: () => "application/json" },
+        }) as unknown as globalThis.Response,
+    );
+    global.fetch = fetchMock as unknown as typeof fetch;
+    const req = {
+      method,
+      header: () => undefined,
+      originalUrl,
+      body: undefined,
+    } as unknown as Request;
+    const res = mockRes();
+    return { res, done: coreProxy(req, res as unknown as Response) };
+  }
+
+  const cacheHeader = (res: ReturnType<typeof mockRes>) =>
+    (res.setHeader as jest.Mock).mock.calls.find((c) => c[0] === "Cache-Control");
+
+  it("sets a public browser cache header on a 200 static-meta GET (tour-topics)", async () => {
+    const { res, done } = runGet("/v1/meta/tour-topics");
+    await done;
+    expect(cacheHeader(res)).toEqual(["Cache-Control", "public, max-age=300"]);
+  });
+
+  it("also caches tour-features", async () => {
+    const { res, done } = runGet("/v1/meta/tour-features");
+    await done;
+    expect(cacheHeader(res)).toEqual(["Cache-Control", "public, max-age=300"]);
+  });
+
+  it("does NOT cache a parameterised meta lookup (universities?q=)", async () => {
+    const { res, done } = runGet("/v1/meta/universities?q=stanford");
+    await done;
+    expect(cacheHeader(res)).toBeUndefined();
+  });
+
+  it("does NOT cache a static-meta path carrying a query string (cache-buster)", async () => {
+    const { res, done } = runGet("/v1/meta/tour-topics?_=123");
+    await done;
+    expect(cacheHeader(res)).toBeUndefined();
+  });
+
+  it("does NOT cache a non-200 static-meta response", async () => {
+    const { res, done } = runGet("/v1/meta/tour-topics", 404);
+    await done;
+    expect(cacheHeader(res)).toBeUndefined();
+  });
+
+  it("does NOT cache a non-meta public GET (/tours)", async () => {
+    const { res, done } = runGet("/v1/tours");
+    await done;
+    expect(cacheHeader(res)).toBeUndefined();
+  });
+});
