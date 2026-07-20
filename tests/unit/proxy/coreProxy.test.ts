@@ -62,6 +62,28 @@ describe("coreProxy (unit) — correlation-id fallback", () => {
     expect(headers["X-Request-Id"]).toMatch(/[0-9a-f-]{36}/i);
     expect(headers.Authorization).toBe("Bearer bearer-xyz");
   });
+
+  // M1: a literal `..` on the wire. Real HTTP clients collapse it before sending (so the
+  // integration suite can't reach this branch), but a raw client can send it verbatim — driving
+  // coreProxy directly is the only way to exercise the guard.
+  it("rejects a literal `..` path with 400 BAD_PATH before resolving a bearer or calling Core", async () => {
+    const fetchMock = jest.fn<typeof fetch>();
+    global.fetch = fetchMock as unknown as typeof fetch;
+    const res = mockRes();
+
+    const req = {
+      method: "GET",
+      header: () => undefined,
+      originalUrl: "/v1/tours/../guide/offerings",
+      body: undefined,
+    } as unknown as Request;
+
+    await coreProxy(req, res as unknown as Response);
+
+    expect(res.status).toHaveBeenCalledWith(400);
+    expect(resolveBearer).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
 });
 
 // Multi-topic filter (CTL-16): the bff proxies /v1/tours generically by forwarding

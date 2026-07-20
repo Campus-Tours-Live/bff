@@ -116,6 +116,48 @@ describe("coreProxy (/v1/* passthrough)", () => {
     });
   });
 
+  // M1: the public/private decision and the upstream target must agree on ONE canonical path, so a
+  // traversal cannot present a private resource as a `/tours/...` public read (which would forward
+  // it anonymously, with no bearer).
+  describe("path canonicalisation / traversal", () => {
+    it("a `..` traversal never reaches Core as a public read (client collapses it; still private)", async () => {
+      mockCoreByPath({});
+
+      // HTTP clients collapse `..` before it hits the wire, so this arrives as
+      // /v1/guide/offerings — a private path. (The literal, un-collapsed form a raw client could
+      // send is rejected with 400 BAD_PATH; see the coreProxy unit test.)
+      const res = await request(app).get("/v1/tours/../guide/offerings");
+
+      expect(res.status).toBe(401);
+      expect(res.headers["auth-required"]).toBe("reauthenticate");
+      expect(global.fetch).not.toHaveBeenCalled();
+    });
+
+    it("an encoded traversal is canonicalised, so a private path still requires a bearer", async () => {
+      mockCoreByPath({});
+
+      // %2e%2e decodes to `..`. Under the old naive `/v1` strip this path would still
+      // startsWith("/tours/") → classified public → proxied anonymously.
+      const res = await request(app).get("/v1/tours/%2e%2e/guide/offerings");
+
+      expect(res.status).toBe(401);
+      expect(res.headers["auth-required"]).toBe("reauthenticate");
+      expect(global.fetch).not.toHaveBeenCalled();
+    });
+
+    it("forwards the canonical path upstream, preserving the query string", async () => {
+      const mock = mockCoreByPath({ "/guide/offerings": coreOk([{ id: "o1" }]) });
+
+      const res = await request(app)
+        .get("/v1/tours/%2e%2e/guide/offerings?page=2")
+        .set("Cookie", cookie);
+
+      expect(res.status).toBe(200);
+      // The authorized path and the forwarded path are the same canonical path.
+      expect(String(mock.mock.calls[0]![0])).toBe("http://core.test/guide/offerings?page=2");
+    });
+  });
+
   describe("CSRF protection on state-changing methods", () => {
     it("PATCH with a cross-site Origin → 403 CSRF_BLOCKED (no Core call)", async () => {
       mockCoreByPath({});

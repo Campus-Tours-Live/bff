@@ -9,16 +9,24 @@ import { isCrossSiteMutation } from "../util/csrf.js";
  * Public marketplace reads — the tour catalog + reference-data lookups are readable without a
  * session (Core permits these GETs anonymously). Everything else requires a bearer.
  */
-/** The `/v1`-stripped request path with any query string removed — the canonical form used for
- *  both the public-GET check and the cacheability check (a `?cache-buster` must not change either
- *  decision). */
-function strippedPath(req: Request): string {
-  return req.originalUrl.replace(/^\/v1/, "").replace(/\?.*$/, "");
+/** The `/v1`-stripped request path in CANONICAL form (query removed). The WHATWG URL parser
+ *  collapses any `.`/`..` segments BEFORE we use it, so a traversal like `/v1/tours/../guide/...`
+ *  cannot masquerade as a path that `startsWith("/tours/")`. Used for BOTH the public-GET /
+ *  cacheability classification and the upstream target, so the path we authorize is exactly the
+ *  path we forward (a `?cache-buster` must not change any decision). */
+function canonicalPath(req: Request): string {
+  return new URL(req.originalUrl, "http://x").pathname.replace(/^\/v1/, "");
+}
+
+/** The canonical `/v1`-stripped path WITH the original query re-appended — the upstream target. */
+function canonicalTarget(req: Request): string {
+  const u = new URL(req.originalUrl, "http://x");
+  return u.pathname.replace(/^\/v1/, "") + u.search;
 }
 
 function isPublicGet(req: Request): boolean {
   if (req.method !== "GET" && req.method !== "HEAD") return false;
-  const path = strippedPath(req);
+  const path = canonicalPath(req);
   return path === "/tours" || path.startsWith("/tours/") || path.startsWith("/meta/");
 }
 
@@ -33,7 +41,7 @@ const CACHEABLE_STATIC_META = new Set(["/meta/tour-topics", "/meta/tour-features
 function isCacheableStaticMeta(req: Request): boolean {
   if (req.method !== "GET") return false;
   if (req.originalUrl.includes("?")) return false;
-  return CACHEABLE_STATIC_META.has(strippedPath(req));
+  return CACHEABLE_STATIC_META.has(canonicalPath(req));
 }
 
 /**
@@ -47,6 +55,17 @@ export async function coreProxy(req: Request, res: Response): Promise<void> {
     return;
   }
 
+  // A `..` in the path is never a legitimate Core resource; reject it outright rather than
+  // canonicalising-and-serving a normalized path. Most HTTP clients collapse `..` before sending
+  // (so this rarely fires), but a raw client can put it on the wire verbatim. `canonicalPath`
+  // below is the general defense — it also covers encoded (`%2e%2e`) and `.` traversal.
+  const qIndex = req.originalUrl.indexOf("?");
+  const rawPath = qIndex === -1 ? req.originalUrl : req.originalUrl.slice(0, qIndex);
+  if (rawPath.includes("..")) {
+    sendProblem(res, 400, "Invalid request path", { code: "BAD_PATH" });
+    return;
+  }
+
   // Public reads forward anonymously (no session needed); everything else requires a bearer.
   const publicGet = isPublicGet(req);
   const bearer = publicGet ? null : await resolveBearer(req, res);
@@ -56,9 +75,9 @@ export async function coreProxy(req: Request, res: Response): Promise<void> {
     return;
   }
 
-  // /v1/participant/profile -> {core}/participant/profile
-  const corePath = req.originalUrl.replace(/^\/v1/, "");
-  const target = `${config.coreApiBaseUrl}${corePath}`;
+  // /v1/participant/profile -> {core}/participant/profile (canonical path + original query, so the
+  // forwarded target matches the path we just authorized).
+  const target = `${config.coreApiBaseUrl}${canonicalTarget(req)}`;
   const requestId = res.getHeader("X-Request-Id")?.toString() ?? crypto.randomUUID();
 
   const headers: Record<string, string> = {
