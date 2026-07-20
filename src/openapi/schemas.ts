@@ -1225,7 +1225,7 @@ export const GuideDashboardDataSchema = z.object({
   guideStatus: z.string().nullable(), // forwarded from Core — value not constrained here
   canPublish: z.boolean(), // BFF-derived
   offerings: z.array(LooseObject), // BFF owns "it's an array"; items are Core-opaque
-  createdAt: z.string().optional(), // forwarded from Core
+  createdAt: z.string().nullish(), // forwarded from Core (may be null, not just absent)
 });
 
 /** GET /v1/dashboard participant `data` — strict on `kind` + the array shape (BFF-owned). */
@@ -1235,7 +1235,7 @@ export const ParticipantDashboardDataSchema = z.object({
   nextTour: BookingResponseSchema.nullable(), // reshaped to Contract-A (one booking shape)
   upcomingBookings: z.array(BookingResponseSchema), // reshaped to Contract-A
   pendingActions: z.unknown(), // Core-opaque (object | null)
-  createdAt: z.string().optional(), // forwarded from Core
+  createdAt: z.string().nullish(), // forwarded from Core (may be null, not just absent)
 });
 
 /** GET /v1/dashboard `data`, discriminated by `kind`. */

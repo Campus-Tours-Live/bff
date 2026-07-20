@@ -1,6 +1,8 @@
 import { jest } from "@jest/globals";
 import {
   CreateAvailabilityExceptionRequestSchema,
+  GuideDashboardDataSchema,
+  ParticipantDashboardDataSchema,
   UpdateAvailabilityExceptionRequestSchema,
 } from "@/openapi/schemas.js";
 
@@ -96,6 +98,32 @@ describe("UpdateAvailabilityExceptionRequestSchema (CTL-56 item 2)", () => {
       kind: "UNAVAILABLE",
       startLocal: "09:00",
       windowMin: 60,
+    });
+    expect(result.success).toBe(true);
+  });
+});
+
+describe("Dashboard data schemas tolerate a null createdAt (Core sends null, not undefined)", () => {
+  it("GuideDashboardDataSchema accepts createdAt: null", () => {
+    const result = GuideDashboardDataSchema.safeParse({
+      kind: "guide",
+      guide: {},
+      guideStatus: null,
+      canPublish: false,
+      offerings: [],
+      createdAt: null,
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("ParticipantDashboardDataSchema accepts createdAt: null", () => {
+    const result = ParticipantDashboardDataSchema.safeParse({
+      kind: "participant",
+      participant: {},
+      nextTour: null,
+      upcomingBookings: [],
+      pendingActions: null,
+      createdAt: null,
     });
     expect(result.success).toBe(true);
   });
