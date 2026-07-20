@@ -105,7 +105,6 @@ describe("OpenAPI contract — drift guard (Express routes ↔ spec)", () => {
       [
         "get /auth/callback",
         "get /auth/login",
-        "get /auth/logout",
         "get /auth/session",
         "get /v1/dashboard",
         "get /v1/onboarding",

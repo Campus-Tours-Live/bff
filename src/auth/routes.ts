@@ -10,6 +10,7 @@ import {
 } from "../session.js";
 import { buildAuthorizeUrl, createPkce, exchangeCode, randomState } from "./google.js";
 import { sendProblem } from "../util/problem.js";
+import { csrfGuard } from "../util/csrf.js";
 
 export const authRouter: Router = Router();
 
@@ -227,13 +228,14 @@ authRouter.get("/callback", async (req, res) => {
   return res.redirect(webUrl(dest));
 });
 
-/** GET/POST /auth/logout — clear the local session and return to the web app. */
+/** POST /auth/logout — clear the local session and return to the web app. POST-only + CSRF-guarded:
+ *  logout is a state change, so a GET would be forgeable cross-site (SameSite=Lax allows a top-level
+ *  navigation GET) to force-log-out a user. */
 function logout(_req: import("express").Request, res: import("express").Response) {
   clearSession(res);
   return res.redirect(config.webBaseUrl);
 }
-authRouter.get("/logout", logout);
-authRouter.post("/logout", logout);
+authRouter.post("/logout", csrfGuard, logout);
 
 /** GET /auth/session — lightweight auth check for the web app (no Core call). */
 authRouter.get("/session", (req, res) => {

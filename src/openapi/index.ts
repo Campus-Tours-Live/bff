@@ -1037,16 +1037,16 @@ apiRoute({
   },
 });
 
-// GET & POST /auth/logout
-for (const method of ["get", "post"] as const) {
+// POST /auth/logout — POST-only + CSRF-guarded (a GET logout would be forgeable cross-site).
+for (const method of ["post"] as const) {
   apiRoute({
     method,
     path: "/auth/logout",
     tags: ["Auth"],
     summary: "Clear the session",
     description:
-      "Clears the `ctl_sess` cookie and 302-redirects to the web app base URL. Exposed as both GET " +
-      "(link) and POST (form) for convenience.",
+      "Clears the `ctl_sess` cookie and 302-redirects to the web app base URL. POST-only and " +
+      "CSRF-guarded — logout is a state change, so a GET would be cross-site forgeable.",
     responses: {
       302: {
         description:
