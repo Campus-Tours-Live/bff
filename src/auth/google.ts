@@ -8,6 +8,7 @@ import { config } from "../config.js";
  */
 const AUTHORIZE_URL = "https://accounts.google.com/o/oauth2/v2/auth";
 const TOKEN_URL = "https://oauth2.googleapis.com/token";
+const REVOKE_URL = "https://oauth2.googleapis.com/revoke";
 
 function base64url(buf: Buffer): string {
   return buf.toString("base64url");
@@ -137,4 +138,33 @@ export async function refreshTokens(refreshToken: string): Promise<TokenSet> {
     client_secret: config.google.clientSecret,
     refresh_token: refreshToken,
   });
+}
+
+/**
+ * Best-effort revocation of a Google grant at logout (L5#3).
+ *
+ * Clearing our session cookie ends the session HERE. The refresh token inside it stays valid
+ * at Google until it expires or is revoked, so anyone holding a copy could keep minting
+ * id_tokens for an account whose owner believes they signed out. Revoking the refresh token
+ * invalidates the whole grant, access tokens included.
+ *
+ * N2 is why this matters more than it used to: before it, transient Google failures quietly
+ * destroyed refresh tokens all the time. N2 deliberately made them survive — so making them
+ * durable without also revoking them on logout would leave a long-lived credential alive
+ * behind a "sign out" the user trusted.
+ *
+ * NEVER allowed to fail, delay, or block a logout: the user asked to leave, and an
+ * unreachable Google is not a reason to keep them signed in. Errors are swallowed on
+ * purpose; the local session is cleared either way.
+ */
+export async function revokeRefreshToken(refreshToken: string): Promise<void> {
+  try {
+    await fetch(REVOKE_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({ token: refreshToken }).toString(),
+    });
+  } catch {
+    // Best effort — see above. A failed revocation must not keep the user signed in.
+  }
 }
