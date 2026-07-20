@@ -17,7 +17,14 @@ export const authRouter: Router = Router();
 // site-relative paths under known authenticated roots are allowed (defends
 // against open redirect via absolute / protocol-relative / backslash values).
 const DEFAULT_RETURN_TO = "/dashboard";
-const ALLOWED_RETURN_ROOTS = ["/dashboard", "/profile", "/support", "/staff", "/onboarding"];
+const ALLOWED_RETURN_ROOTS = [
+  "/dashboard",
+  "/profile",
+  "/support",
+  "/staff",
+  "/onboarding",
+  "/guide",
+];
 
 // Exported for unit testing — this is the open-redirect defence, so it earns a
 // direct test of the allowlist (the route handlers below are its only callers).
@@ -62,9 +69,14 @@ export function landingFor(
   activeRole: string | null,
   participantType: string | null,
 ): string {
-  const targetRole = returnTo.startsWith("/onboarding/guide")
+  // Re-validate here too: landingFor is exported and unit-tested with raw values, and the
+  // returnTo honoured below must never trust an un-sanitised path (open-redirect defence).
+  // safeReturnTo is idempotent, so this is a no-op on the already-sanitised callback value.
+  const safeRt = safeReturnTo(returnTo);
+
+  const targetRole = safeRt.startsWith("/onboarding/guide")
     ? "GUIDE"
-    : returnTo.startsWith("/onboarding/participant")
+    : safeRt.startsWith("/onboarding/participant")
       ? "PARTICIPANT"
       : null;
 
@@ -76,7 +88,10 @@ export function landingFor(
     return targetRole === "GUIDE" ? "/onboarding/guide" : "/onboarding/participant";
   }
 
-  if (roles.length > 0) return CONSUMER_HOME;
+  // A returning user who already holds a role: land them back on the specific allow-listed page
+  // they came from (safeRt), not always /dashboard. Fall back to home when returnTo was
+  // absent/default (safeRt === DEFAULT_RETURN_TO).
+  if (roles.length > 0) return safeRt !== DEFAULT_RETURN_TO ? safeRt : CONSUMER_HOME;
   // Account exists but holds no role yet (e.g. signed up then abandoned onboarding,
   // now signing in) → send to role selection with a notice. This is a continuation,
   // not a rejection (see the session handling in the callback).
