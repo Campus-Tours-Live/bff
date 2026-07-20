@@ -2,7 +2,12 @@ import crypto from "node:crypto";
 import type { Request, Response } from "express";
 import { config } from "../config.js";
 import { sendProblem } from "../util/problem.js";
-import { requireReauth, resolveBearer } from "../api/_shared/index.js";
+import {
+  requireReauth,
+  authUpstreamUnavailable,
+  resolveBearer,
+  TransientAuthError,
+} from "../api/_shared/index.js";
 import { isCrossSiteMutation } from "../util/csrf.js";
 
 /**
@@ -72,9 +77,22 @@ export async function coreProxy(req: Request, res: Response): Promise<void> {
 
   // Public reads forward anonymously (no session needed); everything else requires a bearer.
   const publicGet = isPublicGet(req);
-  const bearer = publicGet ? null : await resolveBearer(req, res);
+  let bearer: string | null = null;
+  if (!publicGet) {
+    try {
+      bearer = await resolveBearer(req, res);
+    } catch (err) {
+      // Google unreachable ≠ session dead. Keep the session and ask for a retry, so a
+      // Google blip can't log the user out irrecoverably (the refresh token survives).
+      if (err instanceof TransientAuthError) {
+        authUpstreamUnavailable(res);
+        return;
+      }
+      throw err;
+    }
+  }
   if (!bearer && !publicGet) {
-    // No session / silent refresh failed → genuine re-auth required.
+    // No session, or the grant is genuinely dead → real re-auth required.
     requireReauth(res);
     return;
   }

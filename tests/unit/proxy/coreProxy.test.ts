@@ -8,9 +8,15 @@ import type { Request, Response } from "express";
 
 const resolveBearer = jest.fn<(...args: unknown[]) => Promise<string | null>>();
 const requireReauth = jest.fn<(...args: unknown[]) => void>();
+const authUpstreamUnavailable = jest.fn<(...args: unknown[]) => void>();
+// The REAL TransientAuthError — coreProxy branches on `instanceof`, so a stand-in would
+// silently never match. (N2)
+const { TransientAuthError } = await import("@/api/_shared/errors.js");
 jest.unstable_mockModule("@/api/_shared/index.js", () => ({
   resolveBearer: (...args: unknown[]) => resolveBearer(...args),
   requireReauth: (...args: unknown[]) => requireReauth(...args),
+  authUpstreamUnavailable: (...args: unknown[]) => authUpstreamUnavailable(...args),
+  TransientAuthError,
 }));
 
 const { coreProxy } = await import("@/proxy/coreProxy.js");
@@ -26,10 +32,68 @@ function mockRes() {
   return res;
 }
 
+describe("coreProxy (unit) — transient refresh failure (N2)", () => {
+  beforeEach(() => {
+    resolveBearer.mockReset();
+    requireReauth.mockReset();
+    authUpstreamUnavailable.mockReset();
+  });
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
+
+  /**
+   * coreProxy is the third resolveBearer call site and the one that serves /v1/userinfo —
+   * i.e. the request the web app makes on every page. If Google being down made THIS route
+   * re-auth, the whole point of preserving the session would be lost.
+   */
+  it("answers 'temporarily unavailable' and never re-auths when the refresh is transient", async () => {
+    resolveBearer.mockRejectedValue(new TransientAuthError());
+    const fetchMock = jest.fn<typeof fetch>();
+    global.fetch = fetchMock as unknown as typeof fetch;
+
+    const req = {
+      method: "GET",
+      url: "/v1/userinfo",
+      originalUrl: "/v1/userinfo",
+      headers: {},
+      header: () => undefined,
+    } as unknown as Request;
+
+    await coreProxy(req, mockRes() as unknown as Response);
+
+    expect(authUpstreamUnavailable).toHaveBeenCalledTimes(1);
+    expect(requireReauth).not.toHaveBeenCalled();
+    // Never reached Core — we could not authenticate the call.
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("re-throws an unrelated resolveBearer failure instead of masking it as a 503", async () => {
+    // A programmer error must surface as a 500 via the error middleware, not be dressed up
+    // as a retryable upstream blip.
+    resolveBearer.mockRejectedValue(new Error("programmer error"));
+
+    const req = {
+      method: "GET",
+      url: "/v1/userinfo",
+      originalUrl: "/v1/userinfo",
+      headers: {},
+      header: () => undefined,
+    } as unknown as Request;
+
+    await expect(coreProxy(req, mockRes() as unknown as Response)).rejects.toThrow(
+      "programmer error",
+    );
+    expect(authUpstreamUnavailable).not.toHaveBeenCalled();
+    expect(requireReauth).not.toHaveBeenCalled();
+  });
+});
+
 describe("coreProxy (unit) — correlation-id fallback", () => {
   beforeEach(() => {
     resolveBearer.mockReset();
     requireReauth.mockReset();
+    authUpstreamUnavailable.mockReset();
   });
   afterEach(() => {
     jest.restoreAllMocks();

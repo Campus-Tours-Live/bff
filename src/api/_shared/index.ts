@@ -1,10 +1,10 @@
 /** Barrel for the shared building blocks behind the BFF's aggregation endpoints —
  *  auth resolution, the Core client, the success/error envelopes, and shared types. */
-export { requireReauth } from "./reauth.js";
+export { requireReauth, authUpstreamUnavailable } from "./reauth.js";
 export { resolveBearer } from "./session.js";
 export { CoreClient } from "./core-client.js";
 export type { CoreWriteEnvelope } from "./core-client.js";
-export { CoreAuthError, CoreError } from "./errors.js";
+export { CoreAuthError, CoreError, TransientAuthError } from "./errors.js";
 export { sendData, coreUnavailable, assertShapeInDev } from "./envelope.js";
 export { withSession } from "./with-session.js";
 export { withMutation } from "./with-mutation.js";

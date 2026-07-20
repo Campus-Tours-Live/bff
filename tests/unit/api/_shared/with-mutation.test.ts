@@ -13,6 +13,9 @@ jest.unstable_mockModule("@/api/_shared/session.js", () => ({
 }));
 jest.unstable_mockModule("@/api/_shared/reauth.js", () => ({
   requireReauth: (...args: unknown[]) => requireReauth(...args),
+  // N2: the transient-refresh path. Exercised in transient-auth-callers.test.ts; stubbed
+  // here so this suite's module graph still resolves.
+  authUpstreamUnavailable: jest.fn(),
 }));
 jest.unstable_mockModule("@/api/_shared/envelope.js", () => ({
   coreUnavailable: (...args: unknown[]) => coreUnavailable(...args),

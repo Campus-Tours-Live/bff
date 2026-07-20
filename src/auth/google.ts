@@ -51,14 +51,71 @@ export interface TokenSet {
   id_token?: string;
 }
 
+/**
+ * A failed call to Google's token endpoint, typed so the caller can tell a genuinely dead
+ * grant from a transient upstream problem.
+ *
+ * This distinction is load-bearing: the only correct response to a dead grant is to clear
+ * the session, and the only correct response to Google having a bad minute is to keep it.
+ * Conflating them (which a bare `Error` forced) means one Google 5xx permanently logs a
+ * user out, because clearing the session discards the refresh token — there is then
+ * nothing left to retry with.
+ */
+export class GoogleTokenError extends Error {
+  constructor(
+    /** HTTP status from Google, or 0 when the request never completed (network failure). */
+    readonly status: number,
+    /** Google's `error` field, when the body was JSON and carried one. */
+    readonly code?: string,
+    /** Google's `error_description`, or a short note for transport failures. */
+    readonly description?: string,
+  ) {
+    super(`Google token request failed: ${status}${code ? ` (${code})` : ""}`);
+    this.name = "GoogleTokenError";
+  }
+
+  /**
+   * True only when retrying is pointless because the grant/client is genuinely rejected.
+   *
+   * Deliberately a strict ALLOWLIST, not a status-code range: an unparseable body, an
+   * unfamiliar error code, or any 4xx we don't recognise stays transient. Wrongly keeping
+   * a session costs one extra 401 later; wrongly clearing one costs the user their session
+   * irrecoverably. The asymmetry decides the default.
+   */
+  get fatal(): boolean {
+    return this.code === "invalid_grant" || this.code === "invalid_client";
+  }
+}
+
 /** Google's token endpoint expects application/x-www-form-urlencoded. */
 async function postToken(body: Record<string, string>): Promise<TokenSet> {
-  const res = await fetch(TOKEN_URL, {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams(body).toString(),
-  });
-  if (!res.ok) throw new Error(`Google token request failed: ${res.status}`);
+  let res: Response;
+  try {
+    res = await fetch(TOKEN_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams(body).toString(),
+    });
+  } catch (cause) {
+    // Never reached Google (DNS, TCP, TLS, timeout) — always retryable.
+    throw new GoogleTokenError(0, undefined, cause instanceof Error ? cause.message : "network");
+  }
+
+  if (!res.ok) {
+    // Read the body: it is the ONLY place Google says `invalid_grant`. A non-JSON body
+    // (proxy/CDN HTML error page) leaves `code` undefined, i.e. transient.
+    let code: string | undefined;
+    let description: string | undefined;
+    try {
+      const parsed = (await res.json()) as { error?: string; error_description?: string };
+      code = parsed?.error;
+      description = parsed?.error_description;
+    } catch {
+      /* non-JSON error body — leave code undefined so it classifies as transient */
+    }
+    throw new GoogleTokenError(res.status, code, description);
+  }
+
   return (await res.json()) as TokenSet;
 }
 
