@@ -189,3 +189,46 @@ describe("OpenAPI contract — protected /v1 operations", () => {
     }
   });
 });
+
+/**
+ * M5 follow-up — the PUBLISHED shape must agree with what we actually validate.
+ *
+ * M5 fixed the runtime schemas (`GuideDashboardDataSchema` / `ParticipantDashboardDataSchema`
+ * accept the `null` Core really sends) but left the documented ones saying `createdAt` is a
+ * required, non-null string. The spec is Contract A's public face — consumers generate types
+ * from it — so a spec that disagrees with the validator hands them a type that is wrong in
+ * production while every test stays green.
+ *
+ * Generalised on purpose: this walks the dashboard schemas rather than asserting one field,
+ * so the next nullable field cannot drift the same way.
+ */
+describe("OpenAPI contract — published nullability matches runtime validation", () => {
+  const NULLABLE_DASHBOARD_FIELDS = [
+    ["GuideDashboard", "createdAt"],
+    ["ParticipantDashboard", "createdAt"],
+  ] as const;
+
+  /** True when the documented property admits null (OpenAPI 3.0 `nullable` or 3.1 type union). */
+  function admitsNull(prop: unknown): boolean {
+    if (!prop || typeof prop !== "object") return false;
+    const p = prop as { nullable?: boolean; type?: unknown; anyOf?: unknown[]; oneOf?: unknown[] };
+    if (p.nullable === true) return true;
+    if (Array.isArray(p.type) && p.type.includes("null")) return true;
+    const union = p.anyOf ?? p.oneOf;
+    return Array.isArray(union) && union.some((m) => admitsNull(m));
+  }
+
+  it.each(NULLABLE_DASHBOARD_FIELDS)(
+    "%s.%s is documented as nullable, matching the runtime schema",
+    (schemaName, field) => {
+      const schemas = (openapiSpec as { components?: { schemas?: Record<string, unknown> } })
+        .components?.schemas;
+      const schema = schemas?.[schemaName] as { properties?: Record<string, unknown> } | undefined;
+      expect(schema).toBeDefined();
+
+      const prop = schema?.properties?.[field];
+      expect(prop).toBeDefined();
+      expect(admitsNull(prop)).toBe(true);
+    },
+  );
+});

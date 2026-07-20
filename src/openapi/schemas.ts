@@ -381,10 +381,16 @@ const GuideDashboard = z
     offerings: z.array(Offering).openapi({
       description: "The guide's offerings (best-effort — empty list if the Core read fails).",
     }),
-    createdAt: z.string().openapi({
-      description: 'Account creation timestamp (ISO-8601 UTC), rendered as "member since".',
-      example: "2025-09-01T12:00:00.000Z",
-    }),
+    createdAt: z
+      .string()
+      .nullish()
+      .openapi({
+        description:
+          'Account creation timestamp (ISO-8601 UTC), rendered as "member since". Nullable: ' +
+          "Core sends `null` for accounts created before it recorded this, and the runtime " +
+          "schema accepts that — the published shape must say so too (M5).",
+        example: "2025-09-01T12:00:00.000Z",
+      }),
   })
   .openapi("GuideDashboard", { description: "Signed-in home for a guide." });
 
@@ -443,10 +449,16 @@ const ParticipantDashboard = z
         "Counts of actions needing attention, forwarded from Core (opaque). Best-effort: null on failure.",
       example: { unreadMessages: 2, awaitingReview: 1 },
     }),
-    createdAt: z.string().openapi({
-      description: 'Account creation timestamp (ISO-8601 UTC), rendered as "member since".',
-      example: "2026-01-15T09:30:00.000Z",
-    }),
+    createdAt: z
+      .string()
+      .nullish()
+      .openapi({
+        description:
+          'Account creation timestamp (ISO-8601 UTC), rendered as "member since". Nullable: ' +
+          "Core sends `null` for accounts created before it recorded this, and the runtime " +
+          "schema accepts that — the published shape must say so too (M5).",
+        example: "2026-01-15T09:30:00.000Z",
+      }),
   })
   .openapi("ParticipantDashboard", { description: "Signed-in home for a participant." });
 
