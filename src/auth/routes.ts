@@ -239,8 +239,8 @@ authRouter.get("/callback", async (req, res) => {
  *  navigation GET) to force-log-out a user. */
 function logout(req: import("express").Request, res: import("express").Response) {
   // Revoke the Google grant before dropping our cookie, so "sign out" also ends the
-  // credential at Google rather than only here (L5#3). Deliberately NOT awaited: it is
-  // best-effort and must not delay the redirect the user is waiting on.
+  // credential at Google rather than only here. Deliberately NOT awaited: it is best-effort
+  // and must not delay the redirect the user is waiting on.
   const session = readSession(req);
   if (session?.refreshToken) void revokeRefreshToken(session.refreshToken);
   clearSession(res);

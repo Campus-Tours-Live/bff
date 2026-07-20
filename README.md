@@ -316,12 +316,22 @@ OAuth 2.0 **Authorization Code + PKCE**, implemented directly over `fetch` (no S
    **role-aware landing** page (`landingFor`) based on the roles the Core returned and where the user
    started.
 
-Other endpoints: **`GET|POST /auth/logout`** clears the session and returns to the web app;
+Other endpoints: **`POST /auth/logout`** clears the session and returns to the web app (POST-only
+and CSRF-guarded — a `GET` would be forgeable cross-site to force a logout);
 **`GET /auth/session`** is a lightweight `{ authenticated: boolean }` check (no Core call).
 
-**Token refresh:** when forwarding to the Core, if the `id_token` is within 60s of expiry and a
-refresh token is present, the BFF **silently refreshes** with Google and rotates the session cookie.
-If the refresh fails, the request triggers re-authentication (see below).
+**Token refresh:** when forwarding to the Core, if the `id_token` is within **5 minutes** of expiry
+and a refresh token is present, the BFF **silently refreshes** with Google and rotates the session
+cookie. Concurrent requests share one in-flight refresh rather than each redeeming the same token.
+
+How a failed refresh is classified matters, because the two outcomes are opposite:
+
+- Google answers **`invalid_grant`** / **`invalid_client`** — the grant really is dead (revoked, or
+  the refresh token expired). The session is cleared and the request triggers re-authentication.
+- **anything else** — a 5xx, a timeout, a network error, an unrecognised error code. The session is
+  **kept** and the request returns **`503 AUTH_UPSTREAM_UNAVAILABLE`** with `Retry-After`. Clearing
+  it here would discard a refresh token that is still perfectly good, and there would be nothing
+  left to retry with, so an unreachable Google would log people out permanently.
 
 ---
 
@@ -334,11 +344,17 @@ If the refresh fails, the request triggers re-authentication (see below).
   Same encryption; **15-minute** max age; cleared as soon as the callback finishes.
 - **Design principle:** the OAuth tokens live **only** inside the encrypted, `httpOnly` cookie —
   never exposed to browser JavaScript. This is the BFF's core defence against token theft via XSS.
-- **Re-authentication:** when the session is missing/expired/revoked or a silent refresh fails, the
-  BFF clears the cookie and responds **`401`** with an explicit **`Auth-Required: reauthenticate`**
+- **Re-authentication:** when the session is missing/expired/revoked, or a silent refresh is
+  rejected as a dead grant, the BFF clears the cookie and responds **`401`** with an explicit
+  **`Auth-Required: reauthenticate`**
   header (and `code: SESSION_EXPIRED`). The web app keys on that header to open the sign-in modal — a
   plain `401` (e.g. an authorization failure / `403`) does **not** trigger re-auth.
-- **Logout** simply clears `ctl_sess` and redirects to the web app. No server-side state to revoke.
+- **Logout** clears `ctl_sess`, and — because the session is a self-contained encrypted cookie with
+  no server-side record to delete — also asks Google to **revoke the refresh token** so the
+  credential ends there too, not just here. The revocation is fire-and-forget and its failures are
+  swallowed: the user asked to leave, and an unreachable Google is not a reason to keep them signed
+  in. Note this revokes the **grant**, so other sessions of the same user for this OAuth client end
+  too.
 
 ---
 
@@ -346,27 +362,33 @@ If the refresh fails, the request triggers re-authentication (see below).
 
 **Front-facing (called by the web app):**
 
-| Route                          | Purpose                                                               |
-| ------------------------------ | --------------------------------------------------------------------- |
-| `GET /health`                  | Liveness — `{ "status": "ok", "auth": "google" }`                     |
-| `GET /docs`                    | Swagger UI — interactive Contract A reference                         |
-| `GET /openapi.json`            | OpenAPI 3.1 spec (Contract A), generated in-code from the zod schemas |
-| `GET /auth/login`              | Start Google sign-in. Query: `returnTo`, `intent`, `login_hint`       |
-| `GET /auth/callback`           | Google redirect target (code → session, then redirect to the web app) |
-| `GET\|POST /auth/logout`       | Clear the session cookie, return to the web app                       |
-| `GET /auth/session`            | `{ authenticated: boolean }` (no Core call)                           |
-| `GET /v1/dashboard`            | **Aggregation** — role-aware home (discriminated by `kind`)           |
-| `GET /v1/onboarding`           | **Aggregation** — onboarding bootstrap data                           |
-| `POST /v1/bookings`            | **Reshape** — create a booking; Core reply mapped to Contract A       |
-| `POST /v1/bookings/:id/cancel` | **Reshape** — cancel own booking; reshaped reply                      |
-| `GET /v1/cart`                 | **Reshape** — the booking cart (list of reshaped DRAFT bookings)      |
-| `POST /v1/cart/items`          | **Reshape** — validate + add a cart item; reshaped reply              |
-| `DELETE /v1/cart/items/:id`    | **Reshape** — remove a cart item; reshaped cart list                  |
-| `POST /v1/cart/checkout`       | **Reshape** — check out the whole cart atomically; reshaped list      |
-| `ALL /v1/*` (other)            | **Proxy** to the Core API (authenticated passthrough)                 |
+| Route                                                                                                                 | Purpose                                                               |
+| --------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------- |
+| `GET /health`                                                                                                         | Liveness — `{ "status": "ok", "auth": "google" }`                     |
+| `GET /docs`                                                                                                           | Swagger UI — interactive Contract A reference                         |
+| `GET /openapi.json`                                                                                                   | OpenAPI 3.1 spec (Contract A), generated in-code from the zod schemas |
+| `GET /auth/login`                                                                                                     | Start Google sign-in. Query: `returnTo`, `intent`, `login_hint`       |
+| `GET /auth/callback`                                                                                                  | Google redirect target (code → session, then redirect to the web app) |
+| `POST /auth/logout`                                                                                                   | Clear the session cookie, return to the web app (CSRF-guarded)        |
+| `GET /auth/session`                                                                                                   | `{ authenticated: boolean }` (no Core call)                           |
+| `GET /v1/dashboard`                                                                                                   | **Aggregation** — role-aware home (discriminated by `kind`)           |
+| `GET /v1/onboarding`                                                                                                  | **Aggregation** — onboarding bootstrap data                           |
+| `POST /v1/bookings`                                                                                                   | **Reshape** — create a booking; Core reply mapped to Contract A       |
+| `POST /v1/bookings/:id/cancel`                                                                                        | **Reshape** — cancel own booking; reshaped reply                      |
+| `GET /v1/cart`                                                                                                        | **Reshape** — the booking cart (list of reshaped DRAFT bookings)      |
+| `POST /v1/cart/items`                                                                                                 | **Reshape** — validate + add a cart item; reshaped reply              |
+| `DELETE /v1/cart/items/:id`                                                                                           | **Reshape** — remove a cart item; reshaped cart list                  |
+| `POST /v1/cart/checkout`                                                                                              | **Reshape** — check out the whole cart atomically; reshaped list      |
+| `GET /v1/availability`                                                                                                | **Reshape** — the guide's resolved availability                       |
+| `GET\|POST /v1/availability/preview`                                                                                  | **Reshape** — dry-run a rule/override change before saving            |
+| `GET\|POST /v1/availability/rules`, `PATCH\|DELETE /v1/availability/rules/:id`, `POST /v1/availability/rules/replace` | **Reshape** — weekly recurring hours                                  |
+| `GET\|POST /v1/availability/exceptions`, `PATCH\|DELETE /v1/availability/exceptions/:id`                              | **Reshape** — date-specific overrides                                 |
+| `GET\|PATCH /v1/availability/settings`                                                                                | **Reshape** — booking settings (timezone, notice, buffers)            |
+| `GET /v1/offerings/:id/slots`                                                                                         | **Reshape** — bookable slots for one offering                         |
+| `ALL /v1/*` (other)                                                                                                   | **Proxy** to the Core API — bearer attached, except public reads      |
 
 The composite/reshape routes are mounted under `/v1` **before** the catch-all proxy, so they win
-over the passthrough. Their paths are **generic** (`/v1/bookings*`, `/v1/cart*`) — they mirror the
+over the passthrough. Their paths are **generic** (`/v1/bookings*`, `/v1/cart*`, `/v1/availability*`) — they mirror the
 Core's canonical resource paths one-to-one and only add the `/v1` prefix. Role (PARTICIPANT) is
 enforced by the Core's authorization, never by the URL, so the front end builds one URL regardless
 of role (matching how `/v1/dashboard` and `/v1/onboarding` already work).
@@ -378,8 +400,20 @@ of role (matching how `/v1/dashboard` and `/v1/onboarding` already work).
 The BFF talks to exactly one downstream — the Core — and exposes three patterns over it:
 
 - **Proxy** (`/v1/*`, catch-all): strips the `/v1` prefix (the Core owns the bare resource paths),
-  attaches the `Bearer` token, an `X-Request-Id`, and — for mutations — an `Idempotency-Key`
-  (client-provided or generated, so retries are safe). Transport failures become `502`.
+  attaches an `X-Request-Id` and — for mutations — the client's `Idempotency-Key` **if it sent one**.
+  The BFF never mints one: a fresh key per request is unique every time, so the Core would record a
+  row per mutation and never dedupe. Transport failures become `502`.
+
+  Not every proxied request carries a `Bearer`. `GET`/`HEAD` on `/tours`, `/tours/*` and `/meta/*`
+  are **public reads**, forwarded anonymously with no session; everything else requires one.
+
+  The path is **canonicalised before** that public/private decision is made, so a traversal cannot
+  dress a private path up as a public one — and the same canonical path is what gets forwarded, so
+  the path authorised is always the path sent. A `..` **path segment** is rejected outright with
+  `400 BAD_PATH` (a slug that merely contains dots, like `/tours/foo..bar`, is left alone). The
+  query string is forwarded as the raw byte slice of the request target rather than a re-encoded
+  copy, so a transparent proxy stays transparent.
+
 - **Aggregation** (`/v1/dashboard`, `/v1/onboarding`): the BFF fans out to several Core endpoints via
   a `CoreClient`, then composes a single front-end-shaped payload. The `withSession` wrapper resolves
   the Bearer once, hands the handler a `CoreClient`, and funnels all errors through one place — so
@@ -395,8 +429,8 @@ The BFF talks to exactly one downstream — the Core — and exposes three patte
 Reads use `withSession`; **writes use `withMutation`** — the mutation sibling that resolves auth
 once and, on a Core error, **relays the Core's `4xx` `problem+json` verbatim** (its status,
 content-type, and body) so validation messages (e.g. "time slot just taken", `422`) reach the
-browser unchanged. Writes carry headers built by `writeOpts`: the client's `Idempotency-Key` (or one the `CoreClient`
-generates) and the canonical `X-Request-Id` that `app.ts` echoes back.
+browser unchanged. Writes carry headers built by `writeOpts`: the client's `Idempotency-Key` when present (never one
+the BFF invents) and the canonical `X-Request-Id` that `app.ts` echoes back.
 
 **Downstream error mapping:**
 
@@ -406,6 +440,13 @@ generates) and the canonical `X-Request-Id` that `app.ts` echoes back.
 | `4xx` on a **read**    | the real status as generic `problem+json` (`UPSTREAM_ERROR`)                        |
 | `4xx` on a **write**   | the Core's own `problem+json` **relayed verbatim** (so field-level detail survives) |
 | `5xx` / unreachable    | `502` `CORE_UNAVAILABLE`                                                            |
+
+Two responses the BFF originates itself, before or instead of calling the Core:
+
+| BFF returns                                       | When                                                                                                                                |
+| ------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| `503` `AUTH_UPSTREAM_UNAVAILABLE` + `Retry-After` | Google could not be reached to refresh the token. The session is deliberately **kept** — see [Token refresh](#authentication-flow). |
+| `400` `BAD_PATH`                                  | The request target contains a `..` path segment.                                                                                    |
 
 The `CoreClient` uses plain `fetch` with no built-in retry/timeout — failures throw (`CoreAuthError`
 on 401, `CoreError` carrying the response body/content-type otherwise) and are mapped centrally. Its

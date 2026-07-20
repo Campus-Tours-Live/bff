@@ -55,8 +55,11 @@ function isCacheableStaticMeta(req: Request): boolean {
 
 /**
  * Proxy /v1/* to the Core API. The BFF strips the /v1 prefix (Core owns the bare
- * resource paths), attaches the Bearer token, a correlation id, and an
- * Idempotency-Key for mutations, and normalises transport errors to problem+json.
+ * resource paths), attaches a correlation id, and normalises transport errors to
+ * problem+json. A Bearer token is attached to everything EXCEPT the public reads
+ * (GET/HEAD on /tours and /meta), which forward anonymously. It forwards the
+ * client's Idempotency-Key on mutations when one was sent, and never mints one --
+ * see the note at the header-building step below.
  */
 export async function coreProxy(req: Request, res: Response): Promise<void> {
   if (isCrossSiteMutation(req)) {

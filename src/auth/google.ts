@@ -141,17 +141,20 @@ export async function refreshTokens(refreshToken: string): Promise<TokenSet> {
 }
 
 /**
- * Best-effort revocation of a Google grant at logout (L5#3).
+ * Best-effort revocation of a Google grant at logout.
  *
  * Clearing our session cookie ends the session HERE. The refresh token inside it stays valid
  * at Google until it expires or is revoked, so anyone holding a copy could keep minting
  * id_tokens for an account whose owner believes they signed out. Revoking the refresh token
  * invalidates the whole grant, access tokens included.
  *
- * N2 is why this matters more than it used to: before it, transient Google failures quietly
- * destroyed refresh tokens all the time. N2 deliberately made them survive — so making them
- * durable without also revoking them on logout would leave a long-lived credential alive
- * behind a "sign out" the user trusted.
+ * This became load-bearing once refresh tokens were made durable: `bearerForSession` now keeps
+ * them across a transient Google outage instead of discarding them (see the failure
+ * classification there). Durable credentials that no logout revokes would outlive the "sign
+ * out" the user trusted, so the two changes belong together.
+ *
+ * Note this revokes the GRANT, not one token — other sessions of the same user for this OAuth
+ * client end too.
  *
  * NEVER allowed to fail, delay, or block a logout: the user asked to leave, and an
  * unreachable Google is not a reason to keep them signed in. Errors are swallowed on
