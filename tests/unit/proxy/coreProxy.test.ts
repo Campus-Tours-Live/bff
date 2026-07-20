@@ -84,6 +84,31 @@ describe("coreProxy (unit) — correlation-id fallback", () => {
     expect(resolveBearer).not.toHaveBeenCalled();
     expect(fetchMock).not.toHaveBeenCalled();
   });
+
+  // The query is forwarded byte-for-byte: `new URL().search` would re-encode a bare `<` to `%3C`.
+  // Driven directly because Node's HTTP client rejects such characters before they reach the wire.
+  it("forwards the raw query string verbatim (no percent re-encoding)", async () => {
+    const fetchMock = jest.fn<typeof fetch>(
+      async () =>
+        ({
+          status: 200,
+          text: async () => "ok",
+          headers: { get: () => null },
+        }) as unknown as globalThis.Response,
+    );
+    global.fetch = fetchMock as unknown as typeof fetch;
+
+    const req = {
+      method: "GET",
+      header: () => undefined,
+      originalUrl: "/v1/tours?q=a<b&topic=x&topic=y", // public read → no bearer needed
+      body: undefined,
+    } as unknown as Request;
+
+    await coreProxy(req, mockRes() as unknown as Response);
+
+    expect(String(fetchMock.mock.calls[0]![0])).toMatch(/\/tours\?q=a<b&topic=x&topic=y$/);
+  });
 });
 
 // Multi-topic filter (CTL-16): the bff proxies /v1/tours generically by forwarding

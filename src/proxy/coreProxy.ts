@@ -18,10 +18,14 @@ function canonicalPath(req: Request): string {
   return new URL(req.originalUrl, "http://x").pathname.replace(/^\/v1/, "");
 }
 
-/** The canonical `/v1`-stripped path WITH the original query re-appended — the upstream target. */
-function canonicalTarget(req: Request): string {
-  const u = new URL(req.originalUrl, "http://x");
-  return u.pathname.replace(/^\/v1/, "") + u.search;
+/** Split the raw request-target into its un-normalised path and query halves. The path half feeds
+ *  the traversal guard; the query half is forwarded to Core byte-for-byte (a transparent proxy must
+ *  not re-encode it — `new URL().search` would percent-encode bare `<`, `"`, … ). */
+function splitRaw(req: Request): { rawPath: string; rawQuery: string } {
+  const q = req.originalUrl.indexOf("?");
+  return q === -1
+    ? { rawPath: req.originalUrl, rawQuery: "" }
+    : { rawPath: req.originalUrl.slice(0, q), rawQuery: req.originalUrl.slice(q) };
 }
 
 function isPublicGet(req: Request): boolean {
@@ -55,13 +59,13 @@ export async function coreProxy(req: Request, res: Response): Promise<void> {
     return;
   }
 
-  // A `..` in the path is never a legitimate Core resource; reject it outright rather than
-  // canonicalising-and-serving a normalized path. Most HTTP clients collapse `..` before sending
-  // (so this rarely fires), but a raw client can put it on the wire verbatim. `canonicalPath`
-  // below is the general defense — it also covers encoded (`%2e%2e`) and `.` traversal.
-  const qIndex = req.originalUrl.indexOf("?");
-  const rawPath = qIndex === -1 ? req.originalUrl : req.originalUrl.slice(0, qIndex);
-  if (rawPath.includes("..")) {
+  // A `..` SEGMENT is never a legitimate Core resource; reject it outright rather than
+  // canonicalising-and-serving a normalized path. Segment-aware on purpose: a slug that merely
+  // *contains* dots (`/tours/foo..bar`) is a legitimate resource and must pass. Most HTTP clients
+  // collapse `..` before sending (so this rarely fires), but a raw client can put it on the wire
+  // verbatim. `canonicalPath` is the general defense — it also covers encoded (`%2e%2e`) and `.`.
+  const { rawPath, rawQuery } = splitRaw(req);
+  if (rawPath.split("/").some((segment) => segment === "..")) {
     sendProblem(res, 400, "Invalid request path", { code: "BAD_PATH" });
     return;
   }
@@ -75,9 +79,9 @@ export async function coreProxy(req: Request, res: Response): Promise<void> {
     return;
   }
 
-  // /v1/participant/profile -> {core}/participant/profile (canonical path + original query, so the
-  // forwarded target matches the path we just authorized).
-  const target = `${config.coreApiBaseUrl}${canonicalTarget(req)}`;
+  // /v1/participant/profile -> {core}/participant/profile. Canonical path (so the forwarded target
+  // matches the path we just authorized) + the RAW query, forwarded verbatim.
+  const target = `${config.coreApiBaseUrl}${canonicalPath(req)}${rawQuery}`;
   const requestId = res.getHeader("X-Request-Id")?.toString() ?? crypto.randomUUID();
 
   const headers: Record<string, string> = {

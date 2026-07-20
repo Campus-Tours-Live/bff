@@ -145,6 +145,15 @@ describe("coreProxy (/v1/* passthrough)", () => {
       expect(global.fetch).not.toHaveBeenCalled();
     });
 
+    it("allows a slug that merely CONTAINS dots (the guard is segment-aware, not a substring match)", async () => {
+      const mock = mockCoreByPath({ "/tours/foo..bar": coreOk({ id: "t1" }) });
+
+      const res = await request(app).get("/v1/tours/foo..bar");
+
+      expect(res.status).toBe(200);
+      expect(String(mock.mock.calls[0]![0])).toBe("http://core.test/tours/foo..bar");
+    });
+
     it("forwards the canonical path upstream, preserving the query string", async () => {
       const mock = mockCoreByPath({ "/guide/offerings": coreOk([{ id: "o1" }]) });
 
