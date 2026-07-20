@@ -197,7 +197,7 @@ describe("coreProxy (/v1/* passthrough)", () => {
   });
 
   describe("mutations", () => {
-    it("forwards a generated Idempotency-Key on a mutation", async () => {
+    it("does NOT mint an Idempotency-Key when the client sends none", async () => {
       const mock = mockCoreByPath({ "/participant/profile": coreOk({ id: "p1" }) });
 
       const res = await request(app)
@@ -208,8 +208,9 @@ describe("coreProxy (/v1/* passthrough)", () => {
 
       expect(res.status).toBe(200);
       const headers = (mock.mock.calls[0]![1] as RequestInit).headers as Record<string, string>;
-      expect(headers["Idempotency-Key"]).toBeDefined();
-      expect(headers["Idempotency-Key"]).not.toBe("");
+      // The BFF forwards a client key but never mints one — a per-request UUID would defeat the
+      // Core's dedupe (unique every time). Keyless ⇒ no header ⇒ Core passthrough.
+      expect(headers["Idempotency-Key"]).toBeUndefined();
       expect(headers["Content-Type"]).toBe("application/json");
     });
 

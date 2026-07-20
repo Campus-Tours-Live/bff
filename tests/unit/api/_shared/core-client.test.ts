@@ -248,11 +248,13 @@ describe("CoreClient.post/del", () => {
     expect(seen!.body).toBeUndefined();
   });
 
-  it("generates an Idempotency-Key when none is supplied", async () => {
+  it("omits the Idempotency-Key header when none is supplied (the BFF never mints one)", async () => {
     let seen: RequestInit | undefined;
     mockFetch(ok({ ok: true }, (i) => (seen = i)));
     await new CoreClient("t").post("/cart/checkout", {}, {});
-    expect((seen!.headers as Record<string, string>)["Idempotency-Key"]).toMatch(/[0-9a-f-]{36}/);
+    // A minted per-call UUID would be unique every time → the Core records a row per mutation and
+    // never dedupes. No client key ⇒ no header ⇒ Core passthrough.
+    expect((seen!.headers as Record<string, string>)["Idempotency-Key"]).toBeUndefined();
   });
 
   it("throws CoreError(502) when the write fetch itself rejects (unreachable)", async () => {

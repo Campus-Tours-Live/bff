@@ -68,9 +68,13 @@ export async function coreProxy(req: Request, res: Response): Promise<void> {
   if (bearer) headers["Authorization"] = `Bearer ${bearer}`;
   if (req.method !== "GET" && req.method !== "HEAD") {
     headers["Content-Type"] = "application/json";
-    // Idempotency-Key: forward the client's, else generate one — lets the Core dedupe a
-    // retried mutation (the BFF itself does not retry).
-    headers["Idempotency-Key"] = (req.header("Idempotency-Key") as string) ?? crypto.randomUUID();
+    // Idempotency-Key: forward the client's if — and only if — it sent one. The BFF must NOT mint
+    // a key: a fresh UUID per request is unique every time, so the Core would record a row per
+    // mutation and never dedupe, defeating its idempotency filter. Absent key → no header → Core
+    // passes through (best-effort dedupe is opt-in; the Core's natural-key constraints still reject
+    // a real duplicate write). The client is the source of truth for a stable retry key.
+    const clientKey = req.header("Idempotency-Key");
+    if (clientKey) headers["Idempotency-Key"] = clientKey as string;
   }
 
   const hasBody =
