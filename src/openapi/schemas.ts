@@ -626,6 +626,13 @@ export const coreUnavailableProblem = problem(
   "The Core API was unreachable or returned a 5xx.",
 );
 
+export const authUpstreamUnavailableProblem = problem(
+  503,
+  "Sign-in service temporarily unavailable",
+  "AUTH_UPSTREAM_UNAVAILABLE",
+  "Could not refresh your session with Google. Your session is intact — retry shortly.",
+);
+
 // --- Booking request schemas (Contract A for booking operations) ---
 //
 // `MoneySchema`/`BookingResponseSchema`/`BookingListSchema` live earlier in this file (just

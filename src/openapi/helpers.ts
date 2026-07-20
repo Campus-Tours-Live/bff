@@ -23,6 +23,7 @@ import {
   registry,
   sessionExpiredProblem,
   coreUnavailableProblem,
+  authUpstreamUnavailableProblem,
 } from "./schemas.js";
 
 /** Either a single worked `example` or a map of named `examples` for a response body. */
@@ -91,6 +92,16 @@ export function problem502(
   return problemResponse(description, example);
 }
 
+/**
+ * Standard `503 Service Unavailable` — the BFF could not reach Google to refresh the session.
+ *
+ * Deliberately NOT a 401: the session is still valid and the BFF kept it, so the client must retry
+ * rather than treat the user as signed out. Carries `Retry-After`.
+ */
+export function problem503(description: string): ResponseConfig {
+  return problemResponse(description, authUpstreamUnavailableProblem);
+}
+
 /** Standard `422 Unprocessable Entity` with a stable `code` (e.g. INVALID_ROLE). */
 export function problem422(code: string, title: string, description: string): ResponseConfig {
   return problemResponse(description, problem(422, title, code));
@@ -126,7 +137,7 @@ export type ApiRouteConfig = RouteConfig & {
  *   - REQUIRES `summary`, `description`, and ≥1 `tags` (throws at build/import time if
  *     missing — a misconfigured operation fails the process, and thus CI, immediately);
  *   - for protected `/v1/*` routes, merges in the `sessionCookie` security scheme and
- *     default `401`/`502` problem responses (caller-supplied ones win, so bespoke
+ *     default `401`/`502`/`503` problem responses (caller-supplied ones win, so bespoke
  *     descriptions are preserved).
  */
 export function apiRoute(config: ApiRouteConfig): void {
@@ -149,6 +160,11 @@ export function apiRoute(config: ApiRouteConfig): void {
     route.responses = {
       401: problem401("Authentication required — no/expired session or a Core 401."),
       502: problem502("The Core API was unreachable or returned a 5xx."),
+      // Every protected route resolves a Bearer first, so any of them can hit this.
+      503: problem503(
+        "Google was unreachable, so the session could not be refreshed. The session is " +
+          "PRESERVED — retry after `Retry-After` rather than treating the user as signed out.",
+      ),
       ...route.responses,
     };
   }
