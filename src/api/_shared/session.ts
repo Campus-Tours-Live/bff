@@ -13,14 +13,24 @@ const REFRESH_WINDOW_MS = 5 * 60_000;
 /**
  * In-flight refreshes, keyed by the refresh token being redeemed.
  *
- * Without this, a burst of concurrent requests each redeem the SAME refresh token. Google
- * may rotate it, in which case every writer but the last persists a refresh token that is
- * already invalid — manufacturing exactly the dead session this task exists to prevent.
+ * Without this, a burst of concurrent requests each spend a separate round-trip on the same
+ * refresh, and each writes its own `Set-Cookie` (last-write-wins) — wasteful, and it makes
+ * the resulting cookie state depend on response ordering.
  *
- * LIMIT, by design: the session is a stateless encrypted cookie with no shared store, so
- * this coalesces PER PROCESS only. It covers the common same-instance burst; it is not a
- * distributed guarantee, and behind multiple instances concurrent refreshes remain
- * possible. Fixing that properly needs a shared store and is out of scope here.
+ * TWO LIMITS, both real — do NOT read this as making refresh-token rotation safe:
+ *
+ *  1. PER PROCESS only. The session is a stateless encrypted cookie with no shared store,
+ *     so behind multiple instances concurrent refreshes remain possible.
+ *  2. It does NOT close the stale-cookie window. The map is evicted the moment the flight
+ *     settles, so a request that was already in flight carrying the OLD cookie (sent before
+ *     the refreshing response's `Set-Cookie` arrived) will redeem the old refresh token
+ *     AGAIN on arrival. If Google ever rotated refresh tokens, that second redemption would
+ *     come back `invalid_grant` → classified fatal → session cleared: exactly the
+ *     unrecoverable logout this file exists to prevent. Low risk today because Google does
+ *     not generally rotate them (the `refresh_token ?? session.refreshToken` fallback below
+ *     assumes as much), but if that ever changes, coalescing is NOT the defence — retaining
+ *     the settled result under a short TTL would be, so a lagging request gets the new
+ *     tokens instead of re-redeeming the old ones.
  */
 const inFlight = new Map<string, ReturnType<typeof refreshTokens>>();
 
