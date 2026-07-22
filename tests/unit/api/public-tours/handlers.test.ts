@@ -17,19 +17,20 @@ function mockRes() {
   return res;
 }
 
-/** A Core Response whose body has NO content-type header — hits the `if (contentType)` false arm. */
-function coreResNoContentType(body: string) {
+/** A Core Response whose body has NO content-type header — hits the `if (contentType)` false arm.
+ *  Typed as the fetch `Response` (not express's, which is imported above under the same name). */
+function coreResNoContentType(body: string): Awaited<ReturnType<typeof fetch>> {
   return {
     status: 200,
     text: jest.fn<() => Promise<string>>().mockResolvedValue(body),
     headers: { get: jest.fn(() => null) }, // content-type absent
-  } as unknown as Response;
+  } as unknown as Awaited<ReturnType<typeof fetch>>;
 }
 
-let fetchMock: jest.Mock;
+let fetchMock: jest.Mock<typeof fetch>;
 
 beforeEach(() => {
-  fetchMock = jest.fn();
+  fetchMock = jest.fn<typeof fetch>();
   global.fetch = fetchMock as unknown as typeof fetch;
 });
 
