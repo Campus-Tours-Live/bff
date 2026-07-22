@@ -1,6 +1,6 @@
 import request from "supertest";
 import { app } from "@/app.js";
-import { coreOk, mintSessionCookie, mockCoreByPath } from "../_helpers.js";
+import { coreOk, mintSessionCookie, mockCoreByPath } from "../../_helpers.js";
 
 const coreBooking = {
   id: "b1",

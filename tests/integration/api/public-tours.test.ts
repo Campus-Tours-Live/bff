@@ -98,14 +98,19 @@ describe("public tour discovery", () => {
     expect(res.body).toMatchObject({ code: "CORE_UNAVAILABLE" });
   });
 
-  it("does not make nested tour paths public", async () => {
-    mockCoreByPath({});
+  it("serves nested tour paths anonymously too (the whole /tours/* subtree is public)", async () => {
+    // Anything under /tours is public discovery, not just the two documented single-segment
+    // routes: the proxy forwards a deeper path like /tours/{id}/slots anonymously, with no BFF
+    // session and no bearer. (Session-scoped subtrees live elsewhere — see /offerings below.)
+    const mock = mockCoreByPath({ "/tours/a-tour/slots": coreTourOk([]) });
 
-    const res = await request(app).get("/v1/tours/not-a-tour/slots");
+    const res = await request(app).get("/v1/tours/a-tour/slots");
 
-    expect(res.status).toBe(401);
-    expect(res.headers["auth-required"]).toBe("reauthenticate");
-    expect(global.fetch).not.toHaveBeenCalled();
+    expect(res.status).toBe(200);
+    const [url, init] = mock.mock.calls[0]!;
+    expect(String(url)).toBe("http://core.test/tours/a-tour/slots");
+    const headers = (init as RequestInit).headers as Record<string, string>;
+    expect(headers.Authorization).toBeUndefined();
   });
 
   it("keeps participant slots and bookings session-protected", async () => {

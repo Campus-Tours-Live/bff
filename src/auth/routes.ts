@@ -8,8 +8,15 @@ import {
   writeAuthTx,
   writeSession,
 } from "../session.js";
-import { buildAuthorizeUrl, createPkce, exchangeCode, randomState } from "./google.js";
+import {
+  buildAuthorizeUrl,
+  createPkce,
+  exchangeCode,
+  randomState,
+  revokeRefreshToken,
+} from "./google.js";
 import { sendProblem } from "../util/problem.js";
+import { csrfGuard } from "../util/csrf.js";
 
 export const authRouter: Router = Router();
 
@@ -17,7 +24,14 @@ export const authRouter: Router = Router();
 // site-relative paths under known authenticated roots are allowed (defends
 // against open redirect via absolute / protocol-relative / backslash values).
 const DEFAULT_RETURN_TO = "/dashboard";
-const ALLOWED_RETURN_ROOTS = ["/dashboard", "/profile", "/support", "/staff", "/onboarding"];
+const ALLOWED_RETURN_ROOTS = [
+  "/dashboard",
+  "/profile",
+  "/support",
+  "/staff",
+  "/onboarding",
+  "/guide",
+];
 
 // Exported for unit testing — this is the open-redirect defence, so it earns a
 // direct test of the allowlist (the route handlers below are its only callers).
@@ -62,9 +76,14 @@ export function landingFor(
   activeRole: string | null,
   participantType: string | null,
 ): string {
-  const targetRole = returnTo.startsWith("/onboarding/guide")
+  // Re-validate here too: landingFor is exported and unit-tested with raw values, and the
+  // returnTo honoured below must never trust an un-sanitised path (open-redirect defence).
+  // safeReturnTo is idempotent, so this is a no-op on the already-sanitised callback value.
+  const safeRt = safeReturnTo(returnTo);
+
+  const targetRole = safeRt.startsWith("/onboarding/guide")
     ? "GUIDE"
-    : returnTo.startsWith("/onboarding/participant")
+    : safeRt.startsWith("/onboarding/participant")
       ? "PARTICIPANT"
       : null;
 
@@ -76,7 +95,10 @@ export function landingFor(
     return targetRole === "GUIDE" ? "/onboarding/guide" : "/onboarding/participant";
   }
 
-  if (roles.length > 0) return CONSUMER_HOME;
+  // A returning user who already holds a role: land them back on the specific allow-listed page
+  // they came from (safeRt), not always /dashboard. Fall back to home when returnTo was
+  // absent/default (safeRt === DEFAULT_RETURN_TO).
+  if (roles.length > 0) return safeRt !== DEFAULT_RETURN_TO ? safeRt : CONSUMER_HOME;
   // Account exists but holds no role yet (e.g. signed up then abandoned onboarding,
   // now signing in) → send to role selection with a notice. This is a continuation,
   // not a rejection (see the session handling in the callback).
@@ -212,13 +234,19 @@ authRouter.get("/callback", async (req, res) => {
   return res.redirect(webUrl(dest));
 });
 
-/** GET/POST /auth/logout — clear the local session and return to the web app. */
-function logout(_req: import("express").Request, res: import("express").Response) {
+/** POST /auth/logout — clear the local session and return to the web app. POST-only + CSRF-guarded:
+ *  logout is a state change, so a GET would be forgeable cross-site (SameSite=Lax allows a top-level
+ *  navigation GET) to force-log-out a user. */
+function logout(req: import("express").Request, res: import("express").Response) {
+  // Revoke the Google grant before dropping our cookie, so "sign out" also ends the
+  // credential at Google rather than only here. Deliberately NOT awaited: it is best-effort
+  // and must not delay the redirect the user is waiting on.
+  const session = readSession(req);
+  if (session?.refreshToken) void revokeRefreshToken(session.refreshToken);
   clearSession(res);
   return res.redirect(config.webBaseUrl);
 }
-authRouter.get("/logout", logout);
-authRouter.post("/logout", logout);
+authRouter.post("/logout", csrfGuard, logout);
 
 /** GET /auth/session — lightweight auth check for the web app (no Core call). */
 authRouter.get("/session", (req, res) => {

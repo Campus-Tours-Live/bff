@@ -20,16 +20,8 @@ function sessCookie(idToken = "id-tok"): string {
   return setCookie.split(";")[0] as string;
 }
 
-describe("GET/POST /auth/logout", () => {
-  it("GET clears the session and redirects to the web base url", async () => {
-    const res = await request(app).get("/auth/logout").set("Cookie", sessCookie());
-
-    expect(res.status).toBe(302);
-    expect(res.headers.location).toBe("http://localhost:3001");
-    expect(isCleared(cookieNamed(res, "ctl_sess"))).toBe(true);
-  });
-
-  it("POST clears the session and redirects to the web base url", async () => {
+describe("POST /auth/logout", () => {
+  it("clears the session and redirects to the web base url", async () => {
     const res = await request(app).post("/auth/logout").set("Cookie", sessCookie());
 
     expect(res.status).toBe(302);
@@ -38,10 +30,23 @@ describe("GET/POST /auth/logout", () => {
   });
 
   it("clears the session even when no session cookie was present", async () => {
-    const res = await request(app).get("/auth/logout");
+    const res = await request(app).post("/auth/logout");
     expect(res.status).toBe(302);
     expect(res.headers.location).toBe("http://localhost:3001");
     expect(isCleared(cookieNamed(res, "ctl_sess"))).toBe(true);
+  });
+
+  it("rejects a cross-site POST (CSRF) instead of force-logging-out", async () => {
+    const res = await request(app)
+      .post("/auth/logout")
+      .set("Origin", "https://evil.example")
+      .set("Cookie", sessCookie());
+    expect(res.status).toBe(403);
+  });
+
+  it("is not exposed as a GET — a GET would be forgeable cross-site", async () => {
+    const res = await request(app).get("/auth/logout");
+    expect(res.status).toBe(404);
   });
 });
 

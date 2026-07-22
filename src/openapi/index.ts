@@ -897,11 +897,8 @@ apiRoute({
     "coalesced, disjoint, ascending occurrences over the requested window (`occurrences` " +
     "reshaped to canonical UTC `Z`, CTL-49) and reports any DST gap-days (a local calendar " +
     "day a spring-forward transition eliminates). Core's `from`/`to` window is " +
-    "UTC-midnight-anchored, not guide-local, so this bff widens whichever of `from`/`to` is " +
-    "present by 1 calendar day on that side before forwarding to Core, to avoid silently " +
-    "cutting a guide-local edge occurrence at the UTC-midnight boundary — the response may " +
-    "therefore include a few occurrences just outside the exact requested window (precise " +
-    "guide-local re-anchoring is a tracked follow-up). Also carries the backend-derived " +
+    "anchored in the GUIDE's own timezone, so `from`/`to` are forwarded verbatim and the " +
+    "response covers exactly the requested guide-local window. Also carries the backend-derived " +
     "readiness flags `bookable`/`hasWeeklyHours` (CTL-54 B1) verbatim — this bff never " +
     "recomputes availability. This is the CTL-55 frontend contract.",
   request: {
@@ -911,8 +908,8 @@ apiRoute({
         .optional()
         .openapi({
           description:
-            "Inclusive window start (ISO date). Widened by 1 day earlier before hitting Core " +
-            "to avoid a UTC-midnight edge-cut; see the endpoint description.",
+            "Inclusive window start (ISO date), interpreted in the guide's own timezone and " +
+            "forwarded to Core unchanged.",
           example: "2026-08-01",
         }),
       to: z
@@ -920,8 +917,8 @@ apiRoute({
         .optional()
         .openapi({
           description:
-            "Inclusive window end (ISO date). Widened by 1 day later before hitting Core to " +
-            "avoid a UTC-midnight edge-cut; see the endpoint description.",
+            "Inclusive window end (ISO date), interpreted in the guide's own timezone and " +
+            "forwarded to Core unchanged.",
           example: "2026-08-31",
         }),
     }),
@@ -942,8 +939,8 @@ apiRoute({
   summary: "List an offering's bookable slots",
   description:
     "Participant-facing bookable slots for a tour offering, reshaped to canonical UTC `Z` " +
-    "(CTL-49). `from`/`to` are forwarded to Core verbatim (same caveat as the resolved-" +
-    "availability read above). Role PARTICIPANT is enforced by Core.",
+    "(CTL-49). `from`/`to` are forwarded to Core verbatim and interpreted in the guide's own " +
+    "timezone. Role PARTICIPANT is enforced by Core.",
   request: {
     params: z.object({ id: z.string().openapi({ description: "Offering id.", example: "off1" }) }),
     query: z.object({
@@ -994,9 +991,10 @@ apiRoute({
     "above, `dateFrom`/`dateTo` are forwarded to Core verbatim, NOT widened — they are the " +
     "EXACT range the caller is proposing to create, so widening them would silently change " +
     "what's being previewed. Guide-only; role is enforced by Core.\n\n" +
-    "**4xx caveat:** this is the generic read-path relay (`withSession`), so a Core 4xx (e.g. " +
-    "a range over 366 dates) surfaces with its real status but a generic `UPSTREAM_ERROR` body, " +
-    "not Core's message.",
+    "**4xx relay:** this route is wrapped so a Core 4xx (e.g. a range over 366 dates, or " +
+    "windows that cross midnight) reaches the caller VERBATIM — real status, real message — " +
+    "rather than a generic `UPSTREAM_ERROR` body, because the message is what tells a guide " +
+    "what to change.",
   request: {
     query: z.object({
       dateFrom: z.string().openapi({
@@ -1088,9 +1086,10 @@ apiRoute({
     "**No CSRF guard:** unlike this API's other POST routes, this one carries no CSRF check — " +
     "it mutates no state (a dry-run), so a cross-site-triggered call can compute a result but " +
     "not read it back (no CORS) and persists nothing.\n\n" +
-    "**4xx caveat:** this is the generic read-path relay (`withSession`), so a Core 4xx (e.g. " +
-    "empty `windows` or a cross-midnight span) surfaces with its real status but a generic " +
-    "`UPSTREAM_ERROR` body, not Core's message.",
+    "**4xx relay:** this route is wrapped so a Core 4xx (e.g. empty `windows` or a " +
+    "cross-midnight span) reaches the caller VERBATIM — real status, real message — rather " +
+    "than a generic `UPSTREAM_ERROR` body, because the message is what tells a guide what to " +
+    "change.",
   request: {
     body: {
       content: {
@@ -1130,7 +1129,8 @@ apiRoute({
         .openapi({
           description:
             "Site-relative path to land on after auth. Allowlisted (must start with one of " +
-            "/dashboard, /profile, /support, /staff, /onboarding); anything else falls back to /dashboard.",
+            "/dashboard, /profile, /support, /staff, /onboarding, /guide); anything else falls " +
+            "back to /dashboard.",
           example: "/onboarding/guide",
         }),
       intent: z.enum(["signup", "signin"]).optional().openapi({
@@ -1208,20 +1208,21 @@ apiRoute({
   },
 });
 
-// GET & POST /auth/logout
-for (const method of ["get", "post"] as const) {
+// POST /auth/logout — POST-only + CSRF-guarded (a GET logout would be forgeable cross-site).
+for (const method of ["post"] as const) {
   apiRoute({
     method,
     path: "/auth/logout",
     tags: ["Auth"],
     summary: "Clear the session",
     description:
-      "Clears the `ctl_sess` cookie and 302-redirects to the web app base URL. Exposed as both GET " +
-      "(link) and POST (form) for convenience.",
+      "Clears the `ctl_sess` cookie and 302-redirects to the web app base URL. POST-only and " +
+      "CSRF-guarded — logout is a state change, so a GET would be cross-site forgeable.",
     responses: {
       302: {
         description:
-          "Redirect to the web app base URL (`Location: <WEB_ORIGIN>`), session cleared.",
+          "Redirect to the web app base URL (`Location: <WEB_BASE_URL>`). The local session is " +
+          "cleared and the Google grant is revoked best-effort.",
       },
     },
   });

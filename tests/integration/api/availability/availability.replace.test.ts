@@ -2,7 +2,7 @@ import request from "supertest";
 import { z } from "zod";
 import { app } from "@/app.js";
 import { WriteEnvelope, AvailabilityExceptionResponseSchema } from "@/openapi/schemas.js";
-import { coreErr, mintSessionCookie, mockCoreByPath } from "../_helpers.js";
+import { coreErr, mintSessionCookie, mockCoreByPath } from "../../_helpers.js";
 
 /**
  * Task 3 (CTL-56 B2 bff half): proxy `POST /v1/availability/overrides/replace` → Contract A.

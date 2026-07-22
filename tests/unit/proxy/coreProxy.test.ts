@@ -8,9 +8,15 @@ import type { Request, Response } from "express";
 
 const resolveBearer = jest.fn<(...args: unknown[]) => Promise<string | null>>();
 const requireReauth = jest.fn<(...args: unknown[]) => void>();
+const authUpstreamUnavailable = jest.fn<(...args: unknown[]) => void>();
+// The REAL TransientAuthError — coreProxy branches on `instanceof`, so a stand-in would
+// silently never match. (N2)
+const { TransientAuthError } = await import("@/api/_shared/errors.js");
 jest.unstable_mockModule("@/api/_shared/index.js", () => ({
   resolveBearer: (...args: unknown[]) => resolveBearer(...args),
   requireReauth: (...args: unknown[]) => requireReauth(...args),
+  authUpstreamUnavailable: (...args: unknown[]) => authUpstreamUnavailable(...args),
+  TransientAuthError,
 }));
 
 const { coreProxy } = await import("@/proxy/coreProxy.js");
@@ -26,10 +32,68 @@ function mockRes() {
   return res;
 }
 
+describe("coreProxy (unit) — transient refresh failure (N2)", () => {
+  beforeEach(() => {
+    resolveBearer.mockReset();
+    requireReauth.mockReset();
+    authUpstreamUnavailable.mockReset();
+  });
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
+
+  /**
+   * coreProxy is the third resolveBearer call site and the one that serves /v1/userinfo —
+   * i.e. the request the web app makes on every page. If Google being down made THIS route
+   * re-auth, the whole point of preserving the session would be lost.
+   */
+  it("answers 'temporarily unavailable' and never re-auths when the refresh is transient", async () => {
+    resolveBearer.mockRejectedValue(new TransientAuthError());
+    const fetchMock = jest.fn<typeof fetch>();
+    global.fetch = fetchMock as unknown as typeof fetch;
+
+    const req = {
+      method: "GET",
+      url: "/v1/userinfo",
+      originalUrl: "/v1/userinfo",
+      headers: {},
+      header: () => undefined,
+    } as unknown as Request;
+
+    await coreProxy(req, mockRes() as unknown as Response);
+
+    expect(authUpstreamUnavailable).toHaveBeenCalledTimes(1);
+    expect(requireReauth).not.toHaveBeenCalled();
+    // Never reached Core — we could not authenticate the call.
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("re-throws an unrelated resolveBearer failure instead of masking it as a 503", async () => {
+    // A programmer error must surface as a 500 via the error middleware, not be dressed up
+    // as a retryable upstream blip.
+    resolveBearer.mockRejectedValue(new Error("programmer error"));
+
+    const req = {
+      method: "GET",
+      url: "/v1/userinfo",
+      originalUrl: "/v1/userinfo",
+      headers: {},
+      header: () => undefined,
+    } as unknown as Request;
+
+    await expect(coreProxy(req, mockRes() as unknown as Response)).rejects.toThrow(
+      "programmer error",
+    );
+    expect(authUpstreamUnavailable).not.toHaveBeenCalled();
+    expect(requireReauth).not.toHaveBeenCalled();
+  });
+});
+
 describe("coreProxy (unit) — correlation-id fallback", () => {
   beforeEach(() => {
     resolveBearer.mockReset();
     requireReauth.mockReset();
+    authUpstreamUnavailable.mockReset();
   });
   afterEach(() => {
     jest.restoreAllMocks();
@@ -61,5 +125,209 @@ describe("coreProxy (unit) — correlation-id fallback", () => {
     // Fell back to a generated UUID (not undefined, not empty).
     expect(headers["X-Request-Id"]).toMatch(/[0-9a-f-]{36}/i);
     expect(headers.Authorization).toBe("Bearer bearer-xyz");
+  });
+
+  // M1: a literal `..` on the wire. Real HTTP clients collapse it before sending (so the
+  // integration suite can't reach this branch), but a raw client can send it verbatim — driving
+  // coreProxy directly is the only way to exercise the guard.
+  it("rejects a literal `..` path with 400 BAD_PATH before resolving a bearer or calling Core", async () => {
+    const fetchMock = jest.fn<typeof fetch>();
+    global.fetch = fetchMock as unknown as typeof fetch;
+    const res = mockRes();
+
+    const req = {
+      method: "GET",
+      header: () => undefined,
+      originalUrl: "/v1/tours/../guide/offerings",
+      body: undefined,
+    } as unknown as Request;
+
+    await coreProxy(req, res as unknown as Response);
+
+    expect(res.status).toHaveBeenCalledWith(400);
+    expect(resolveBearer).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  // The query is forwarded byte-for-byte: `new URL().search` would re-encode a bare `<` to `%3C`.
+  // Driven directly because Node's HTTP client rejects such characters before they reach the wire.
+  it("forwards the raw query string verbatim (no percent re-encoding)", async () => {
+    const fetchMock = jest.fn<typeof fetch>(
+      async () =>
+        ({
+          status: 200,
+          text: async () => "ok",
+          headers: { get: () => null },
+        }) as unknown as globalThis.Response,
+    );
+    global.fetch = fetchMock as unknown as typeof fetch;
+
+    const req = {
+      method: "GET",
+      header: () => undefined,
+      originalUrl: "/v1/tours?q=a<b&topic=x&topic=y", // public read → no bearer needed
+      body: undefined,
+    } as unknown as Request;
+
+    await coreProxy(req, mockRes() as unknown as Response);
+
+    expect(String(fetchMock.mock.calls[0]![0])).toMatch(/\/tours\?q=a<b&topic=x&topic=y$/);
+  });
+});
+
+// Multi-topic filter (CTL-16): the bff proxies /v1/tours generically by forwarding
+// req.originalUrl verbatim (coreProxy.ts:39), so it should never need to understand
+// `topic`/geo params itself. These tests verify that pass-through contract by inspecting
+// the URL the mocked upstream `fetch` actually receives, and that an upstream 422
+// problem+json response is relayed unchanged (not swallowed into a 500). GET /v1/tours
+// is a public read (isPublicGet), so no bearer/session setup is needed here.
+describe("coreProxy (unit) — /v1/tours query passthrough", () => {
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
+
+  function mockFetchOk(body = "[]") {
+    const fetchMock = jest.fn<typeof fetch>(
+      async () =>
+        ({
+          status: 200,
+          text: async () => body,
+          headers: { get: () => "application/json" },
+        }) as unknown as globalThis.Response,
+    );
+    global.fetch = fetchMock as unknown as typeof fetch;
+    return fetchMock;
+  }
+
+  it("forwards repeated topic params to core unchanged", async () => {
+    const fetchMock = mockFetchOk();
+    const req = {
+      method: "GET",
+      header: () => undefined,
+      originalUrl: "/v1/tours?topic=GENERAL_CAMPUS&topic=DORM_HOUSING",
+      body: undefined,
+    } as unknown as Request;
+
+    await coreProxy(req, mockRes() as unknown as Response);
+
+    const target = fetchMock.mock.calls[0]![0] as string;
+    expect(new URL(target).searchParams.getAll("topic")).toEqual([
+      "GENERAL_CAMPUS",
+      "DORM_HOUSING",
+    ]);
+  });
+
+  it("forwards arbitrary extra query params (geo) unchanged", async () => {
+    const fetchMock = mockFetchOk();
+    const req = {
+      method: "GET",
+      header: () => undefined,
+      originalUrl: "/v1/tours?nearLat=37.42&nearLon=-122.08&radiusMiles=50",
+      body: undefined,
+    } as unknown as Request;
+
+    await coreProxy(req, mockRes() as unknown as Response);
+
+    const target = fetchMock.mock.calls[0]![0] as string;
+    const url = new URL(target);
+    expect(url.searchParams.get("nearLat")).toBe("37.42");
+    expect(url.searchParams.get("nearLon")).toBe("-122.08");
+    expect(url.searchParams.get("radiusMiles")).toBe("50");
+  });
+
+  it("passes an upstream 422 problem+json response through unchanged (not converted to 500)", async () => {
+    const problemBody = JSON.stringify({
+      type: "about:blank",
+      title: "Invalid topic",
+      status: 422,
+    });
+    const fetchMock = jest.fn<typeof fetch>(
+      async () =>
+        ({
+          status: 422,
+          text: async () => problemBody,
+          headers: { get: () => "application/problem+json" },
+        }) as unknown as globalThis.Response,
+    );
+    global.fetch = fetchMock as unknown as typeof fetch;
+
+    const req = {
+      method: "GET",
+      header: () => undefined,
+      originalUrl: "/v1/tours?topic=NOPE",
+      body: undefined,
+    } as unknown as Request;
+    const res = mockRes();
+
+    await coreProxy(req, res as unknown as Response);
+
+    expect(res.status).toHaveBeenCalledWith(422);
+    expect(res.type).toHaveBeenCalledWith("application/problem+json");
+    expect(res.send).toHaveBeenCalledWith(problemBody);
+  });
+});
+
+describe("coreProxy (unit) — static-meta Cache-Control (Phase 1B)", () => {
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
+
+  function runGet(originalUrl: string, status = 200, method = "GET") {
+    const fetchMock = jest.fn<typeof fetch>(
+      async () =>
+        ({
+          status,
+          text: async () => "[]",
+          headers: { get: () => "application/json" },
+        }) as unknown as globalThis.Response,
+    );
+    global.fetch = fetchMock as unknown as typeof fetch;
+    const req = {
+      method,
+      header: () => undefined,
+      originalUrl,
+      body: undefined,
+    } as unknown as Request;
+    const res = mockRes();
+    return { res, done: coreProxy(req, res as unknown as Response) };
+  }
+
+  const cacheHeader = (res: ReturnType<typeof mockRes>) =>
+    (res.setHeader as jest.Mock).mock.calls.find((c) => c[0] === "Cache-Control");
+
+  it("sets a public browser cache header on a 200 static-meta GET (tour-topics)", async () => {
+    const { res, done } = runGet("/v1/meta/tour-topics");
+    await done;
+    expect(cacheHeader(res)).toEqual(["Cache-Control", "public, max-age=300"]);
+  });
+
+  it("also caches tour-features", async () => {
+    const { res, done } = runGet("/v1/meta/tour-features");
+    await done;
+    expect(cacheHeader(res)).toEqual(["Cache-Control", "public, max-age=300"]);
+  });
+
+  it("does NOT cache a parameterised meta lookup (universities?q=)", async () => {
+    const { res, done } = runGet("/v1/meta/universities?q=stanford");
+    await done;
+    expect(cacheHeader(res)).toBeUndefined();
+  });
+
+  it("does NOT cache a static-meta path carrying a query string (cache-buster)", async () => {
+    const { res, done } = runGet("/v1/meta/tour-topics?_=123");
+    await done;
+    expect(cacheHeader(res)).toBeUndefined();
+  });
+
+  it("does NOT cache a non-200 static-meta response", async () => {
+    const { res, done } = runGet("/v1/meta/tour-topics", 404);
+    await done;
+    expect(cacheHeader(res)).toBeUndefined();
+  });
+
+  it("does NOT cache a non-meta public GET (/tours)", async () => {
+    const { res, done } = runGet("/v1/tours");
+    await done;
+    expect(cacheHeader(res)).toBeUndefined();
   });
 });

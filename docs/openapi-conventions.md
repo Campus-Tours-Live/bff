@@ -1,10 +1,13 @@
 # OpenAPI conventions (Contract A)
 
-The BFF documents **Contract A** — the frontend-facing surface it owns (`/auth/*` and the
-`/v1` aggregation composites `/v1/dashboard`, `/v1/onboarding`) — as a hand-written,
-zod-driven OpenAPI 3.1 spec built in code with `@asteasolutions/zod-to-openapi`. Everything
-else under `/v1/*` is a transparent proxy to the Core API and is intentionally **not**
-re-documented here (see the spec's `externalDocs`).
+The BFF documents **Contract A** — the frontend-facing surface it owns — as a hand-written,
+zod-driven OpenAPI 3.1 spec built in code with `@asteasolutions/zod-to-openapi`. That surface is
+`/auth/*` plus every `/v1` route the BFF serves itself: the aggregation composites
+(`/v1/dashboard`, `/v1/onboarding`) and the reshaped resources (`/v1/bookings*`, `/v1/cart*`,
+`/v1/availability*`, `/v1/offerings/:id/slots`).
+
+Only the **catch-all proxy** is left undocumented: those paths pass through to the Core API
+unchanged, so the Core's own spec is authoritative for them (see the spec's `externalDocs`).
 
 The spec is served at **`/openapi.json`** and rendered by Swagger UI at **`/docs`**.
 
@@ -23,13 +26,13 @@ The spec is served at **`/openapi.json`** and rendered by Swagger UI at **`/docs
 
 ## Where things live
 
-| File                                  | Purpose                                                                                                                                                                                                           |
-| ------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `src/openapi/schemas.ts`              | The zod schemas — **single source of truth**. Documentation schemas (rich `.openapi()` metadata) **and** the runtime response-shape contracts (`*DataSchema` / `Enveloped*Schema`). Also the reusable `RoleEnum`. |
-| `src/openapi/helpers.ts`              | The helper DSL that bakes in the conventions: `apiRoute`, `enveloped`, `problem401/502/422/400`.                                                                                                                  |
-| `src/openapi/index.ts`                | Registers every path **through the DSL** and generates `openapiSpec`.                                                                                                                                             |
-| `.spectral.yaml`                      | Spectral ruleset (industry OAS linter) run in CI.                                                                                                                                                                 |
-| `tests/unit/openapi.contract.test.ts` | Project-specific drift guard + convention checks.                                                                                                                                                                 |
+| File                                          | Purpose                                                                                                                                                                                                           |
+| --------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `src/openapi/schemas.ts`                      | The zod schemas — **single source of truth**. Documentation schemas (rich `.openapi()` metadata) **and** the runtime response-shape contracts (`*DataSchema` / `Enveloped*Schema`). Also the reusable `RoleEnum`. |
+| `src/openapi/helpers.ts`                      | The helper DSL that bakes in the conventions: `apiRoute`, `enveloped`, `problem401/502/422/400`.                                                                                                                  |
+| `src/openapi/index.ts`                        | Registers every path **through the DSL** and generates `openapiSpec`.                                                                                                                                             |
+| `.spectral.yaml`                              | Spectral ruleset (industry OAS linter) run in CI.                                                                                                                                                                 |
+| `tests/unit/openapi/openapi.contract.test.ts` | Project-specific drift guard + convention checks.                                                                                                                                                                 |
 
 ## Adding or changing an endpoint
 

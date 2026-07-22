@@ -1,4 +1,3 @@
-import crypto from "node:crypto";
 import { config } from "../../config.js";
 import { CoreAuthError, CoreError } from "./errors.js";
 
@@ -119,8 +118,12 @@ export class CoreClient {
     const headers: Record<string, string> = {
       Authorization: `Bearer ${this.bearer}`,
       Accept: "application/json",
-      "Idempotency-Key": opts.idempotencyKey ?? crypto.randomUUID(),
     };
+    // Forward the client's Idempotency-Key only; never mint one here. A fresh UUID per call is
+    // unique every time, so the Core would record a row per mutation and never dedupe. Absent →
+    // no header → Core passthrough (natural-key constraints remain the real duplicate-write
+    // defense). The client owns the stable retry key.
+    if (opts.idempotencyKey) headers["Idempotency-Key"] = opts.idempotencyKey;
     if (opts.correlationId) headers["X-Request-Id"] = opts.correlationId;
     if (body !== undefined) headers["Content-Type"] = "application/json";
     let r: Response;

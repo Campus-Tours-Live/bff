@@ -24,12 +24,17 @@ describe("safeReturnTo (open-redirect allowlist)", () => {
     expect(safeReturnTo(raw)).toBe("/dashboard");
   });
 
-  it.each(["/dashboard", "/profile", "/support", "/staff", "/onboarding/guide"])(
+  it.each(["/dashboard", "/profile", "/support", "/staff", "/onboarding/guide", "/guide"])(
     "allows the known root %s",
     (root) => {
       expect(safeReturnTo(root)).toBe(root);
     },
   );
+
+  it("allows the /guide authenticated area and its sub-paths", () => {
+    expect(safeReturnTo("/guide/availability")).toBe("/guide/availability");
+    expect(safeReturnTo("/guide/tour-offerings/new")).toBe("/guide/tour-offerings/new");
+  });
 
   it("allows sub-paths under a known root", () => {
     expect(safeReturnTo("/profile/settings")).toBe("/profile/settings");
@@ -93,9 +98,24 @@ describe("landingFor (post-auth role landing)", () => {
   });
 
   describe("with no target (plain sign-in)", () => {
-    it("→ /dashboard when the account holds any role", () => {
+    it("→ /dashboard when the account holds any role and returnTo is the default", () => {
       expect(landingFor("/dashboard", ["PARTICIPANT"], "PARTICIPANT", null)).toBe("/dashboard");
+      // "/" is not allow-listed → normalised to the default → home, not honoured.
       expect(landingFor("/", ["GUIDE"], "GUIDE", null)).toBe("/dashboard");
+    });
+
+    it("→ the returnTo when a registered user came from a specific allow-listed page", () => {
+      expect(landingFor("/profile/settings", ["PARTICIPANT"], "PARTICIPANT", null)).toBe(
+        "/profile/settings",
+      );
+      expect(landingFor("/guide/availability", ["GUIDE"], "GUIDE", null)).toBe(
+        "/guide/availability",
+      );
+    });
+
+    it("does NOT honour an unsafe returnTo for a registered user (open-redirect guard)", () => {
+      expect(landingFor("//evil.com", ["GUIDE"], "GUIDE", null)).toBe("/dashboard");
+      expect(landingFor("/secret", ["GUIDE"], "GUIDE", null)).toBe("/dashboard");
     });
 
     it("→ /signup/role notice when the account holds no role yet", () => {

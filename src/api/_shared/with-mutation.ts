@@ -1,10 +1,10 @@
 import type { Request, Response } from "express";
 import { sendProblem } from "../../util/problem.js";
 import { resolveBearer } from "./session.js";
-import { requireReauth } from "./reauth.js";
+import { requireReauth, authUpstreamUnavailable } from "./reauth.js";
 import { coreUnavailable } from "./envelope.js";
 import { CoreClient } from "./core-client.js";
-import { CoreAuthError, CoreError } from "./errors.js";
+import { CoreAuthError, CoreError, TransientAuthError } from "./errors.js";
 
 /**
  * Mutation sibling of {@link withSession}. Resolves auth once, then on a Core error:
@@ -20,7 +20,15 @@ export function withMutation(
   handler: (req: Request, res: Response, core: CoreClient) => Promise<void>,
 ): (req: Request, res: Response) => Promise<void> {
   return async (req: Request, res: Response): Promise<void> => {
-    const bearer = await resolveBearer(req, res);
+    let bearer: string | null;
+    try {
+      bearer = await resolveBearer(req, res);
+    } catch (err) {
+      // Google was unreachable, not the session dead — keep the session, ask for a retry.
+      // Safe for a mutation: the handler has not run, so nothing was written.
+      if (err instanceof TransientAuthError) return authUpstreamUnavailable(res);
+      throw err;
+    }
     if (!bearer) return requireReauth(res);
     try {
       await handler(req, res, new CoreClient(bearer));

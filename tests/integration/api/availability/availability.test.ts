@@ -1,6 +1,6 @@
 import request from "supertest";
 import { app } from "@/app.js";
-import { coreErr, mintSessionCookie, mockCoreByPath } from "../_helpers.js";
+import { coreErr, mintSessionCookie, mockCoreByPath } from "../../_helpers.js";
 
 const rule = {
   id: "r1",

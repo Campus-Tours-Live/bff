@@ -51,6 +51,38 @@ describe("coreProxy (/v1/* passthrough)", () => {
       expect(url).toBe("http://core.test/universities?q=mit");
     });
 
+    it("passes universityImageUrl through the /v1/tours proxy verbatim (public read, no session)", async () => {
+      // CTL-16 (Contract A honesty): the bff proxies /v1/tours transparently — it never
+      // parses/reshapes the Core response — so a new Core field just needs to survive the
+      // round trip unchanged. Uses the real Core PagedResponse<TourSummaryResponse> shape
+      // (items/page/size/totalElements/totalPages) so a future re-wrap of GET /v1/tours
+      // would break this test rather than silently drop the field.
+      const mock = mockCoreByPath({
+        "/tours": coreOk({
+          items: [
+            {
+              id: "o1",
+              universityImageUrl: "https://r2.example/Yale%20University.png",
+            },
+          ],
+          page: 0,
+          size: 1,
+          totalElements: 1,
+          totalPages: 1,
+        }),
+      });
+
+      // Deliberately no `.set("Cookie", cookie)` — GET /v1/tours is a public read
+      // (isPublicGet), so this also pins that no session is required.
+      const res = await request(app).get("/v1/tours");
+
+      expect(res.status).toBe(200);
+      expect(res.body.data.items[0].universityImageUrl).toBe(
+        "https://r2.example/Yale%20University.png",
+      );
+      expect(mock).toHaveBeenCalledTimes(1);
+    });
+
     it("no session → 401 + Auth-Required (no Core call)", async () => {
       mockCoreByPath({});
 
@@ -81,6 +113,57 @@ describe("coreProxy (/v1/* passthrough)", () => {
 
       expect(res.status).toBe(502);
       expect(res.body).toMatchObject({ code: "CORE_UNAVAILABLE" });
+    });
+  });
+
+  // M1: the public/private decision and the upstream target must agree on ONE canonical path, so a
+  // traversal cannot present a private resource as a `/tours/...` public read (which would forward
+  // it anonymously, with no bearer).
+  describe("path canonicalisation / traversal", () => {
+    it("a `..` traversal never reaches Core as a public read (client collapses it; still private)", async () => {
+      mockCoreByPath({});
+
+      // HTTP clients collapse `..` before it hits the wire, so this arrives as
+      // /v1/guide/offerings — a private path. (The literal, un-collapsed form a raw client could
+      // send is rejected with 400 BAD_PATH; see the coreProxy unit test.)
+      const res = await request(app).get("/v1/tours/../guide/offerings");
+
+      expect(res.status).toBe(401);
+      expect(res.headers["auth-required"]).toBe("reauthenticate");
+      expect(global.fetch).not.toHaveBeenCalled();
+    });
+
+    it("an encoded traversal is canonicalised, so a private path still requires a bearer", async () => {
+      mockCoreByPath({});
+
+      // %2e%2e decodes to `..`. Under the old naive `/v1` strip this path would still
+      // startsWith("/tours/") → classified public → proxied anonymously.
+      const res = await request(app).get("/v1/tours/%2e%2e/guide/offerings");
+
+      expect(res.status).toBe(401);
+      expect(res.headers["auth-required"]).toBe("reauthenticate");
+      expect(global.fetch).not.toHaveBeenCalled();
+    });
+
+    it("allows a slug that merely CONTAINS dots (the guard is segment-aware, not a substring match)", async () => {
+      const mock = mockCoreByPath({ "/tours/foo..bar": coreOk({ id: "t1" }) });
+
+      const res = await request(app).get("/v1/tours/foo..bar");
+
+      expect(res.status).toBe(200);
+      expect(String(mock.mock.calls[0]![0])).toBe("http://core.test/tours/foo..bar");
+    });
+
+    it("forwards the canonical path upstream, preserving the query string", async () => {
+      const mock = mockCoreByPath({ "/guide/offerings": coreOk([{ id: "o1" }]) });
+
+      const res = await request(app)
+        .get("/v1/tours/%2e%2e/guide/offerings?page=2")
+        .set("Cookie", cookie);
+
+      expect(res.status).toBe(200);
+      // The authorized path and the forwarded path are the same canonical path.
+      expect(String(mock.mock.calls[0]![0])).toBe("http://core.test/guide/offerings?page=2");
     });
   });
 
@@ -165,7 +248,7 @@ describe("coreProxy (/v1/* passthrough)", () => {
   });
 
   describe("mutations", () => {
-    it("forwards a generated Idempotency-Key on a mutation", async () => {
+    it("does NOT mint an Idempotency-Key when the client sends none", async () => {
       const mock = mockCoreByPath({ "/participant/profile": coreOk({ id: "p1" }) });
 
       const res = await request(app)
@@ -176,8 +259,9 @@ describe("coreProxy (/v1/* passthrough)", () => {
 
       expect(res.status).toBe(200);
       const headers = (mock.mock.calls[0]![1] as RequestInit).headers as Record<string, string>;
-      expect(headers["Idempotency-Key"]).toBeDefined();
-      expect(headers["Idempotency-Key"]).not.toBe("");
+      // The BFF forwards a client key but never mints one — a per-request UUID would defeat the
+      // Core's dedupe (unique every time). Keyless ⇒ no header ⇒ Core passthrough.
+      expect(headers["Idempotency-Key"]).toBeUndefined();
       expect(headers["Content-Type"]).toBe("application/json");
     });
 

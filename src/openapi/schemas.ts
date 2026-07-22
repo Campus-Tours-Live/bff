@@ -381,10 +381,16 @@ const GuideDashboard = z
     offerings: z.array(Offering).openapi({
       description: "The guide's offerings (best-effort — empty list if the Core read fails).",
     }),
-    createdAt: z.string().openapi({
-      description: 'Account creation timestamp (ISO-8601 UTC), rendered as "member since".',
-      example: "2025-09-01T12:00:00.000Z",
-    }),
+    createdAt: z
+      .string()
+      .nullish()
+      .openapi({
+        description:
+          'Account creation timestamp (ISO-8601 UTC), rendered as "member since". Nullable: ' +
+          "Core sends `null` for accounts created before it recorded this, and the runtime " +
+          "schema accepts that — the published shape must say so too (M5).",
+        example: "2025-09-01T12:00:00.000Z",
+      }),
   })
   .openapi("GuideDashboard", { description: "Signed-in home for a guide." });
 
@@ -443,10 +449,16 @@ const ParticipantDashboard = z
         "Counts of actions needing attention, forwarded from Core (opaque). Best-effort: null on failure.",
       example: { unreadMessages: 2, awaitingReview: 1 },
     }),
-    createdAt: z.string().openapi({
-      description: 'Account creation timestamp (ISO-8601 UTC), rendered as "member since".',
-      example: "2026-01-15T09:30:00.000Z",
-    }),
+    createdAt: z
+      .string()
+      .nullish()
+      .openapi({
+        description:
+          'Account creation timestamp (ISO-8601 UTC), rendered as "member since". Nullable: ' +
+          "Core sends `null` for accounts created before it recorded this, and the runtime " +
+          "schema accepts that — the published shape must say so too (M5).",
+        example: "2026-01-15T09:30:00.000Z",
+      }),
   })
   .openapi("ParticipantDashboard", { description: "Signed-in home for a participant." });
 
@@ -612,6 +624,13 @@ export const coreUnavailableProblem = problem(
   "Upstream service unavailable",
   "CORE_UNAVAILABLE",
   "The Core API was unreachable or returned a 5xx.",
+);
+
+export const authUpstreamUnavailableProblem = problem(
+  503,
+  "Sign-in service temporarily unavailable",
+  "AUTH_UPSTREAM_UNAVAILABLE",
+  "Could not refresh your session with Google. Your session is intact — retry shortly.",
 );
 
 // --- Booking request schemas (Contract A for booking operations) ---
@@ -1225,7 +1244,7 @@ export const GuideDashboardDataSchema = z.object({
   guideStatus: z.string().nullable(), // forwarded from Core — value not constrained here
   canPublish: z.boolean(), // BFF-derived
   offerings: z.array(LooseObject), // BFF owns "it's an array"; items are Core-opaque
-  createdAt: z.string().optional(), // forwarded from Core
+  createdAt: z.string().nullish(), // forwarded from Core (may be null, not just absent)
 });
 
 /** GET /v1/dashboard participant `data` — strict on `kind` + the array shape (BFF-owned). */
@@ -1235,7 +1254,7 @@ export const ParticipantDashboardDataSchema = z.object({
   nextTour: BookingResponseSchema.nullable(), // reshaped to Contract-A (one booking shape)
   upcomingBookings: z.array(BookingResponseSchema), // reshaped to Contract-A
   pendingActions: z.unknown(), // Core-opaque (object | null)
-  createdAt: z.string().optional(), // forwarded from Core
+  createdAt: z.string().nullish(), // forwarded from Core (may be null, not just absent)
 });
 
 /** GET /v1/dashboard `data`, discriminated by `kind`. */

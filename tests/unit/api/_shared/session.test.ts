@@ -19,11 +19,17 @@ jest.unstable_mockModule("@/session.js", () => ({
   readSession: (...args: unknown[]) => readSession(...args),
   writeSession: (...args: unknown[]) => writeSession(...args),
 }));
+// The REAL GoogleTokenError — bearerForSession branches on `instanceof` + `.fatal` to
+// decide whether a refresh failure may destroy the session, so a stand-in would never
+// match and every failure would look transient. (N2)
+const { GoogleTokenError } = await import("@/auth/google.js");
 jest.unstable_mockModule("@/auth/google.js", () => ({
   refreshTokens: (...args: unknown[]) => refreshTokens(...args),
+  GoogleTokenError,
 }));
 
 const { resolveBearer } = await import("@/api/_shared/session.js");
+const { TransientAuthError } = await import("@/api/_shared/errors.js");
 
 const req = {} as Request;
 const res = {} as Response;
@@ -117,13 +123,31 @@ describe("resolveBearer / bearerForSession", () => {
     });
   });
 
-  it("returns null when the refresh throws (force re-auth)", async () => {
+  // N2 REPLACED THE OLD ASSERTION HERE. This used to expect `resolves.toBeNull()` for ANY
+  // refresh failure, i.e. "a bare Error logs the user out". That was the bug: null makes the
+  // caller requireReauth → clearSession → the refresh token is discarded, so a transient
+  // Google failure became an unrecoverable logout. An untyped error is now treated as
+  // transient (the session survives); only an explicit invalid_grant clears it. Full
+  // classification matrix: session-resilience.test.ts.
+  it("throws TransientAuthError when the refresh fails for an unrecognised reason", async () => {
     readSession.mockReturnValue({
       idToken: "id-old",
       refreshToken: "refresh-old",
       expiresAt: NOW + 30_000,
     });
     refreshTokens.mockRejectedValue(new Error("refresh failed"));
+
+    await expect(resolveBearer(req, res)).rejects.toBeInstanceOf(TransientAuthError);
+    expect(writeSession).not.toHaveBeenCalled();
+  });
+
+  it("returns null when the grant is genuinely dead (invalid_grant → re-auth)", async () => {
+    readSession.mockReturnValue({
+      idToken: "id-old",
+      refreshToken: "refresh-old",
+      expiresAt: NOW + 30_000,
+    });
+    refreshTokens.mockRejectedValue(new GoogleTokenError(400, "invalid_grant"));
 
     await expect(resolveBearer(req, res)).resolves.toBeNull();
     expect(writeSession).not.toHaveBeenCalled();

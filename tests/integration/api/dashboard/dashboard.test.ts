@@ -1,6 +1,6 @@
 import request from "supertest";
 import { app } from "@/app.js";
-import { coreErr, coreOk, mintSessionCookie, mockCoreByPath } from "../_helpers.js";
+import { coreErr, coreOk, mintSessionCookie, mockCoreByPath } from "../../_helpers.js";
 import { EnvelopedDashboardSchema } from "@/openapi/schemas.js";
 
 describe("GET /v1/dashboard", () => {
