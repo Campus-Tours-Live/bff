@@ -108,6 +108,8 @@ describe("OpenAPI contract — drift guard (Express routes ↔ spec)", () => {
         "get /auth/session",
         "get /v1/dashboard",
         "get /v1/onboarding",
+        "get /v1/tours",
+        "get /v1/tours/{tourId}",
         "post /auth/logout",
         "post /v1/bookings",
         "post /v1/bookings/{id}/cancel",
@@ -144,6 +146,62 @@ describe("OpenAPI contract — drift guard (Express routes ↔ spec)", () => {
   });
 });
 
+describe("OpenAPI contract — public /v1 discovery operations", () => {
+  const publicOps = () =>
+    operations().filter((o) => o.path === "/v1/tours" || o.path === "/v1/tours/{tourId}");
+
+  it("declare no session security requirement", () => {
+    for (const { path, op } of publicOps()) {
+      expect({ path, security: op.security }).toEqual({ path, security: undefined });
+    }
+  });
+
+  it("document Core errors and BFF transport failures without a session 401", () => {
+    for (const { path, op } of publicOps()) {
+      expect({ path, has401: Boolean(op.responses["401"]) }).toEqual({ path, has401: false });
+      expect({ path, has502: Boolean(op.responses["502"]) }).toEqual({ path, has502: true });
+    }
+  });
+
+  it("documents the relayed Core tour fields and metadata", () => {
+    type Schema = {
+      properties?: Record<string, Schema>;
+      items?: Schema;
+    };
+    const catalog = paths["/v1/tours"]?.get as Operation;
+    const detail = paths["/v1/tours/{tourId}"]?.get as Operation;
+    const catalogSchema = catalog.responses["200"]?.content?.["application/json"]?.schema as Schema;
+    const detailSchema = detail.responses["200"]?.content?.["application/json"]?.schema as Schema;
+
+    expect(Object.keys(catalogSchema.properties?.data?.items?.properties ?? {})).toEqual(
+      expect.arrayContaining([
+        "id",
+        "slug",
+        "topic",
+        "universityId",
+        "guideId",
+        "durationMin",
+        "priceCents",
+        "avgRating",
+        "reviewCount",
+      ]),
+    );
+    expect(Object.keys(detailSchema.properties?.data?.properties ?? {})).toEqual(
+      expect.arrayContaining([
+        "description",
+        "languages",
+        "universitySlug",
+        "universityCity",
+        "universityRegion",
+        "guideBio",
+      ]),
+    );
+    expect(Object.keys(catalogSchema.properties?.meta?.properties ?? {})).toEqual(
+      expect.arrayContaining(["requestId", "timestamp"]),
+    );
+  });
+});
+
 describe("OpenAPI contract — every operation is self-describing", () => {
   it("has a non-empty summary, description, and ≥1 tag", () => {
     for (const { method, path, op } of operations()) {
@@ -159,7 +217,9 @@ describe("OpenAPI contract — every operation is self-describing", () => {
 });
 
 describe("OpenAPI contract — protected /v1 operations", () => {
-  const protectedOps = () => operations().filter((o) => o.path.startsWith("/v1/"));
+  const publicV1Paths = new Set(["/v1/tours", "/v1/tours/{tourId}"]);
+  const protectedOps = () =>
+    operations().filter((o) => o.path.startsWith("/v1/") && !publicV1Paths.has(o.path));
 
   it("declare the sessionCookie security scheme", () => {
     for (const { path, op } of protectedOps()) {
