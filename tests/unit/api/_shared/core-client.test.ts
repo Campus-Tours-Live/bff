@@ -160,6 +160,7 @@ describe("CoreClient convenience methods", () => {
     ["getUserinfo", "/userinfo"],
     ["getGuideProfile", "/guide/profile"],
     ["getOfferings", "/guide/offerings"],
+    ["getGuideDashboardStats", "/guide/dashboard/stats"],
     ["getParticipantProfile", "/participant/profile"],
     ["getNextTour", "/bookings/next-tour"],
     ["getUpcomingBookings", "/bookings/upcoming"],

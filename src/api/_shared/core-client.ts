@@ -46,6 +46,9 @@ export class CoreClient {
   getPendingActions<T>(): Promise<T> {
     return this.get<T>("/bookings/pending-actions");
   }
+  getGuideDashboardStats<T>(): Promise<T> {
+    return this.get<T>("/guide/dashboard/stats");
+  }
 
   /**
    * Unwrap Core's `{ data }` envelope — return `data` whenever the body IS enveloped, even

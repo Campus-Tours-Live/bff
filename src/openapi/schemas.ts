@@ -363,6 +363,40 @@ export const BookingListSchema = z.array(BookingResponseSchema);
 
 // --- Dashboard payloads (GET /v1/dashboard, discriminated by `kind`) ---
 
+/** Dashboard stats snapshot forwarded from Core `GET /guide/dashboard/stats`. */
+export const GuideDashboardStats = registry.register(
+  "GuideDashboardStats",
+  z
+    .object({
+      avgRating: z.number().nullable().openapi({
+        description: "Average rating across all published reviews. Null when no reviews yet.",
+        example: 4.5,
+      }),
+      reviewCount: z.number().int().openapi({
+        description: "Total published review count.",
+        example: 12,
+      }),
+      earningsThisMonthCents: z.number().int().openapi({
+        description:
+          "Sum of guide_amount_cents for tours completed in the current UTC calendar month.",
+        example: 8400,
+      }),
+      upcomingPayoutCents: z.number().int().openapi({
+        description:
+          "Sum of guide_amount_cents for confirmed/in-progress tours — earnings on completion.",
+        example: 4200,
+      }),
+      currency: z.string().openapi({
+        description: "ISO-4217 currency for all cent values.",
+        example: "USD",
+      }),
+    })
+    .openapi("GuideDashboardStats", {
+      description:
+        "Guide dashboard stats snapshot: aggregate rating, this-month earnings, and upcoming payout.",
+    }),
+);
+
 /** GET /v1/dashboard, guide variant (src/api/dashboard/guide.ts). */
 const GuideDashboard = z
   .object({
@@ -380,6 +414,10 @@ const GuideDashboard = z
     }),
     offerings: z.array(Offering).openapi({
       description: "The guide's offerings (best-effort — empty list if the Core read fails).",
+    }),
+    stats: GuideDashboardStats.nullable().openapi({
+      description:
+        "Dashboard stats snapshot forwarded from Core (best-effort — null if the Core read fails).",
     }),
     createdAt: z
       .string()
@@ -569,6 +607,13 @@ export const guideDashboardExample = envelope({
       description: "A 45-minute walk through the parts of campus the official tour skips.",
     },
   ],
+  stats: {
+    avgRating: 4.5,
+    reviewCount: 12,
+    earningsThisMonthCents: 8400,
+    upcomingPayoutCents: 4200,
+    currency: "USD",
+  },
   createdAt: "2025-09-01T12:00:00.000Z",
 });
 
@@ -1244,6 +1289,7 @@ export const GuideDashboardDataSchema = z.object({
   guideStatus: z.string().nullable(), // forwarded from Core — value not constrained here
   canPublish: z.boolean(), // BFF-derived
   offerings: z.array(LooseObject), // BFF owns "it's an array"; items are Core-opaque
+  stats: LooseObject.nullish(), // forwarded from Core (best-effort — null on failure, absent on older BFF)
   createdAt: z.string().nullish(), // forwarded from Core (may be null, not just absent)
 });
 
