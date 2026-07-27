@@ -2,8 +2,8 @@
  * OpenAPI 3.1 spec for Contract A — the frontend-facing surface the BFF owns.
  *
  * Single source of truth: every request/response shape is a Zod schema (see ./schemas.ts),
- * so the SAME schemas drive the docs AND runtime validation (the onboarding `role` guard
- * and the dev-only response-shape assertions in src/api/_shared/envelope.ts). We build the
+ * so the SAME schemas drive the docs AND runtime validation (the
+ * dev-only response-shape assertions in src/api/_shared/envelope.ts). We build the
  * document in code with @asteasolutions/zod-to-openapi, so it works identically from src/
  * (tsx/jest) and the compiled dist/ (no filesystem/source scanning like swagger-jsdoc).
  *
@@ -21,10 +21,8 @@ import { OpenApiGeneratorV31 } from "@asteasolutions/zod-to-openapi";
 import {
   registry,
   coreApiBaseUrl,
-  RoleEnum,
   CoreRoleEnum,
   Dashboard,
-  Progress,
   SessionStatus,
   Userinfo,
   CurrentRoleSchema,
@@ -34,8 +32,6 @@ import {
   problem,
   guideDashboardExample,
   participantDashboardExample,
-  guideProgressExample,
-  participantProgressExample,
   userinfoExample,
   currentRoleExample,
   onboardingRoleExample,
@@ -314,57 +310,6 @@ apiRoute({
     }),
     401: problem401(
       "No/expired session or a Core 401 (also sets `Auth-Required: reauthenticate`).",
-    ),
-    502: problem502("The Core API was unreachable or returned a 5xx."),
-  },
-});
-
-// GET /v1/onboarding
-apiRoute({
-  method: "get",
-  path: "/v1/onboarding",
-  tags: ["Onboarding"],
-  summary: "Onboarding progress for a target role",
-  description:
-    "Progress for the TARGET role (the `role` query param), derived from Core `GET /users/me` " +
-    "alone (no `/guide/profile` read). Keyed by the target role, NOT the current role — a participant " +
-    "applying to be a guide still has `currentRole = PARTICIPANT`. Guide progress is coarse for " +
-    "now (the field-level verification checklist is deferred). The frontend calls this to render " +
-    "the onboarding checklist for the role being set up.\n\n" +
-    "**Onboarding guard (CTL-97):** allowed iff `roles.includes(role)` (already holds it) OR " +
-    "this session's `onboardingRole === role` (mid-acquisition, set by `GET /auth/callback`) — " +
-    "else 403. This is why a brand-new signup (Core `roles: []`) is NOT bounced: it's gated by " +
-    "`onboardingRole`, not held roles.\n\n" +
-    "**Auth:** requires the `ctl_sess` session cookie (sign in via `GET /auth/login` first).",
-  request: {
-    query: z.object({
-      role: RoleEnum.openapi({
-        description: "Target role whose onboarding progress to report.",
-        example: "guide",
-      }),
-    }),
-  },
-  responses: {
-    200: enveloped(Progress, {
-      description: "Onboarding progress, wrapped in the standard success envelope.",
-      examples: {
-        guide: { summary: "Guide onboarding progress", value: guideProgressExample },
-        participant: {
-          summary: "Participant onboarding progress",
-          value: participantProgressExample,
-        },
-      },
-    }),
-    401: problem401("No/expired session or a Core 401."),
-    403: problem403(
-      "ONBOARDING_NOT_AUTHORIZED",
-      "Not authorized for this role's onboarding",
-      "`role` is neither held by the account nor this session's in-progress `onboardingRole`.",
-    ),
-    422: problem422(
-      "INVALID_ROLE",
-      "role must be 'guide' or 'participant'",
-      "`role` was missing or not 'guide'|'participant'.",
     ),
     502: problem502("The Core API was unreachable or returned a 5xx."),
   },
@@ -1441,7 +1386,7 @@ export const openapiSpec = generator.generateDocument({
     },
     description:
       "The frontend-facing API the BFF owns: the Google sign-in lifecycle (`/auth/*`) and the " +
-      "`/v1` aggregation composites (`/v1/dashboard`, `/v1/onboarding`).\n\n" +
+      "`/v1` aggregation composites (`/v1/dashboard`).\n\n" +
       "### Response shapes\n" +
       '- **Success** aggregation responses use the envelope `{ "data": <payload>, "meta": ' +
       '{ "requestId": "<uuid>" } }`. `meta.requestId` echoes the `X-Request-Id` header for tracing.\n' +
@@ -1468,7 +1413,6 @@ export const openapiSpec = generator.generateDocument({
         "Bootstrap identity/roles/current-role read the frontend calls on every page load.",
     },
     { name: "Dashboard", description: "Role-shaped signed-in home aggregate." },
-    { name: "Onboarding", description: "Per-role onboarding progress aggregate." },
     { name: "Tours", description: "Anonymous marketplace tour discovery." },
     { name: "Booking", description: "Participant booking and cart operations." },
     {

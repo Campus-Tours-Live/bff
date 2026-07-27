@@ -1,6 +1,6 @@
 /**
  * Zod schemas for Contract A — the single source of truth behind BOTH the OpenAPI
- * document (see ./index.ts) and runtime validation (the onboarding `role` guard and the
+ * document (see ./index.ts) and runtime validation (the
  * dev-only response-shape assertions in src/api/_shared/envelope.ts + the contract test).
  *
  * Two families live here:
@@ -10,8 +10,8 @@
  *      at the bottom) — deliberately LOOSE on the opaque objects the BFF forwards verbatim
  *      from Core (Core may add fields) and STRICT on the parts the BFF actually owns: the
  *      `{ data, meta }` envelope, the `kind`/`role` discriminators, and derived fields
- *      (`canPublish`, the `offerings`/`upcomingBookings` array shapes, the `Progress`
- *      structure, `authenticated`). This split lets CI catch "a handler changed shape but
+ *      (`canPublish`, the `offerings`/`upcomingBookings` array shapes,
+ *      `authenticated`). This split lets CI catch "a handler changed shape but
  *      the schema/spec didn't" without false-failing on legitimate Core passthrough drift.
  */
 import { z } from "zod";
@@ -49,17 +49,8 @@ registry.registerComponent("securitySchemes", "sessionCookie", {
 // --- Enumerations (exact values sourced from backend + frontend Contract A) ---
 
 /**
- * `role` request/response discriminator (dashboard `kind`, onboarding `role`). Exported so
- * the onboarding handler validates its `role` query param against the SAME enum the spec
- * documents — one source of truth for the accepted values.
- */
-export const RoleEnum = z.enum(["guide", "participant"]);
-
-/**
  * The two role values Core itself uses (`user_roles`, `GET /users/me` `roles`, and this
- * session's `currentRole`) — UPPERCASE, distinct from {@link RoleEnum}'s lowercase
- * request/response discriminator (dashboard `kind`, onboarding `?role=`). Used by the
- * `Userinfo` schema below.
+ * session's `currentRole`) — UPPERCASE. Used by the `Userinfo` schema below.
  */
 export const CoreRoleEnum = z.enum(["GUIDE", "PARTICIPANT"]);
 
@@ -600,52 +591,6 @@ export const Dashboard = registry.register(
     .openapi({ description: "Role-shaped dashboard payload, discriminated by `kind`." }),
 );
 
-/** Uniform onboarding-progress shape returned for either role (src/api/onboarding/types.ts). */
-export const Progress = registry.register(
-  "Progress",
-  z
-    .object({
-      role: RoleEnum.openapi({
-        description: "The target role this progress describes.",
-        example: "guide",
-      }),
-      started: z
-        .boolean()
-        .openapi({ description: "Whether onboarding for this role has begun.", example: true }),
-      complete: z
-        .boolean()
-        .openapi({ description: "Whether onboarding for this role is finished.", example: false }),
-      canSubmit: z.boolean().openapi({
-        description:
-          "Whether the user may submit/advance now (coarse for guides — field gating deferred).",
-        example: true,
-      }),
-      guideStatus: GuideStatusEnum.nullable().openapi({
-        description: "Guide status; always null for participants.",
-        example: "PENDING",
-      }),
-      verificationStatus: VerificationStatusEnum.nullable().openapi({
-        description: "Guide verification status; deferred, so currently always null.",
-        example: null,
-      }),
-      steps: z
-        .array(
-          z.object({
-            key: z.string().openapi({ description: "Stable step key.", example: "submitted" }),
-            label: z.string().openapi({
-              description: "Human-readable step label.",
-              example: "Application submitted",
-            }),
-            done: z
-              .boolean()
-              .openapi({ description: "Whether this step is complete.", example: true }),
-          }),
-        )
-        .openapi({ description: "Ordered checklist of onboarding steps for this role." }),
-    })
-    .openapi("Progress", { description: "Derived onboarding progress for one role." }),
-);
-
 /** GET /auth/session — lightweight, un-enveloped auth check (src/auth/routes.ts). */
 export const SessionStatus = registry.register(
   "SessionStatus",
@@ -734,26 +679,6 @@ export const participantDashboardExample = envelope({
   upcomingBookings: [PARTICIPANT_UPCOMING_EXAMPLE],
   pendingActions: { unreadMessages: 2, awaitingReview: 1 },
   createdAt: "2026-01-15T09:30:00.000Z",
-});
-
-export const guideProgressExample = envelope({
-  role: "guide",
-  started: true,
-  complete: false,
-  canSubmit: true,
-  guideStatus: "PENDING",
-  verificationStatus: null,
-  steps: [{ key: "submitted", label: "Application submitted", done: false }],
-});
-
-export const participantProgressExample = envelope({
-  role: "participant",
-  started: true,
-  complete: true,
-  canSubmit: false,
-  guideStatus: null,
-  verificationStatus: null,
-  steps: [{ key: "profile", label: "Your details", done: true }],
 });
 
 // Reused Problem examples.
@@ -1436,20 +1361,6 @@ export const DashboardDataSchema = z.discriminatedUnion("kind", [
 
 /** Full enveloped GET /v1/dashboard response contract. */
 export const EnvelopedDashboardSchema = envelopeOf(DashboardDataSchema);
-
-/** GET /v1/onboarding `data` — the `Progress` structure is entirely BFF-owned (strict). */
-export const ProgressDataSchema = z.object({
-  role: RoleEnum,
-  started: z.boolean(),
-  complete: z.boolean(),
-  canSubmit: z.boolean(),
-  guideStatus: z.string().nullable(), // forwarded from Core — value not constrained here
-  verificationStatus: z.string().nullable(), // deferred (currently always null)
-  steps: z.array(z.object({ key: z.string(), label: z.string(), done: z.boolean() })),
-});
-
-/** Full enveloped GET /v1/onboarding response contract. */
-export const EnvelopedProgressSchema = envelopeOf(ProgressDataSchema);
 
 /** GET /auth/session — the bare, un-enveloped `{ authenticated }` boolean (BFF-owned). */
 export const SessionStatusSchema = z.object({ authenticated: z.boolean() });
