@@ -29,6 +29,8 @@ import {
   Userinfo,
   ActiveRoleSchema,
   SetActiveRoleRequestSchema,
+  OnboardingRoleSchema,
+  SetOnboardingRoleRequestSchema,
   problem,
   guideDashboardExample,
   participantDashboardExample,
@@ -36,6 +38,7 @@ import {
   participantProgressExample,
   userinfoExample,
   activeRoleExample,
+  onboardingRoleExample,
   envelope,
   writeEnvelope,
   BookingResponseSchema,
@@ -406,6 +409,62 @@ apiRoute({
       "Role not held by this account",
       "The account does not currently hold the requested role (session left unchanged), or the " +
         "account is disabled (Core `ACCOUNT_NOT_ACTIVE`).",
+    ),
+  },
+});
+
+// POST /v1/session/onboarding-role
+apiRoute({
+  method: "post",
+  path: "/v1/session/onboarding-role",
+  tags: ["Session"],
+  summary: "Start onboarding into a new (not-yet-held) role, in-app",
+  description:
+    "Authorises a *logged-in* user to start onboarding into a SECOND role by setting THIS bff " +
+    "session's `onboardingRole` (Profile Contract v2). The 'Become a Guide/Participant' " +
+    "affordance must stay in-app — it must NOT round-trip through `GET /auth/login` (that " +
+    "re-runs Google OAuth / forces account re-selection, which is wrong for an already-" +
+    "authenticated user). `roles` are re-validated against Core `GET /users/me` on EVERY call " +
+    "(never cached in the session). Distinct from `POST /session/active-role`: that switches " +
+    "among roles ALREADY held; this authorises acquiring a role NOT yet held, and never sets " +
+    "`activeRole`.\n\n" +
+    "Already holding the role → 409 (the UI should call `POST /session/active-role` to switch, " +
+    "not onboard). Otherwise, eligibility is Core's authoritative call " +
+    "(`GET /users/me/role-eligibility?role=`) — not eligible (e.g. a PARENT participant may " +
+    "never become a GUIDE) → 403, carrying Core's typed reason as `code` so the frontend can " +
+    "map it to the parent-not-eligible message. A disabled/suspended account surfaces as a " +
+    "Core 403 (`ACCOUNT_NOT_ACTIVE`, carried in `Problem.title`) via the same generic 4xx " +
+    "passthrough. No Core write happens in this flow.\n\n" +
+    "**CSRF-guarded** (state-changing mutation) — a cross-site POST is rejected.",
+  request: {
+    body: {
+      content: {
+        "application/json": { schema: SetOnboardingRoleRequestSchema, example: { role: "GUIDE" } },
+      },
+    },
+  },
+  responses: {
+    200: enveloped(OnboardingRoleSchema, {
+      description: "The now-authorised onboarding role, wrapped in the standard success envelope.",
+      example: onboardingRoleExample,
+    }),
+    400: problem400(
+      "INVALID_ROLE",
+      "role must be 'GUIDE' or 'PARTICIPANT'",
+      "`role` was missing or not a recognised role value.",
+    ),
+    403: problem403(
+      "PARENT_CANNOT_BECOME_GUIDE",
+      "Not eligible to onboard into this role",
+      "Core's role-eligibility check rejected this role (e.g. a PARENT participant may never " +
+        "become a GUIDE), or the account is disabled (Core `ACCOUNT_NOT_ACTIVE`). The `code` " +
+        "carries Core's typed ineligibility reason.",
+    ),
+    409: problem409(
+      "ROLE_ALREADY_HELD",
+      "Role already held by this account",
+      "The account already holds this role — call `POST /session/active-role` to switch to it " +
+        "instead of onboarding.",
     ),
   },
 });

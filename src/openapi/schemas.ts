@@ -250,6 +250,39 @@ export const ActiveRoleSchema = registry.register(
     .openapi("ActiveRole", { description: "This session's newly-switched active role." }),
 );
 
+// --- POST /v1/session/onboarding-role (bff-owned) ---
+
+/** Request body for `POST /v1/session/onboarding-role`. */
+export const SetOnboardingRoleRequestSchema = z.object({
+  role: CoreRoleEnum.openapi({
+    description:
+      "The role to start onboarding into for this session — must NOT already be held by " +
+      "the account (use `POST /session/active-role` for a role already held).",
+    example: "GUIDE",
+  }),
+});
+
+/**
+ * `POST /v1/session/onboarding-role` response `data`
+ * (src/api/session/onboarding-role.handler.ts) — the logged-in-role-acquisition counterpart to
+ * `ActiveRoleSchema`. Deliberately lean: just the role now authorised for onboarding, echoed
+ * back on success.
+ */
+export const OnboardingRoleSchema = registry.register(
+  "OnboardingRole",
+  z
+    .object({
+      onboardingRole: CoreRoleEnum.openapi({
+        description:
+          "The role this session is now authorised to onboard into (echo of the request `role`).",
+        example: "GUIDE",
+      }),
+    })
+    .openapi("OnboardingRole", {
+      description: "This session's newly-authorised onboarding role.",
+    }),
+);
+
 // --- Domain sub-schemas (forwarded from Core; field names per Contract A) ---
 
 /** A guide's public/profile record (Core, forwarded verbatim by the BFF). */
@@ -615,6 +648,8 @@ export const userinfoExample = envelope({
 });
 
 export const activeRoleExample = envelope({ activeRole: "GUIDE" });
+
+export const onboardingRoleExample = envelope({ onboardingRole: "GUIDE" });
 
 export const guideDashboardExample = envelope({
   kind: "guide",
@@ -1332,6 +1367,14 @@ export const ActiveRoleDataSchema = z.object({
 
 /** Full enveloped POST /v1/session/active-role response contract. */
 export const EnvelopedActiveRoleSchema = envelopeOf(ActiveRoleDataSchema);
+
+/** POST /v1/session/onboarding-role `data` — entirely BFF-owned (strict). */
+export const OnboardingRoleDataSchema = z.object({
+  onboardingRole: z.enum(["GUIDE", "PARTICIPANT"]),
+});
+
+/** Full enveloped POST /v1/session/onboarding-role response contract. */
+export const EnvelopedOnboardingRoleSchema = envelopeOf(OnboardingRoleDataSchema);
 
 /** GET /v1/dashboard guide `data` — strict on `kind`/`canPublish`/`offerings` (BFF-owned). */
 export const GuideDashboardDataSchema = z.object({
