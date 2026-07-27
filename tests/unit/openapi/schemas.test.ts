@@ -140,9 +140,9 @@ describe("Dashboard data schemas tolerate a null createdAt (Core sends null, not
  * not a runtime gate; these tests pin down its documented shape.
  */
 describe("GuideProfile (CTL-97 universities[])", () => {
-  it("accepts the universities[] shape with per-school degree + verificationStatus", () => {
+  it("accepts the universities[] shape with per-school degree + entryYear + verificationStatus", () => {
     const result = GuideProfile.safeParse({
-      applicationStatus: "APPROVED",
+      applicationStatus: "VERIFIED",
       universities: [
         {
           universityId: "uni_mit",
@@ -151,16 +151,21 @@ describe("GuideProfile (CTL-97 universities[])", () => {
           major: "Computer Science",
           degree: "Bachelor's",
           classYear: "2026",
+          entryYear: 2023,
           verificationStatus: "VERIFIED",
         },
       ],
       bio: "Sophomore who loves showing off the maker space.",
       languages: ["en", "es"],
       specialties: ["engineering", "campus-life"],
-      basePriceCents: 2500,
-      currency: "USD",
     });
     expect(result.success).toBe(true);
+  });
+
+  it("no longer has the guide-level basePriceCents/currency fields (dropped from the guide profile)", () => {
+    const shape = GuideProfile.shape;
+    expect(shape).not.toHaveProperty("basePriceCents");
+    expect(shape).not.toHaveProperty("currency");
   });
 
   it("no longer has the flat single-school fields at the top level", () => {
@@ -176,7 +181,7 @@ describe("GuideProfile (CTL-97 universities[])", () => {
 
   it("rejects a leaked schoolEmail on the top-level profile (strict parse)", () => {
     const result = GuideProfile.strict().safeParse({
-      applicationStatus: "APPROVED",
+      applicationStatus: "VERIFIED",
       universities: [],
       schoolEmail: "guide@mit.edu",
     });

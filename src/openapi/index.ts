@@ -184,7 +184,7 @@ apiRoute({
   tags: ["Tours"],
   summary: "Search public marketplace tours",
   description:
-    "Anonymous marketplace discovery. Relays Core's ACTIVE offerings from APPROVED guides " +
+    "Anonymous marketplace discovery. Relays Core's ACTIVE offerings from VERIFIED guides " +
     "without reading or forwarding a BFF session. Query filters are passed through verbatim; " +
     "see the Core API specification for the field-level response contract.",
   request: {
@@ -299,7 +299,7 @@ apiRoute({
     "Contract v2 — `activeRole` is per-session state, never a Core value or an id_token " +
     "claim); guide and participant share this one endpoint. The " +
     "guide variant fans out profile + offerings and adds a computed `canPublish` gate " +
-    "(true only when APPROVED); the participant variant fans out profile + next tour + " +
+    "(true only when VERIFIED); the participant variant fans out profile + next tour + " +
     "upcoming bookings + pending actions (each best-effort). The frontend calls this to render " +
     "`/dashboard`.\n\n" +
     "**Auth:** requires the `ctl_sess` session cookie. Swagger UI can only exercise it if the " +

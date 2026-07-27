@@ -43,7 +43,7 @@ function makeMe(over: Partial<Me> = {}): Me {
 
 describe("guideDashboard", () => {
   it("sends a guide envelope with profile, status (from the profile's applicationStatus), canPublish and offerings", async () => {
-    const guide: Json = { id: "g1", displayName: "Ana", applicationStatus: "APPROVED" };
+    const guide: Json = { id: "g1", displayName: "Ana", applicationStatus: "VERIFIED" };
     const offerings: Json[] = [{ id: "o1" }, { id: "o2" }];
     const core = {
       getGuideProfile: jest.fn<() => Promise<unknown>>().mockResolvedValue(guide),
@@ -57,25 +57,25 @@ describe("guideDashboard", () => {
     expect(sentData(res)).toEqual({
       kind: "guide",
       guide,
-      guideStatus: "APPROVED",
+      guideStatus: "VERIFIED",
       canPublish: true,
       offerings,
       createdAt: "2025-03-15T00:00:00Z",
     });
   });
 
-  it("canPublish is false when the profile's applicationStatus is not APPROVED", async () => {
+  it("canPublish is false when the profile's applicationStatus is not VERIFIED", async () => {
     const core = {
       getGuideProfile: jest
         .fn<() => Promise<unknown>>()
-        .mockResolvedValue({ id: "g1", applicationStatus: "PENDING_REVIEW" }),
+        .mockResolvedValue({ id: "g1", applicationStatus: "PENDING" }),
       getOfferings: jest.fn<() => Promise<unknown>>().mockResolvedValue([]),
     } as unknown as CoreClient;
 
     const res = mockRes();
     await guideDashboard(res as unknown as Response, core, makeMe());
 
-    expect(sentData(res)).toMatchObject({ canPublish: false, guideStatus: "PENDING_REVIEW" });
+    expect(sentData(res)).toMatchObject({ canPublish: false, guideStatus: "PENDING" });
   });
 
   it("guideStatus is null when the profile has no applicationStatus", async () => {

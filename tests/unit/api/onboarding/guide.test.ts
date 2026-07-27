@@ -13,18 +13,7 @@ describe("guideProgress", () => {
     });
   });
 
-  it("DRAFT → started, not complete, canSubmit true", () => {
-    const p = guideProgress("DRAFT");
-    expect(p).toMatchObject({
-      started: true,
-      complete: false,
-      canSubmit: true,
-      applicationStatus: "DRAFT",
-      verificationStatus: null,
-    });
-  });
-
-  it.each(["PENDING_REVIEW", "APPROVED", "REJECTED"])(
+  it.each(["PENDING", "VERIFIED", "REJECTED"])(
     "%s → submitted = complete, canSubmit false",
     (status) => {
       const p = guideProgress(status);
@@ -38,8 +27,22 @@ describe("guideProgress", () => {
     },
   );
 
+  it("an unrecognized applicationStatus value is treated as started but not submitted", () => {
+    // Defensive: there is no DRAFT value anymore under {PENDING,VERIFIED,REJECTED}, but the
+    // positive SUBMITTED_STATUSES check (rather than `!== "DRAFT"`) means a stale/unexpected
+    // value doesn't get incorrectly treated as "submitted".
+    const p = guideProgress("SOME_UNKNOWN_STATUS");
+    expect(p).toMatchObject({
+      started: true,
+      complete: false,
+      canSubmit: true,
+      applicationStatus: "SOME_UNKNOWN_STATUS",
+      verificationStatus: null,
+    });
+  });
+
   it("verificationStatus is always null (deferred)", () => {
-    for (const status of [null, "DRAFT", "PENDING_REVIEW", "APPROVED", "REJECTED"]) {
+    for (const status of [null, "PENDING", "VERIFIED", "REJECTED"]) {
       expect(guideProgress(status).verificationStatus).toBeNull();
     }
   });
@@ -48,7 +51,7 @@ describe("guideProgress", () => {
     expect(guideProgress(null).steps).toEqual([
       { key: "submitted", label: "Application submitted", done: false },
     ]);
-    expect(guideProgress("APPROVED").steps).toEqual([
+    expect(guideProgress("VERIFIED").steps).toEqual([
       { key: "submitted", label: "Application submitted", done: true },
     ]);
   });

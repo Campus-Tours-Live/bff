@@ -72,10 +72,13 @@ export const CoreRoleEnum = z.enum(["GUIDE", "PARTICIPANT"]);
 export const HeldRoleEnum = z.enum(["GUIDE", "PARTICIPANT", "ADMIN", "SUPPORT"]);
 
 /**
- * Guide application status (a.k.a. `guideStatus`, Core `application_status`). `DRAFT`
- * = profile started but not yet submitted; only `APPROVED` unlocks publishing.
+ * Guide application status (a.k.a. `guideStatus`, Core `application_status`). Profile
+ * Contract v2 Phase 4 (verification-driven lifecycle): `PENDING` = submitted, awaiting
+ * verification; only `VERIFIED` unlocks publishing. There is no longer a `DRAFT` value —
+ * a guide profile either doesn't exist yet (null) or has been submitted (`PENDING` at
+ * minimum).
  */
-export const ApplicationStatusEnum = z.enum(["DRAFT", "PENDING_REVIEW", "APPROVED", "REJECTED"]);
+export const ApplicationStatusEnum = z.enum(["PENDING", "VERIFIED", "REJECTED"]);
 
 /** Guide identity/verification status (deferred in onboarding — often null for now). */
 export const VerificationStatusEnum = z.enum(["PENDING", "VERIFIED", "REJECTED"]);
@@ -326,6 +329,10 @@ export const GuideUniversitySchema = registry.register(
         .string()
         .optional()
         .openapi({ description: "Graduation year.", example: "2026" }),
+      entryYear: z.number().int().nullable().optional().openapi({
+        description: "Year this guide entered/started at this university (null until set).",
+        example: 2023,
+      }),
       verificationStatus: VerificationStatusEnum.nullable().optional().openapi({
         description: "This school's identity verification status (often null — deferred).",
         example: "VERIFIED",
@@ -341,7 +348,7 @@ export const GuideProfile = registry.register(
     .object({
       applicationStatus: ApplicationStatusEnum.nullable().optional().openapi({
         description: "Guide application/review status (null if no guide profile yet).",
-        example: "APPROVED",
+        example: "VERIFIED",
       }),
       universities: z
         .array(GuideUniversitySchema)
@@ -363,14 +370,6 @@ export const GuideProfile = registry.register(
         .array(z.string())
         .optional()
         .openapi({ description: "Tour focus areas.", example: ["engineering", "campus-life"] }),
-      basePriceCents: z.number().int().nullable().optional().openapi({
-        description: "Default price per tour, in cents (null until set).",
-        example: 2500,
-      }),
-      currency: z
-        .string()
-        .optional()
-        .openapi({ description: "ISO-4217 currency code.", example: "USD" }),
     })
     .openapi("GuideProfile", { description: "Guide profile record forwarded from Core." }),
 );
@@ -384,9 +383,11 @@ export const ParticipantProfile = registry.register(
         description: "Whether the participant is the student or a booking guardian.",
         example: "STUDENT",
       }),
-      // Loose (not ApplicationStatusEnum): the participant applicationStatus values
-      // (PENDING/VERIFIED) are disjoint from the guide ApplicationStatusEnum
-      // (DRAFT/PENDING_REVIEW/APPROVED/REJECTED) — this embed forwards Core's value as-is.
+      // Loose (not ApplicationStatusEnum), kept that way even though Profile Contract v2
+      // Phase 4 made the participant applicationStatus values the SAME set as the guide
+      // ApplicationStatusEnum ({PENDING,VERIFIED,REJECTED}): this embed still forwards
+      // Core's value as-is rather than sharing the enum reference, so a future divergence
+      // between the two status vocabularies doesn't require touching this schema.
       applicationStatus: z.string().nullable().optional().openapi({
         description: "Participant application/review status (null if not yet set).",
         example: "VERIFIED",
@@ -501,10 +502,10 @@ const GuideDashboard = z
     guide: GuideProfile,
     guideStatus: ApplicationStatusEnum.nullable().openapi({
       description: "The guide's application status (echo of `guide.applicationStatus`).",
-      example: "APPROVED",
+      example: "VERIFIED",
     }),
     canPublish: z.boolean().openapi({
-      description: 'Computed convenience gate — true only when `guideStatus === "APPROVED"`.',
+      description: 'Computed convenience gate — true only when `guideStatus === "VERIFIED"`.',
       example: true,
     }),
     offerings: z.array(Offering).openapi({
@@ -621,7 +622,7 @@ export const Progress = registry.register(
       }),
       applicationStatus: ApplicationStatusEnum.nullable().openapi({
         description: "Guide application status; always null for participants.",
-        example: "PENDING_REVIEW",
+        example: "PENDING",
       }),
       verificationStatus: VerificationStatusEnum.nullable().openapi({
         description: "Guide verification status; deferred, so currently always null.",
@@ -682,7 +683,7 @@ export const onboardingRoleExample = envelope({ onboardingRole: "GUIDE" });
 export const guideDashboardExample = envelope({
   kind: "guide",
   guide: {
-    applicationStatus: "APPROVED",
+    applicationStatus: "VERIFIED",
     universities: [
       {
         universityId: "uni_mit",
@@ -691,16 +692,15 @@ export const guideDashboardExample = envelope({
         major: "Computer Science",
         degree: "Bachelor's",
         classYear: "2026",
+        entryYear: 2023,
         verificationStatus: "VERIFIED",
       },
     ],
     bio: "Sophomore who loves showing off the maker space.",
     languages: ["en", "es"],
     specialties: ["engineering", "campus-life"],
-    basePriceCents: 2500,
-    currency: "USD",
   },
-  guideStatus: "APPROVED",
+  guideStatus: "VERIFIED",
   canPublish: true,
   offerings: [
     {
@@ -741,7 +741,7 @@ export const guideProgressExample = envelope({
   started: true,
   complete: false,
   canSubmit: true,
-  applicationStatus: "PENDING_REVIEW",
+  applicationStatus: "PENDING",
   verificationStatus: null,
   steps: [{ key: "submitted", label: "Application submitted", done: false }],
 });

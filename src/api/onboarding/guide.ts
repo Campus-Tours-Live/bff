@@ -1,6 +1,14 @@
 import type { Progress } from "./types.js";
 
 /**
+ * The "has submitted" applicationStatus values under Profile Contract v2 Phase 4
+ * (verification-driven lifecycle). There is no `DRAFT` value anymore — a guide profile
+ * either doesn't exist yet (`applicationStatus` null, not started) or has already been
+ * submitted, landing directly in one of these three statuses.
+ */
+const SUBMITTED_STATUSES = new Set(["PENDING", "VERIFIED", "REJECTED"]);
+
+/**
  * Guide onboarding progress — COARSE for now, derived from the guide profile's
  * `applicationStatus` alone (Profile Contract v2 — /userinfo no longer carries
  * `guideStatus`, so the handler fetches /guide/profile and passes its
@@ -11,7 +19,7 @@ import type { Progress } from "./types.js";
  */
 export function guideProgress(applicationStatus: string | null): Progress {
   const status = applicationStatus; // null if no guide profile yet
-  const submitted = status !== null && status !== "DRAFT";
+  const submitted = status !== null && SUBMITTED_STATUSES.has(status);
   return {
     role: "guide",
     started: status !== null,

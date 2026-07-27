@@ -42,7 +42,7 @@ describe("GET /v1/onboarding", () => {
     expect(res.status).toBe(200);
     expect(res.body.data.role).toBe("guide");
     expect(res.body.data.started).toBe(true);
-    expect(res.body.data.complete).toBe(true); // PENDING != DRAFT/null → submitted
+    expect(res.body.data.complete).toBe(true); // PENDING is a submitted status → complete
     expect(res.body.data.applicationStatus).toBe("PENDING");
     expect(res.body.data.verificationStatus).toBeNull();
     // Response-shape contract: body ↔ documented Progress envelope schema.
@@ -134,7 +134,7 @@ describe("GET /v1/onboarding", () => {
   it("role accepted case-insensitively (GUIDE)", async () => {
     mockCoreByPath({
       "/users/me": usersMeOk(["GUIDE"]),
-      "/guide/profile": coreOk({ applicationStatus: "APPROVED" }),
+      "/guide/profile": coreOk({ applicationStatus: "VERIFIED" }),
     });
 
     const res = await request(app).get("/v1/onboarding?role=GUIDE").set("Cookie", cookie);
@@ -209,7 +209,7 @@ describe("GET /v1/onboarding — onboarding guard (CTL-97)", () => {
     const cookie = mintSessionCookie();
     mockCoreByPath({
       "/users/me": usersMeOk(["GUIDE"]),
-      "/guide/profile": coreOk({ applicationStatus: "APPROVED" }),
+      "/guide/profile": coreOk({ applicationStatus: "VERIFIED" }),
     });
 
     const res = await request(app).get("/v1/onboarding?role=guide").set("Cookie", cookie);
