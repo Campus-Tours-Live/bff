@@ -142,7 +142,6 @@ describe("Dashboard data schemas tolerate a null createdAt (Core sends null, not
 describe("GuideProfile (CTL-97 universities[])", () => {
   it("accepts the universities[] shape with per-school degree + verificationStatus", () => {
     const result = GuideProfile.safeParse({
-      userId: "u_guide_123",
       applicationStatus: "APPROVED",
       universities: [
         {

@@ -339,10 +339,6 @@ export const GuideProfile = registry.register(
   "GuideProfile",
   z
     .object({
-      userId: z
-        .string()
-        .optional()
-        .openapi({ description: "Guide's user id.", example: "u_guide_123" }),
       applicationStatus: ApplicationStatusEnum.nullable().optional().openapi({
         description: "Guide application/review status (null if no guide profile yet).",
         example: "APPROVED",
@@ -686,7 +682,6 @@ export const onboardingRoleExample = envelope({ onboardingRole: "GUIDE" });
 export const guideDashboardExample = envelope({
   kind: "guide",
   guide: {
-    userId: "u_guide_123",
     applicationStatus: "APPROVED",
     universities: [
       {
