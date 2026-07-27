@@ -8,7 +8,9 @@ export { CoreAuthError, CoreError, TransientAuthError } from "./errors.js";
 export { sendData, coreUnavailable, assertShapeInDev } from "./envelope.js";
 export { withSession } from "./with-session.js";
 export { withMutation } from "./with-mutation.js";
-export type { Me, Json } from "./types.js";
+export type { Me, Json, Userinfo } from "./types.js";
+export { isRole } from "../../session.js";
+export type { Role } from "../../session.js";
 export { PUBLISHABLE_STATUS } from "./constants.js";
 export {
   toZ,

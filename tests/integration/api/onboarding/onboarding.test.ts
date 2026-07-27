@@ -3,8 +3,9 @@ import { app } from "@/app.js";
 import { coreErr, coreOk, mintSessionCookie, mockCoreByPath } from "../../_helpers.js";
 import { EnvelopedProgressSchema } from "@/openapi/schemas.js";
 
-/** Profile Contract v2 /userinfo shape — session/bootstrap only, no role-scoped data. */
-function userinfoOk(roles: string[], activeRole: string | null) {
+/** Core `GET /users/me` (Profile Contract v2): pure identity + held roles — no `activeRole`
+ *  (onboarding progress is keyed by the TARGET role, so it never reads activeRole at all). */
+function usersMeOk(roles: string[]) {
   return coreOk({
     user: {
       id: "u1",
@@ -17,7 +18,6 @@ function userinfoOk(roles: string[], activeRole: string | null) {
       createdAt: "2025-03-15T00:00:00.000Z",
     },
     roles,
-    activeRole,
   });
 }
 
@@ -30,7 +30,7 @@ describe("GET /v1/onboarding", () => {
 
   it("?role=guide → 200 guide progress derived from /guide/profile", async () => {
     mockCoreByPath({
-      "/userinfo": userinfoOk(["PARTICIPANT"], "PARTICIPANT"),
+      "/users/me": usersMeOk(["PARTICIPANT"]),
       "/guide/profile": coreOk({ applicationStatus: "PENDING" }),
     });
 
@@ -48,7 +48,7 @@ describe("GET /v1/onboarding", () => {
 
   it("?role=guide with no guide profile yet → not started", async () => {
     mockCoreByPath({
-      "/userinfo": userinfoOk(["PARTICIPANT"], "PARTICIPANT"),
+      "/users/me": usersMeOk(["PARTICIPANT"]),
       "/guide/profile": coreErr(404),
     });
 
@@ -63,7 +63,7 @@ describe("GET /v1/onboarding", () => {
 
   it("?role=participant → 200 participant progress (complete when holds PARTICIPANT)", async () => {
     mockCoreByPath({
-      "/userinfo": userinfoOk(["PARTICIPANT"], "PARTICIPANT"),
+      "/users/me": usersMeOk(["PARTICIPANT"]),
       "/participant/profile": coreOk({ type: "PROSPECTIVE" }),
     });
 
@@ -78,7 +78,7 @@ describe("GET /v1/onboarding", () => {
 
   it("?role=participant without the role yet → incomplete", async () => {
     mockCoreByPath({
-      "/userinfo": userinfoOk(["GUIDE"], "GUIDE"),
+      "/users/me": usersMeOk(["GUIDE"]),
       "/participant/profile": coreErr(404),
     });
 
@@ -91,7 +91,7 @@ describe("GET /v1/onboarding", () => {
 
   it("brand-new user (no roles yet) → participant onboarding not started, incomplete", async () => {
     mockCoreByPath({
-      "/userinfo": userinfoOk([], null),
+      "/users/me": usersMeOk([]),
       "/participant/profile": coreErr(404),
     });
 
@@ -107,7 +107,7 @@ describe("GET /v1/onboarding", () => {
 
   it("brand-new user (no roles, no guide profile) → guide onboarding not started, incomplete", async () => {
     mockCoreByPath({
-      "/userinfo": userinfoOk([], null),
+      "/users/me": usersMeOk([]),
       "/guide/profile": coreErr(404),
     });
 
@@ -124,7 +124,7 @@ describe("GET /v1/onboarding", () => {
 
   it("role accepted case-insensitively (GUIDE)", async () => {
     mockCoreByPath({
-      "/userinfo": userinfoOk(["GUIDE"], "GUIDE"),
+      "/users/me": usersMeOk(["GUIDE"]),
       "/guide/profile": coreOk({ applicationStatus: "APPROVED" }),
     });
 
@@ -163,8 +163,8 @@ describe("GET /v1/onboarding", () => {
     expect(res.body).toMatchObject({ code: "SESSION_EXPIRED" });
   });
 
-  it("Core /userinfo 401 → 401 + Auth-Required", async () => {
-    mockCoreByPath({ "/userinfo": coreErr(401) });
+  it("Core /users/me 401 → 401 + Auth-Required", async () => {
+    mockCoreByPath({ "/users/me": coreErr(401) });
 
     const res = await request(app).get("/v1/onboarding?role=guide").set("Cookie", cookie);
 

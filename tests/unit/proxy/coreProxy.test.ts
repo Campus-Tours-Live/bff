@@ -43,9 +43,9 @@ describe("coreProxy (unit) — transient refresh failure (N2)", () => {
   });
 
   /**
-   * coreProxy is the third resolveBearer call site and the one that serves /v1/userinfo —
-   * i.e. the request the web app makes on every page. If Google being down made THIS route
-   * re-auth, the whole point of preserving the session would be lost.
+   * coreProxy is the third resolveBearer call site — every proxied `/v1/*` read (e.g. a
+   * guide's own profile). If Google being down made THIS route re-auth, the whole point of
+   * preserving the session would be lost.
    */
   it("answers 'temporarily unavailable' and never re-auths when the refresh is transient", async () => {
     resolveBearer.mockRejectedValue(new TransientAuthError());
@@ -54,8 +54,8 @@ describe("coreProxy (unit) — transient refresh failure (N2)", () => {
 
     const req = {
       method: "GET",
-      url: "/v1/userinfo",
-      originalUrl: "/v1/userinfo",
+      url: "/v1/guide/profile",
+      originalUrl: "/v1/guide/profile",
       headers: {},
       header: () => undefined,
     } as unknown as Request;
@@ -75,8 +75,8 @@ describe("coreProxy (unit) — transient refresh failure (N2)", () => {
 
     const req = {
       method: "GET",
-      url: "/v1/userinfo",
-      originalUrl: "/v1/userinfo",
+      url: "/v1/guide/profile",
+      originalUrl: "/v1/guide/profile",
       headers: {},
       header: () => undefined,
     } as unknown as Request;

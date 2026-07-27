@@ -7,12 +7,13 @@ import { participantProgress } from "./participant.js";
 /**
  * GET /v1/onboarding?role=guide|participant — single entry. Progress is keyed by the
  * TARGET role (the `role` query param), NOT activeRole — a participant applying to be
- * a guide still has activeRole=PARTICIPANT. Profile Contract v2 moved `guideStatus`/
- * `participantType` off /userinfo onto the role-specific profile endpoints, so this
- * handler reads /userinfo for `roles` and additionally fetches the TARGET role's
- * profile (best-effort — no profile yet, e.g. a brand-new user, degrades to null
- * status/type rather than failing the request). Guide progress is COARSE for now; the
- * verification-level checklist is deferred (see guide.ts).
+ * a guide still has activeRole=PARTICIPANT (which, per Profile Contract v2, is bff session
+ * state anyway — irrelevant here). Profile Contract v2 moved `guideStatus`/`participantType`
+ * off the old Core `/userinfo` onto the role-specific profile endpoints, so this handler reads
+ * Core `/users/me` for `roles` and additionally fetches the TARGET role's profile (best-effort
+ * — no profile yet, e.g. a brand-new user, degrades to null status/type rather than failing
+ * the request). Guide progress is COARSE for now; the verification-level checklist is
+ * deferred (see guide.ts).
  */
 export const getOnboarding = withSession(async (req, res, core) => {
   // Validate `role` against the SAME zod enum the OpenAPI spec documents (single source of
@@ -22,7 +23,7 @@ export const getOnboarding = withSession(async (req, res, core) => {
     return sendProblem(res, 422, "role must be 'guide' or 'participant'", { code: "INVALID_ROLE" });
   }
   const role = parsed.data;
-  const me = await core.getUserinfo<Me>();
+  const me = await core.getCurrentUser<Me>();
   const progress =
     role === "guide"
       ? guideProgress(await guideApplicationStatus(core))

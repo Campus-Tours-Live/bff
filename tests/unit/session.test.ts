@@ -4,6 +4,7 @@ import {
   type SessionData,
   clearAuthTx,
   clearSession,
+  isRole,
   readAuthTx,
   readSession,
   writeAuthTx,
@@ -92,6 +93,48 @@ describe("session cookie", () => {
       const res = mockRes();
       writeSession(res as unknown as Response, { idToken: "x" });
       expect(res.cookies[0]).toMatch(new RegExp(`Max-Age=${60 * 60 * 24 * 7}`, "i"));
+    });
+
+    it("round-trips activeRole/onboardingRole (Profile Contract v2 session fields)", () => {
+      const res = mockRes();
+      const data: SessionData = {
+        idToken: "id-tok",
+        activeRole: "GUIDE",
+        onboardingRole: "PARTICIPANT",
+      };
+      writeSession(res as unknown as Response, data);
+      const req = reqFromSetCookie(res.cookies[0]);
+      expect(readSession(req)).toEqual(data);
+    });
+
+    it("activeRole/onboardingRole are absent (not undefined-serialized) on an old-shape session", () => {
+      const res = mockRes();
+      writeSession(res as unknown as Response, { idToken: "id-tok" });
+      const req = reqFromSetCookie(res.cookies[0]);
+      const session = readSession(req);
+      expect(session).not.toBeNull();
+      expect(session!.activeRole).toBeUndefined();
+      expect(session!.onboardingRole).toBeUndefined();
+    });
+  });
+
+  describe("isRole", () => {
+    it.each(["GUIDE", "PARTICIPANT"] as const)("accepts %s", (role) => {
+      expect(isRole(role)).toBe(true);
+    });
+
+    it.each([
+      "guide", // wrong case
+      "participant",
+      "ADMIN",
+      "",
+      null,
+      undefined,
+      42,
+      {},
+      ["GUIDE"],
+    ])("rejects garbage/stale value %p", (value) => {
+      expect(isRole(value)).toBe(false);
     });
   });
 

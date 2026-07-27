@@ -157,7 +157,7 @@ describe("CoreClient convenience methods", () => {
   });
 
   it.each([
-    ["getUserinfo", "/userinfo"],
+    ["getCurrentUser", "/users/me"],
     ["getGuideProfile", "/guide/profile"],
     ["getOfferings", "/guide/offerings"],
     ["getParticipantProfile", "/participant/profile"],
@@ -176,8 +176,32 @@ describe("CoreClient convenience methods", () => {
     (global.fetch as jest.Mock<typeof fetch>).mockResolvedValue(
       jsonResponse(200, { data: { id: 7 } }),
     );
-    const result = await new CoreClient("tok").getUserinfo<{ id: number }>();
+    const result = await new CoreClient("tok").getCurrentUser<{ id: number }>();
     expect(result).toEqual({ id: 7 });
+  });
+});
+
+describe("CoreClient.getRoleEligibility", () => {
+  beforeEach(() => {
+    global.fetch = jest
+      .fn<typeof fetch>()
+      .mockResolvedValue(jsonResponse(200, { data: { eligible: true, reason: null } }));
+  });
+
+  it("GETs /users/me/role-eligibility?role=<role>, URL-encoded", async () => {
+    const client = new CoreClient("tok");
+    await client.getRoleEligibility("GUIDE");
+    expect(global.fetch).toHaveBeenCalledWith(`${BASE}/users/me/role-eligibility?role=GUIDE`, {
+      headers: { Authorization: "Bearer tok", Accept: "application/json" },
+    });
+  });
+
+  it("unwraps the { data } envelope like get()", async () => {
+    const result = await new CoreClient("tok").getRoleEligibility<{
+      eligible: boolean;
+      reason: string | null;
+    }>("GUIDE");
+    expect(result).toEqual({ eligible: true, reason: null });
   });
 });
 

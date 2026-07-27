@@ -32,7 +32,6 @@ const ME: Me = {
     createdAt: "2025-03-15T00:00:00Z",
   },
   roles: ["PARTICIPANT"],
-  activeRole: "PARTICIPANT",
 } as Me;
 
 /** Full happy-path mock — all four Core calls succeed. */

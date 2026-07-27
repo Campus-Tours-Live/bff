@@ -25,8 +25,21 @@ export interface CoreWriteEnvelope<T, A> {
 export class CoreClient {
   constructor(private readonly bearer: string) {}
 
-  getUserinfo<T>(): Promise<T> {
-    return this.get<T>("/userinfo");
+  /**
+   * Core `GET /users/me` (Profile Contract v2 — replaces the old Core `/userinfo`): pure
+   * account identity + held roles, no `activeRole` (that's bff session state; composed on top
+   * by the bff-owned `GET /userinfo`, see src/api/userinfo).
+   */
+  getCurrentUser<T>(): Promise<T> {
+    return this.get<T>("/users/me");
+  }
+  /**
+   * Core `GET /users/me/role-eligibility?role=` — authoritative "can this account acquire
+   * this role" check (e.g. a PARENT participant is never GUIDE-eligible). Not yet called by
+   * any handler (wired up by CTL-97 Task 1.5-BFF2's login callback / role-switch endpoint).
+   */
+  getRoleEligibility<T>(role: string): Promise<T> {
+    return this.get<T>(`/users/me/role-eligibility?role=${encodeURIComponent(role)}`);
   }
   getGuideProfile<T>(): Promise<T> {
     return this.get<T>("/guide/profile");

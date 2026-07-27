@@ -56,6 +56,14 @@ registry.registerComponent("securitySchemes", "sessionCookie", {
 export const RoleEnum = z.enum(["guide", "participant"]);
 
 /**
+ * The two role values Core itself uses (`user_roles`, `GET /users/me` `roles`, and this
+ * session's `activeRole`) — UPPERCASE, distinct from {@link RoleEnum}'s lowercase
+ * request/response discriminator (dashboard `kind`, onboarding `?role=`). Used by the
+ * `Userinfo` schema below.
+ */
+export const CoreRoleEnum = z.enum(["GUIDE", "PARTICIPANT"]);
+
+/**
  * Guide application status (a.k.a. `guideStatus`, Core `application_status`). `DRAFT`
  * = profile started but not yet submitted; only `APPROVED` unlocks publishing.
  */
@@ -164,6 +172,56 @@ export function problem(
 export function envelope<T>(data: T): { data: T; meta: { requestId: string } } {
   return { data, meta: { requestId: REQUEST_ID_EXAMPLE } };
 }
+
+// --- GET /v1/userinfo (bff-owned aggregation) ---
+
+/** The `user` block of Core `GET /users/me`, forwarded verbatim (Profile Contract v2). */
+export const UserSummarySchema = z.object({
+  id: z.string().openapi({ description: "Account id.", example: "u1" }),
+  firstName: z.string().nullable().openapi({ description: "First name.", example: "Gina" }),
+  lastName: z.string().nullable().openapi({ description: "Last name.", example: "Guide" }),
+  displayName: z
+    .string()
+    .nullable()
+    .openapi({ description: "Display name.", example: "Gina Guide" }),
+  email: z
+    .string()
+    .nullable()
+    .openapi({ description: "Account email.", example: "gina@example.com" }),
+  accountStatus: z
+    .string()
+    .nullable()
+    .openapi({ description: "Account lifecycle status.", example: "ACTIVE" }),
+  ageBand: z.string().nullable().openapi({ description: "Age band.", example: "ADULT" }),
+  createdAt: z.string().openapi({
+    description: "Account creation timestamp, ISO-8601 UTC.",
+    example: "2025-03-15T00:00:00.000Z",
+  }),
+});
+
+/**
+ * `GET /v1/userinfo` response `data` (src/api/userinfo/userinfo.handler.ts) — the bootstrap
+ * read the frontend calls on every page load. Composes Core `GET /users/me` (`user`, `roles`)
+ * with THIS session's `activeRole` (Profile Contract v2: session state, never a Core value).
+ */
+export const Userinfo = registry.register(
+  "Userinfo",
+  z
+    .object({
+      user: UserSummarySchema.openapi({ description: "Signed-in account identity." }),
+      roles: z.array(CoreRoleEnum).openapi({ description: "Roles the account holds." }),
+      activeRole: CoreRoleEnum.nullable().openapi({
+        description:
+          "The role this bff session currently has active; null when none is chosen yet, or " +
+          "the previously-active role is no longer held (re-validated against `roles` on " +
+          "every call).",
+        example: "GUIDE",
+      }),
+    })
+    .openapi("Userinfo", {
+      description: "Signed-in identity, held roles, and this session's active role.",
+    }),
+);
 
 // --- Domain sub-schemas (forwarded from Core; field names per Contract A) ---
 
@@ -513,6 +571,21 @@ export const SessionStatus = registry.register(
 );
 
 // --- Example bodies ---
+
+export const userinfoExample = envelope({
+  user: {
+    id: "u1",
+    firstName: "Gina",
+    lastName: "Guide",
+    displayName: "Gina Guide",
+    email: "gina@example.com",
+    accountStatus: "ACTIVE",
+    ageBand: "ADULT",
+    createdAt: "2025-03-15T00:00:00.000Z",
+  },
+  roles: ["GUIDE"],
+  activeRole: "GUIDE",
+});
 
 export const guideDashboardExample = envelope({
   kind: "guide",
@@ -1211,6 +1284,17 @@ export function envelopeOf<T extends z.ZodTypeAny>(
 ): z.ZodObject<{ data: T; meta: z.ZodObject<{ requestId: z.ZodString }> }> {
   return z.object({ data, meta: z.object({ requestId: z.string() }) });
 }
+
+/** GET /v1/userinfo `data` — `user`/`roles` forwarded from Core (loose); `activeRole` is
+ *  BFF-derived from the session (strict — see src/api/userinfo/userinfo.handler.ts). */
+export const UserinfoDataSchema = z.object({
+  user: LooseObject, // forwarded from Core — opaque
+  roles: z.array(z.string()), // forwarded from Core — BFF owns "it's an array of strings"
+  activeRole: z.enum(["GUIDE", "PARTICIPANT"]).nullable(), // BFF-derived (session ∩ Core roles)
+});
+
+/** Full enveloped GET /v1/userinfo response contract. */
+export const EnvelopedUserinfoSchema = envelopeOf(UserinfoDataSchema);
 
 /** GET /v1/dashboard guide `data` — strict on `kind`/`canPublish`/`offerings` (BFF-owned). */
 export const GuideDashboardDataSchema = z.object({

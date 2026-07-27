@@ -1,10 +1,15 @@
 import { jest } from "@jest/globals";
 import type { Request, Response } from "express";
 
-const readSession =
-  jest.fn<
-    (...args: unknown[]) => { idToken?: string; refreshToken?: string; expiresAt?: number } | null
-  >();
+const readSession = jest.fn<
+  (...args: unknown[]) => {
+    idToken?: string;
+    refreshToken?: string;
+    expiresAt?: number;
+    activeRole?: string;
+    onboardingRole?: string;
+  } | null
+>();
 const writeSession = jest.fn<(...args: unknown[]) => void>();
 const refreshTokens = jest.fn<
   (...args: unknown[]) => Promise<{
@@ -99,6 +104,32 @@ describe("resolveBearer / bearerForSession", () => {
       accessToken: "access-new",
       refreshToken: "refresh-new",
       expiresAt: NOW + 3600 * 1000,
+    });
+  });
+
+  it("preserves activeRole/onboardingRole across a silent refresh (Profile Contract v2)", async () => {
+    readSession.mockReturnValue({
+      idToken: "id-old",
+      refreshToken: "refresh-old",
+      expiresAt: NOW + 30_000,
+      activeRole: "GUIDE",
+      onboardingRole: "PARTICIPANT",
+    });
+    refreshTokens.mockResolvedValue({
+      id_token: "id-new",
+      access_token: "access-new",
+      refresh_token: "refresh-new",
+      expires_in: 3600,
+    });
+
+    await expect(resolveBearer(req, res)).resolves.toBe("id-new");
+    expect(writeSession).toHaveBeenCalledWith(res, {
+      idToken: "id-new",
+      accessToken: "access-new",
+      refreshToken: "refresh-new",
+      expiresAt: NOW + 3600 * 1000,
+      activeRole: "GUIDE",
+      onboardingRole: "PARTICIPANT",
     });
   });
 

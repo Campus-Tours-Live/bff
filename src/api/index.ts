@@ -5,6 +5,7 @@ import { bookingsRoutes } from "./bookings/routes.js";
 import { cartRoutes } from "./cart/routes.js";
 import { availabilityRoutes } from "./availability/routes.js";
 import { publicTourRoutes } from "./public-tours/routes.js";
+import { userinfoRoutes } from "./userinfo/routes.js";
 
 /**
  * BFF aggregation API — front-end-shaped composites the Core does not expose directly.
@@ -16,6 +17,7 @@ export const apiRouter: Router = Router();
 // Deliberately public, exact GET-only discovery routes. They must be registered before the
 // authenticated catch-all core proxy in app.ts.
 apiRouter.use(publicTourRoutes);
+apiRouter.use(userinfoRoutes);
 apiRouter.use(dashboardRoutes);
 apiRouter.use(onboardingRoutes);
 apiRouter.use(bookingsRoutes);

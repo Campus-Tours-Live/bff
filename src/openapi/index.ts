@@ -25,11 +25,13 @@ import {
   Dashboard,
   Progress,
   SessionStatus,
+  Userinfo,
   problem,
   guideDashboardExample,
   participantDashboardExample,
   guideProgressExample,
   participantProgressExample,
+  userinfoExample,
   envelope,
   writeEnvelope,
   BookingResponseSchema,
@@ -241,6 +243,42 @@ apiRoute({
   },
 });
 
+// GET /v1/userinfo
+apiRoute({
+  method: "get",
+  path: "/v1/userinfo",
+  tags: ["Session"],
+  summary: "Signed-in identity, held roles, and the active role",
+  description:
+    "Bootstrap/session read the frontend calls on every page load. BFF-OWNED aggregation " +
+    "(Profile Contract v2) — no longer a transparent Core proxy: it composes Core account " +
+    "identity + held roles (`GET /users/me`) with THIS bff session's `activeRole`, which " +
+    "Core does not know (it's per-session state, never a DB value; the Google id_token " +
+    "carries no app role either). `activeRole` is re-validated against the roles Core just " +
+    "returned on every call — a role the account no longer holds (revoked/suspended), or any " +
+    "stale/invalid stored value, is reported as `null`, and only THAT case clears it from the " +
+    "session and persists the change; an ordinary call does not write the session (it must " +
+    "not extend the cookie's TTL on every page load). `onboardingRole` (in-progress role " +
+    "acquisition) is deliberately never surfaced here — it is internal routing state, not " +
+    "part of the bootstrap contract.",
+  responses: {
+    200: enveloped(Userinfo, {
+      description: "Identity + roles + active role, wrapped in the standard success envelope.",
+      examples: {
+        activeRole: { summary: "Session with an active role", value: userinfoExample },
+        noActiveRole: {
+          summary: "Signed in, no active role chosen yet",
+          value: envelope({ ...userinfoExample.data, activeRole: null }),
+        },
+      },
+    }),
+    401: problem401(
+      "No/expired session or a Core 401 (also sets `Auth-Required: reauthenticate`).",
+    ),
+    502: problem502("The Core API was unreachable or returned a 5xx."),
+  },
+});
+
 // GET /v1/dashboard
 apiRoute({
   method: "get",
@@ -249,8 +287,9 @@ apiRoute({
   summary: "Role-shaped signed-in home",
   description:
     "The signed-in home, aggregated from several Core reads and discriminated by `kind` " +
-    "(`guide` | `participant`). The active role is read authoritatively from Core `/userinfo` " +
-    "(the id_token carries no app role); guide and participant share this one endpoint. The " +
+    "(`guide` | `participant`). The active role is read from THIS bff session (Profile " +
+    "Contract v2 — `activeRole` is per-session state, never a Core value or an id_token " +
+    "claim); guide and participant share this one endpoint. The " +
     "guide variant fans out profile + offerings and adds a computed `canPublish` gate " +
     "(true only when APPROVED); the participant variant fans out profile + next tour + " +
     "upcoming bookings + pending actions (each best-effort). The frontend calls this to render " +
@@ -279,8 +318,8 @@ apiRoute({
   tags: ["Onboarding"],
   summary: "Onboarding progress for a target role",
   description:
-    "Progress for the TARGET role (the `role` query param), derived from Core `/userinfo` alone " +
-    "(no `/guide/profile` read). Keyed by the target role, NOT the active role — a participant " +
+    "Progress for the TARGET role (the `role` query param), derived from Core `GET /users/me` " +
+    "alone (no `/guide/profile` read). Keyed by the target role, NOT the active role — a participant " +
     "applying to be a guide still has `activeRole = PARTICIPANT`. Guide progress is coarse for " +
     "now (the field-level verification checklist is deferred). The frontend calls this to render " +
     "the onboarding checklist for the role being set up.\n\n" +
@@ -1294,6 +1333,11 @@ export const openapiSpec = generator.generateDocument({
   servers: [{ url: "/" }],
   tags: [
     { name: "Auth", description: "Google sign-in session lifecycle (`/auth/*`)." },
+    {
+      name: "Session",
+      description:
+        "Bootstrap identity/roles/active-role read the frontend calls on every page load.",
+    },
     { name: "Dashboard", description: "Role-shaped signed-in home aggregate." },
     { name: "Onboarding", description: "Per-role onboarding progress aggregate." },
     { name: "Tours", description: "Anonymous marketplace tour discovery." },

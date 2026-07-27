@@ -4,8 +4,9 @@ import type { Progress } from "./types.js";
 /**
  * Participant onboarding progress — trivial by design (a single-step PATCH, no derived
  * multi-step state). Completion is simply "holds the PARTICIPANT role" — the
- * authoritative signal, read from /userinfo `roles` (never from activeRole). `type` is
- * read from the participant profile (Profile Contract v2 — /userinfo no longer carries
+ * authoritative signal, read from Core `/users/me` `roles` (never from activeRole, which is
+ * bff session state and irrelevant here). `type` is read from the participant profile
+ * (Profile Contract v2 — neither `/users/me` nor the bff `/userinfo` carries
  * `participantType`; null when there's no participant profile yet). Same shape as the
  * guide branch so the single front-end entry can render both uniformly.
  */
