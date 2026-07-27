@@ -26,7 +26,7 @@ describe("participantProgress", () => {
       complete: true,
       started: true,
       canSubmit: false,
-      applicationStatus: null,
+      guideStatus: null,
       verificationStatus: null,
     });
   });
@@ -41,9 +41,9 @@ describe("participantProgress", () => {
     expect(p).toMatchObject({ complete: false, started: false, canSubmit: true });
   });
 
-  it("applicationStatus and verificationStatus are null", () => {
+  it("guideStatus and verificationStatus are null", () => {
     const p = participantProgress(makeMe({ roles: ["PARTICIPANT"] }), null);
-    expect(p.applicationStatus).toBeNull();
+    expect(p.guideStatus).toBeNull();
     expect(p.verificationStatus).toBeNull();
   });
 

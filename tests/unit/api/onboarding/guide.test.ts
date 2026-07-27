@@ -1,14 +1,14 @@
 import { guideProgress } from "@/api/onboarding/guide.js";
 
 describe("guideProgress", () => {
-  it("null applicationStatus (no guide profile yet) → not started, not complete, canSubmit true", () => {
+  it("null guideStatus (no guide profile yet) → not started, not complete, canSubmit true", () => {
     const p = guideProgress(null);
     expect(p).toMatchObject({
       role: "guide",
       started: false,
       complete: false,
       canSubmit: true,
-      applicationStatus: null,
+      guideStatus: null,
       verificationStatus: null,
     });
   });
@@ -21,13 +21,13 @@ describe("guideProgress", () => {
         started: true,
         complete: true,
         canSubmit: false,
-        applicationStatus: status,
+        guideStatus: status,
         verificationStatus: null,
       });
     },
   );
 
-  it("an unrecognized applicationStatus value is treated as started but not submitted", () => {
+  it("an unrecognized guideStatus value is treated as started but not submitted", () => {
     // Defensive: there is no DRAFT value anymore under {PENDING,VERIFIED,REJECTED}, but the
     // positive SUBMITTED_STATUSES check (rather than `!== "DRAFT"`) means a stale/unexpected
     // value doesn't get incorrectly treated as "submitted".
@@ -36,7 +36,7 @@ describe("guideProgress", () => {
       started: true,
       complete: false,
       canSubmit: true,
-      applicationStatus: "SOME_UNKNOWN_STATUS",
+      guideStatus: "SOME_UNKNOWN_STATUS",
       verificationStatus: null,
     });
   });

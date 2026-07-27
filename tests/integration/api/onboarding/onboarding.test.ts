@@ -43,7 +43,7 @@ describe("GET /v1/onboarding", () => {
     expect(res.body.data.role).toBe("guide");
     expect(res.body.data.started).toBe(true);
     expect(res.body.data.complete).toBe(true); // PENDING is a submitted status → complete
-    expect(res.body.data.applicationStatus).toBe("PENDING");
+    expect(res.body.data.guideStatus).toBe("PENDING");
     expect(res.body.data.verificationStatus).toBeNull();
     // Response-shape contract: body ↔ documented Progress envelope schema.
     expect(EnvelopedProgressSchema.safeParse(res.body).success).toBe(true);
@@ -127,7 +127,7 @@ describe("GET /v1/onboarding", () => {
     expect(res.body.data.started).toBe(false);
     expect(res.body.data.complete).toBe(false);
     expect(res.body.data.canSubmit).toBe(true);
-    expect(res.body.data.applicationStatus).toBeNull();
+    expect(res.body.data.guideStatus).toBeNull();
     expect(EnvelopedProgressSchema.safeParse(res.body).success).toBe(true);
   });
 

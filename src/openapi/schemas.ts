@@ -620,8 +620,8 @@ export const Progress = registry.register(
           "Whether the user may submit/advance now (coarse for guides — field gating deferred).",
         example: true,
       }),
-      applicationStatus: GuideStatusEnum.nullable().openapi({
-        description: "Guide application status; always null for participants.",
+      guideStatus: GuideStatusEnum.nullable().openapi({
+        description: "Guide status; always null for participants.",
         example: "PENDING",
       }),
       verificationStatus: VerificationStatusEnum.nullable().openapi({
@@ -741,7 +741,7 @@ export const guideProgressExample = envelope({
   started: true,
   complete: false,
   canSubmit: true,
-  applicationStatus: "PENDING",
+  guideStatus: "PENDING",
   verificationStatus: null,
   steps: [{ key: "submitted", label: "Application submitted", done: false }],
 });
@@ -751,7 +751,7 @@ export const participantProgressExample = envelope({
   started: true,
   complete: true,
   canSubmit: false,
-  applicationStatus: null,
+  guideStatus: null,
   verificationStatus: null,
   steps: [{ key: "profile", label: "Your details", done: true }],
 });
@@ -1443,7 +1443,7 @@ export const ProgressDataSchema = z.object({
   started: z.boolean(),
   complete: z.boolean(),
   canSubmit: z.boolean(),
-  applicationStatus: z.string().nullable(), // forwarded from Core — value not constrained here
+  guideStatus: z.string().nullable(), // forwarded from Core — value not constrained here
   verificationStatus: z.string().nullable(), // deferred (currently always null)
   steps: z.array(z.object({ key: z.string(), label: z.string(), done: z.boolean() })),
 });

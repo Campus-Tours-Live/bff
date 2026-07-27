@@ -17,7 +17,7 @@ export function participantProgress(me: Me, participantType: string | null): Pro
     started: complete || participantType !== null,
     complete,
     canSubmit: !complete,
-    applicationStatus: null,
+    guideStatus: null,
     verificationStatus: null,
     steps: [{ key: "profile", label: "Your details", done: complete }],
   };

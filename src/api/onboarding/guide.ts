@@ -25,7 +25,7 @@ export function guideProgress(guideStatus: string | null): Progress {
     started: status !== null,
     complete: submitted,
     canSubmit: !submitted, // coarse — field-level gating returns with /guide/profile
-    applicationStatus: status,
+    guideStatus: status,
     verificationStatus: null, // deferred
     steps: [{ key: "submitted", label: "Application submitted", done: submitted }],
   };
