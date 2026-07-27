@@ -12,8 +12,8 @@ import { GuideDashboardDataSchema } from "../../openapi/schemas.js";
  * Guide workspace: profile (required — throws → mapped by withSession) + offerings
  * (best-effort — degrades to an empty list) + `canPublish`, a computed convenience
  * field mirroring the Core's publish gate: only a PUBLISHABLE_STATUS guide may publish
- * an offering. `guideStatus` is read from the fetched guide profile's
- * `applicationStatus` (Profile Contract v2 — /userinfo no longer carries it). The two
+ * an offering. The output `guideStatus` is read from the fetched guide profile's own
+ * `guideStatus` field (Profile Contract v2 — /userinfo no longer carries it). The two
  * Core reads are fanned out in parallel to cut latency.
  */
 export async function guideDashboard(res: Response, core: CoreClient, me: Me): Promise<void> {
@@ -21,7 +21,7 @@ export async function guideDashboard(res: Response, core: CoreClient, me: Me): P
     core.getGuideProfile<Json>(),
     core.getOfferings<Json[]>().catch(() => [] as Json[]),
   ]);
-  const guideStatus = (guide.applicationStatus as string | null | undefined) ?? null;
+  const guideStatus = (guide.guideStatus as string | null | undefined) ?? null;
   sendData(
     res,
     {

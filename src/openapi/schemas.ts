@@ -72,13 +72,13 @@ export const CoreRoleEnum = z.enum(["GUIDE", "PARTICIPANT"]);
 export const HeldRoleEnum = z.enum(["GUIDE", "PARTICIPANT", "ADMIN", "SUPPORT"]);
 
 /**
- * Guide application status (a.k.a. `guideStatus`, Core `application_status`). Profile
+ * Guide application status (`GuideProfile.guideStatus`, forwarded from Core). Profile
  * Contract v2 Phase 4 (verification-driven lifecycle): `PENDING` = submitted, awaiting
  * verification; only `VERIFIED` unlocks publishing. There is no longer a `DRAFT` value —
  * a guide profile either doesn't exist yet (null) or has been submitted (`PENDING` at
  * minimum).
  */
-export const ApplicationStatusEnum = z.enum(["PENDING", "VERIFIED", "REJECTED"]);
+export const GuideStatusEnum = z.enum(["PENDING", "VERIFIED", "REJECTED"]);
 
 /** Guide identity/verification status (deferred in onboarding — often null for now). */
 export const VerificationStatusEnum = z.enum(["PENDING", "VERIFIED", "REJECTED"]);
@@ -346,7 +346,7 @@ export const GuideProfile = registry.register(
   "GuideProfile",
   z
     .object({
-      applicationStatus: ApplicationStatusEnum.nullable().optional().openapi({
+      guideStatus: GuideStatusEnum.nullable().optional().openapi({
         description: "Guide application/review status (null if no guide profile yet).",
         example: "VERIFIED",
       }),
@@ -362,11 +362,11 @@ export const GuideProfile = registry.register(
         description: "Free-text guide bio.",
         example: "Sophomore who loves showing off the maker space.",
       }),
-      languages: z
+      spokenLanguages: z
         .array(z.string())
         .optional()
         .openapi({ description: "Languages the guide can tour in.", example: ["en", "es"] }),
-      specialties: z
+      tourTopics: z
         .array(z.string())
         .optional()
         .openapi({ description: "Tour focus areas.", example: ["engineering", "campus-life"] }),
@@ -383,12 +383,12 @@ export const ParticipantProfile = registry.register(
         description: "Whether the participant is the student or a booking guardian.",
         example: "STUDENT",
       }),
-      // Loose (not ApplicationStatusEnum), kept that way even though Profile Contract v2
-      // Phase 4 made the participant applicationStatus values the SAME set as the guide
-      // ApplicationStatusEnum ({PENDING,VERIFIED,REJECTED}): this embed still forwards
+      // Loose (not GuideStatusEnum), kept that way even though Profile Contract v2
+      // Phase 4 made the participant participantStatus values the SAME set as the guide
+      // GuideStatusEnum ({PENDING,VERIFIED,REJECTED}): this embed still forwards
       // Core's value as-is rather than sharing the enum reference, so a future divergence
       // between the two status vocabularies doesn't require touching this schema.
-      applicationStatus: z.string().nullable().optional().openapi({
+      participantStatus: z.string().nullable().optional().openapi({
         description: "Participant application/review status (null if not yet set).",
         example: "VERIFIED",
       }),
@@ -500,8 +500,8 @@ const GuideDashboard = z
       .literal("guide")
       .openapi({ description: "Discriminator — always `guide` here.", example: "guide" }),
     guide: GuideProfile,
-    guideStatus: ApplicationStatusEnum.nullable().openapi({
-      description: "The guide's application status (echo of `guide.applicationStatus`).",
+    guideStatus: GuideStatusEnum.nullable().openapi({
+      description: "The guide's application status (echo of `guide.guideStatus`).",
       example: "VERIFIED",
     }),
     canPublish: z.boolean().openapi({
@@ -620,7 +620,7 @@ export const Progress = registry.register(
           "Whether the user may submit/advance now (coarse for guides — field gating deferred).",
         example: true,
       }),
-      applicationStatus: ApplicationStatusEnum.nullable().openapi({
+      applicationStatus: GuideStatusEnum.nullable().openapi({
         description: "Guide application status; always null for participants.",
         example: "PENDING",
       }),
@@ -683,7 +683,7 @@ export const onboardingRoleExample = envelope({ onboardingRole: "GUIDE" });
 export const guideDashboardExample = envelope({
   kind: "guide",
   guide: {
-    applicationStatus: "VERIFIED",
+    guideStatus: "VERIFIED",
     universities: [
       {
         universityId: "uni_mit",
@@ -697,8 +697,8 @@ export const guideDashboardExample = envelope({
       },
     ],
     bio: "Sophomore who loves showing off the maker space.",
-    languages: ["en", "es"],
-    specialties: ["engineering", "campus-life"],
+    spokenLanguages: ["en", "es"],
+    tourTopics: ["engineering", "campus-life"],
   },
   guideStatus: "VERIFIED",
   canPublish: true,
@@ -723,7 +723,7 @@ export const participantDashboardExample = envelope({
   kind: "participant",
   participant: {
     type: "STUDENT",
-    applicationStatus: null,
+    participantStatus: null,
     gradeLevel: "12",
     intendedMajor: "Biology",
     topicsOfInterest: ["dorm-life", "research"],

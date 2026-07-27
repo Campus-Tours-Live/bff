@@ -142,7 +142,7 @@ describe("Dashboard data schemas tolerate a null createdAt (Core sends null, not
 describe("GuideProfile (CTL-97 universities[])", () => {
   it("accepts the universities[] shape with per-school degree + entryYear + verificationStatus", () => {
     const result = GuideProfile.safeParse({
-      applicationStatus: "VERIFIED",
+      guideStatus: "VERIFIED",
       universities: [
         {
           universityId: "uni_mit",
@@ -156,8 +156,8 @@ describe("GuideProfile (CTL-97 universities[])", () => {
         },
       ],
       bio: "Sophomore who loves showing off the maker space.",
-      languages: ["en", "es"],
-      specialties: ["engineering", "campus-life"],
+      spokenLanguages: ["en", "es"],
+      tourTopics: ["engineering", "campus-life"],
     });
     expect(result.success).toBe(true);
   });
@@ -181,7 +181,7 @@ describe("GuideProfile (CTL-97 universities[])", () => {
 
   it("rejects a leaked schoolEmail on the top-level profile (strict parse)", () => {
     const result = GuideProfile.strict().safeParse({
-      applicationStatus: "VERIFIED",
+      guideStatus: "VERIFIED",
       universities: [],
       schoolEmail: "guide@mit.edu",
     });

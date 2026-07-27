@@ -34,7 +34,7 @@ describe("GET /v1/onboarding", () => {
     cookie = mintSessionCookie({ onboardingRole: "GUIDE" });
     mockCoreByPath({
       "/users/me": usersMeOk(["PARTICIPANT"]),
-      "/guide/profile": coreOk({ applicationStatus: "PENDING" }),
+      "/guide/profile": coreOk({ guideStatus: "PENDING" }),
     });
 
     const res = await request(app).get("/v1/onboarding?role=guide").set("Cookie", cookie);
@@ -134,7 +134,7 @@ describe("GET /v1/onboarding", () => {
   it("role accepted case-insensitively (GUIDE)", async () => {
     mockCoreByPath({
       "/users/me": usersMeOk(["GUIDE"]),
-      "/guide/profile": coreOk({ applicationStatus: "VERIFIED" }),
+      "/guide/profile": coreOk({ guideStatus: "VERIFIED" }),
     });
 
     const res = await request(app).get("/v1/onboarding?role=GUIDE").set("Cookie", cookie);
@@ -209,7 +209,7 @@ describe("GET /v1/onboarding — onboarding guard (CTL-97)", () => {
     const cookie = mintSessionCookie();
     mockCoreByPath({
       "/users/me": usersMeOk(["GUIDE"]),
-      "/guide/profile": coreOk({ applicationStatus: "VERIFIED" }),
+      "/guide/profile": coreOk({ guideStatus: "VERIFIED" }),
     });
 
     const res = await request(app).get("/v1/onboarding?role=guide").set("Cookie", cookie);

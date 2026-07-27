@@ -42,8 +42,8 @@ function makeMe(over: Partial<Me> = {}): Me {
 }
 
 describe("guideDashboard", () => {
-  it("sends a guide envelope with profile, status (from the profile's applicationStatus), canPublish and offerings", async () => {
-    const guide: Json = { id: "g1", displayName: "Ana", applicationStatus: "VERIFIED" };
+  it("sends a guide envelope with profile, status (from the profile's guideStatus), canPublish and offerings", async () => {
+    const guide: Json = { id: "g1", displayName: "Ana", guideStatus: "VERIFIED" };
     const offerings: Json[] = [{ id: "o1" }, { id: "o2" }];
     const core = {
       getGuideProfile: jest.fn<() => Promise<unknown>>().mockResolvedValue(guide),
@@ -64,11 +64,11 @@ describe("guideDashboard", () => {
     });
   });
 
-  it("canPublish is false when the profile's applicationStatus is not VERIFIED", async () => {
+  it("canPublish is false when the profile's guideStatus is not VERIFIED", async () => {
     const core = {
       getGuideProfile: jest
         .fn<() => Promise<unknown>>()
-        .mockResolvedValue({ id: "g1", applicationStatus: "PENDING" }),
+        .mockResolvedValue({ id: "g1", guideStatus: "PENDING" }),
       getOfferings: jest.fn<() => Promise<unknown>>().mockResolvedValue([]),
     } as unknown as CoreClient;
 
@@ -78,7 +78,7 @@ describe("guideDashboard", () => {
     expect(sentData(res)).toMatchObject({ canPublish: false, guideStatus: "PENDING" });
   });
 
-  it("guideStatus is null when the profile has no applicationStatus", async () => {
+  it("guideStatus is null when the profile has no guideStatus", async () => {
     const core = {
       getGuideProfile: jest.fn<() => Promise<unknown>>().mockResolvedValue({ id: "g1" }),
       getOfferings: jest.fn<() => Promise<unknown>>().mockResolvedValue([]),

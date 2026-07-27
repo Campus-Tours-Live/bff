@@ -52,16 +52,16 @@ export const getOnboarding = withSession(async (req, res, core) => {
 
   const progress =
     role === "guide"
-      ? guideProgress(await guideApplicationStatus(core))
+      ? guideProgress(await guideStatusOf(core))
       : participantProgress(me, await participantTypeOf(core));
   sendData(res, progress, ProgressDataSchema);
 });
 
 /** Best-effort: no guide profile yet (e.g. brand-new user) degrades to null, same as
  *  the old /userinfo-derived "null guideStatus" case. */
-async function guideApplicationStatus(core: CoreClient): Promise<string | null> {
+async function guideStatusOf(core: CoreClient): Promise<string | null> {
   const profile = await core.getGuideProfile<Json>().catch(() => null);
-  return (profile?.applicationStatus as string | null | undefined) ?? null;
+  return (profile?.guideStatus as string | null | undefined) ?? null;
 }
 
 /** Best-effort: no participant profile yet degrades to null, same as the old

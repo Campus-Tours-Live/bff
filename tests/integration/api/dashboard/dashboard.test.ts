@@ -35,7 +35,7 @@ describe("GET /v1/dashboard", () => {
       "/guide/profile": coreOk({
         id: "g1",
         displayName: "Gina Guide",
-        applicationStatus: "VERIFIED",
+        guideStatus: "VERIFIED",
       }),
       "/guide/offerings": coreOk([{ id: "o1", title: "Campus Walk" }]),
     });
@@ -49,7 +49,7 @@ describe("GET /v1/dashboard", () => {
     expect(res.body.data.guide).toEqual({
       id: "g1",
       displayName: "Gina Guide",
-      applicationStatus: "VERIFIED",
+      guideStatus: "VERIFIED",
     });
     expect(res.body.data.offerings).toEqual([{ id: "o1", title: "Campus Walk" }]);
     // Response-shape contract: body ↔ documented envelope schema (loose on Core-forwarded
@@ -61,7 +61,7 @@ describe("GET /v1/dashboard", () => {
     cookie = mintSessionCookie({ activeRole: "GUIDE" });
     mockCoreByPath({
       "/users/me": usersMeOk(["GUIDE"]),
-      "/guide/profile": coreOk({ id: "g1", applicationStatus: "PENDING" }),
+      "/guide/profile": coreOk({ id: "g1", guideStatus: "PENDING" }),
       "/guide/offerings": coreOk([]),
     });
 
@@ -128,7 +128,7 @@ describe("GET /v1/dashboard", () => {
     cookie = mintSessionCookie({ activeRole: "GUIDE" });
     mockCoreByPath({
       "/users/me": usersMeOk(["GUIDE"]),
-      "/guide/profile": coreOk({ id: "g1", applicationStatus: "VERIFIED" }),
+      "/guide/profile": coreOk({ id: "g1", guideStatus: "VERIFIED" }),
       "/guide/offerings": coreErr(500),
     });
 
