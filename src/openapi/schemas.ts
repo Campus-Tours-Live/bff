@@ -64,6 +64,14 @@ export const RoleEnum = z.enum(["guide", "participant"]);
 export const CoreRoleEnum = z.enum(["GUIDE", "PARTICIPANT"]);
 
 /**
+ * Every role value an account can hold (Core `user_roles`), including the staff-only roles
+ * (`ADMIN`, `SUPPORT`) that only ever appear in `Userinfo.roles` — never a switchable/onboardable
+ * `activeRole`, `onboardingRole`, or switch/onboarding request `role` (those stay restricted to
+ * {@link CoreRoleEnum}: you can't switch to or onboard into a staff role).
+ */
+export const HeldRoleEnum = z.enum(["GUIDE", "PARTICIPANT", "ADMIN", "SUPPORT"]);
+
+/**
  * Guide application status (a.k.a. `guideStatus`, Core `application_status`). `DRAFT`
  * = profile started but not yet submitted; only `APPROVED` unlocks publishing.
  */
@@ -209,7 +217,7 @@ export const Userinfo = registry.register(
   z
     .object({
       user: UserSummarySchema.openapi({ description: "Signed-in account identity." }),
-      roles: z.array(CoreRoleEnum).openapi({ description: "Roles the account holds." }),
+      roles: z.array(HeldRoleEnum).openapi({ description: "Roles the account holds." }),
       activeRole: CoreRoleEnum.nullable().openapi({
         description:
           "The role this bff session currently has active; null when none is chosen yet, or " +

@@ -253,8 +253,13 @@ authRouter.get("/callback", async (req, res) => {
       clearAuthTx(res);
       return sendProblem(res, 502, "Account resolution failed", { code: "RESOLVE_FAILED" });
     }
-    if (!eligibility.eligible && eligibility.reason === "PARENT_CANNOT_BECOME_GUIDE") {
-      dest = "/signup/role?error=parent_no_guide";
+    if (!eligibility.eligible) {
+      // Any ineligible reason blocks — PARENT→guide gets its specific error destination;
+      // every other reason (e.g. ROLE_ALREADY_HELD) falls back to the generic role-select page.
+      dest =
+        eligibility.reason === "PARENT_CANNOT_BECOME_GUIDE"
+          ? "/signup/role?error=parent_no_guide"
+          : "/signup/role";
       blocked = true;
     } else {
       session.onboardingRole = requestedRole;

@@ -533,6 +533,32 @@ describe("GET /auth/callback — blocked vs bare-account branches", () => {
     expect(isCleared(cookieNamed(res, "ctl_auth_tx"))).toBe(true);
   });
 
+  it("blocked, non-PARENT ineligible reason → generic /signup/role AND NO session (cleared)", async () => {
+    // The eligibility gate must be generic (any !eligible blocks), not PARENT-reason-specific —
+    // otherwise a reason like ROLE_ALREADY_HELD would silently fall through into onboarding.
+    coreNext = {
+      kind: "resolve",
+      value: coreResponse(200, { roles: ["PARTICIPANT"] }),
+    };
+    roleEligibilityNext = roleEligibilityResponse(200, {
+      eligible: false,
+      reason: "ROLE_ALREADY_HELD",
+    });
+
+    const res = await request(app)
+      .get("/auth/callback")
+      .query({ code: "abc", state: STATE })
+      .set("Cookie", txCookie({ intent: "signup", returnTo: "/onboarding/guide" }));
+
+    expect(res.status).toBe(302);
+    expect(res.headers.location).toBe("http://localhost:3001/signup/role");
+    const sessCookie = cookieNamed(res, "ctl_sess");
+    // clearSession path: ctl_sess present but cleared (maxAge 0), never established.
+    expect(isCleared(sessCookie)).toBe(true);
+    expect(isCleared(cookieNamed(res, "ctl_auth_tx"))).toBe(true);
+    expect(sessionFrom(sessCookie)?.onboardingRole).toBeUndefined();
+  });
+
   it("non-parent participant → /onboarding/guide is NOT blocked (role-eligibility says eligible)", async () => {
     coreNext = {
       kind: "resolve",
