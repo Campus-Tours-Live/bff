@@ -60,14 +60,14 @@ function webUrl(path: string): string {
   return new URL(path, config.webBaseUrl).toString();
 }
 
-/** Consumer home after auth. Both roles share /dashboard; the active role decides
+/** Consumer home after auth. Both roles share /dashboard; the current role decides
  *  the view client-side. Single source for the path. */
 const CONSUMER_HOME = "/dashboard";
 
 /**
  * Where to land after auth when there is NO requested role to reason about (a role-agnostic
  * entry, or one already resolved to a role-specific destination by the callback). Pure — the
- * session mutation (activeRole/onboardingRole) lives in the callback, not here.
+ * session mutation (currentRole/onboardingRole) lives in the callback, not here.
  *   - holds any role     → the specific allow-listed page the user came from (safeRt), or
  *                          CONSUMER_HOME when returnTo was absent/default
  *   - holds no role yet  → role selection with a "continue signup" notice (not a rejection —
@@ -210,7 +210,7 @@ authRouter.get("/callback", async (req, res) => {
   }
 
   // Profile Contract v2: Core's /session response is pure identity + held roles, no
-  // `activeRole` (that's bff session state, decided below) and no `participantType`
+  // `currentRole` (that's bff session state, decided below) and no `participantType`
   // (PARENT status is sourced from Core's role-eligibility check instead, only when needed).
   const resolved = (await resolve.json().catch(() => null)) as {
     data?: { roles?: string[] };
@@ -240,7 +240,7 @@ authRouter.get("/callback", async (req, res) => {
 
   if (requestedRole && roles.includes(requestedRole)) {
     // Holds the requested role already — effectively a login into that role (signin or signup).
-    session.activeRole = requestedRole;
+    session.currentRole = requestedRole;
     delete session.onboardingRole;
     dest = CONSUMER_HOME;
   } else if (requestedRole && tx.intent === "signup") {
@@ -270,11 +270,11 @@ authRouter.get("/callback", async (req, res) => {
     delete session.onboardingRole;
     dest = "/signup/role";
   } else {
-    // No requested role (a role-agnostic entry). A single held role initialises activeRole
+    // No requested role (a role-agnostic entry). A single held role initialises currentRole
     // HERE, explicitly — not silently on the next /userinfo read. Zero or multiple held roles
-    // leave activeRole unset (frontend shows role selection on `activeRole === null`).
+    // leave currentRole unset (frontend shows role selection on `currentRole === null`).
     const onlyRole = roles.length === 1 ? roles[0] : undefined;
-    if (isRole(onlyRole)) session.activeRole = onlyRole;
+    if (isRole(onlyRole)) session.currentRole = onlyRole;
     dest = landingFor(tx.returnTo, roles);
   }
 

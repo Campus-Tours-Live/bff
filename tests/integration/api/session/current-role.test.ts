@@ -2,7 +2,7 @@ import request from "supertest";
 import { app } from "@/app.js";
 import { readSession } from "@/session.js";
 import { coreErr, coreOk, mintSessionCookie, mockCoreByPath } from "../../_helpers.js";
-import { EnvelopedActiveRoleSchema } from "@/openapi/schemas.js";
+import { EnvelopedCurrentRoleSchema } from "@/openapi/schemas.js";
 
 /** Core `GET /users/me` (Profile Contract v2): pure identity + held roles. */
 function usersMeOk(roles: string[]) {
@@ -32,13 +32,13 @@ function ctlSessCookieFrom(res: request.Response): string | undefined {
   return raw?.find((c) => c.startsWith("ctl_sess="))?.split(";")[0];
 }
 
-describe("POST /v1/session/active-role", () => {
+describe("POST /v1/session/current-role", () => {
   it("invalid/missing role → 400 INVALID_ROLE, no Core call, session unchanged", async () => {
     const cookie = mintSessionCookie();
     const mock = mockCoreByPath({});
 
     const res = await request(app)
-      .post("/v1/session/active-role")
+      .post("/v1/session/current-role")
       .set("Cookie", cookie)
       .send({ role: "ADMIN" });
 
@@ -52,18 +52,18 @@ describe("POST /v1/session/active-role", () => {
     const cookie = mintSessionCookie();
     mockCoreByPath({});
 
-    const res = await request(app).post("/v1/session/active-role").set("Cookie", cookie).send({});
+    const res = await request(app).post("/v1/session/current-role").set("Cookie", cookie).send({});
 
     expect(res.status).toBe(400);
     expect(res.body).toMatchObject({ code: "INVALID_ROLE" });
   });
 
   it("valid role but not held → 403 ROLE_NOT_HELD, session unchanged", async () => {
-    const cookie = mintSessionCookie({ activeRole: "PARTICIPANT" });
+    const cookie = mintSessionCookie({ currentRole: "PARTICIPANT" });
     mockCoreByPath({ "/users/me": usersMeOk(["PARTICIPANT"]) });
 
     const res = await request(app)
-      .post("/v1/session/active-role")
+      .post("/v1/session/current-role")
       .set("Cookie", cookie)
       .send({ role: "GUIDE" });
 
@@ -78,58 +78,58 @@ describe("POST /v1/session/active-role", () => {
     mockCoreByPath({ "/users/me": usersMeOk(["GUIDE", "PARTICIPANT"]) });
 
     const res = await request(app)
-      .post("/v1/session/active-role")
+      .post("/v1/session/current-role")
       .set("Cookie", cookie)
       .send({ role: "GUIDE" });
 
     expect(res.status).toBe(200);
     expect(res.body).toEqual({
-      data: { activeRole: "GUIDE" },
+      data: { currentRole: "GUIDE" },
       meta: { requestId: expect.any(String) },
     });
-    expect(EnvelopedActiveRoleSchema.safeParse(res.body).success).toBe(true);
+    expect(EnvelopedCurrentRoleSchema.safeParse(res.body).success).toBe(true);
 
     const rotated = ctlSessCookieFrom(res);
     expect(rotated).toBeDefined();
-    expect(sessionFrom(rotated)).toMatchObject({ activeRole: "GUIDE" });
+    expect(sessionFrom(rotated)).toMatchObject({ currentRole: "GUIDE" });
     expect(sessionFrom(rotated)?.onboardingRole).toBeUndefined();
   });
 
-  it("held role, onboardingRole set for a DIFFERENT role → only activeRole changes, onboardingRole untouched", async () => {
+  it("held role, onboardingRole set for a DIFFERENT role → only currentRole changes, onboardingRole untouched", async () => {
     const cookie = mintSessionCookie({ onboardingRole: "PARTICIPANT" });
     mockCoreByPath({ "/users/me": usersMeOk(["GUIDE", "PARTICIPANT"]) });
 
     const res = await request(app)
-      .post("/v1/session/active-role")
+      .post("/v1/session/current-role")
       .set("Cookie", cookie)
       .send({ role: "GUIDE" });
 
     expect(res.status).toBe(200);
     const rotated = ctlSessCookieFrom(res);
     expect(sessionFrom(rotated)).toMatchObject({
-      activeRole: "GUIDE",
+      currentRole: "GUIDE",
       onboardingRole: "PARTICIPANT",
     });
   });
 
-  it("held role, no onboardingRole set → just sets activeRole", async () => {
+  it("held role, no onboardingRole set → just sets currentRole", async () => {
     const cookie = mintSessionCookie();
     mockCoreByPath({ "/users/me": usersMeOk(["PARTICIPANT"]) });
 
     const res = await request(app)
-      .post("/v1/session/active-role")
+      .post("/v1/session/current-role")
       .set("Cookie", cookie)
       .send({ role: "PARTICIPANT" });
 
     expect(res.status).toBe(200);
     const rotated = ctlSessCookieFrom(res);
-    expect(sessionFrom(rotated)).toMatchObject({ activeRole: "PARTICIPANT" });
+    expect(sessionFrom(rotated)).toMatchObject({ currentRole: "PARTICIPANT" });
   });
 
   it("no cookie → 401 + Auth-Required (before role validation)", async () => {
     mockCoreByPath({});
 
-    const res = await request(app).post("/v1/session/active-role").send({ role: "GUIDE" });
+    const res = await request(app).post("/v1/session/current-role").send({ role: "GUIDE" });
 
     expect(res.status).toBe(401);
     expect(res.headers["auth-required"]).toBe("reauthenticate");
@@ -144,7 +144,7 @@ describe("POST /v1/session/active-role", () => {
     });
 
     const res = await request(app)
-      .post("/v1/session/active-role")
+      .post("/v1/session/current-role")
       .set("Cookie", cookie)
       .send({ role: "GUIDE" });
 
@@ -157,7 +157,7 @@ describe("POST /v1/session/active-role", () => {
     mockCoreByPath({ "/users/me": coreErr(401) });
 
     const res = await request(app)
-      .post("/v1/session/active-role")
+      .post("/v1/session/current-role")
       .set("Cookie", cookie)
       .send({ role: "GUIDE" });
 
@@ -170,7 +170,7 @@ describe("POST /v1/session/active-role", () => {
     mockCoreByPath({ "/users/me": coreErr(503) });
 
     const res = await request(app)
-      .post("/v1/session/active-role")
+      .post("/v1/session/current-role")
       .set("Cookie", cookie)
       .send({ role: "GUIDE" });
 
@@ -183,7 +183,7 @@ describe("POST /v1/session/active-role", () => {
     mockCoreByPath({ "/users/me": usersMeOk(["GUIDE"]) });
 
     const res = await request(app)
-      .post("/v1/session/active-role")
+      .post("/v1/session/current-role")
       .set("Origin", "https://evil.example")
       .set("Cookie", cookie)
       .send({ role: "GUIDE" });

@@ -14,14 +14,14 @@ const KEY = crypto.createHash("sha256").update(config.sessionSecret).digest(); /
 
 /**
  * The two role values Core's `/users/me` (and thus `user_roles`) actually uses. Profile
- * Contract v2: `activeRole` is per-SESSION bff state, never a DB/Core value — Core only tells
+ * Contract v2: `currentRole` is per-SESSION bff state, never a DB/Core value — Core only tells
  * us which roles an account HOLDS; which one is "active" in THIS browser session lives here.
  */
 export type Role = "GUIDE" | "PARTICIPANT";
 
 /**
  * Guards an untrusted value (a decrypted-but-otherwise-unvalidated session field) against the
- * two real Core role values. `SessionData.activeRole`/`onboardingRole` are typed as `Role`, but
+ * two real Core role values. `SessionData.currentRole`/`onboardingRole` are typed as `Role`, but
  * the cookie is just decrypted JSON — an older session shape (serialized before these fields
  * existed), a stale/renamed role value, or any other drift must not be trusted as a real role.
  */
@@ -41,9 +41,9 @@ export interface SessionData {
    * The role this session is currently using — must be a role the account HOLDS (∈ Core
    * `/users/me` roles); controls the app shell of an established role and is surfaced by the
    * bff-owned `GET /userinfo` (src/api/userinfo). Optional so existing serialized sessions
-   * (from before this field existed) stay valid — absent just means "no active role yet".
+   * (from before this field existed) stay valid — absent just means "no current role yet".
    */
-  activeRole?: Role;
+  currentRole?: Role;
   /**
    * A role the account does NOT yet hold, authorising only that role's onboarding while it is
    * being acquired (set by the login callback — CTL-97 Task 1.5-BFF2; unused beyond this type

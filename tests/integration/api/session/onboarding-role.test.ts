@@ -67,7 +67,7 @@ describe("POST /v1/session/onboarding-role", () => {
   });
 
   it("role already held → 409 ROLE_ALREADY_HELD, no eligibility call, session unchanged", async () => {
-    const cookie = mintSessionCookie({ activeRole: "PARTICIPANT" });
+    const cookie = mintSessionCookie({ currentRole: "PARTICIPANT" });
     const mock = mockCoreByPath({ "/users/me": usersMeOk(["GUIDE", "PARTICIPANT"]) });
 
     const res = await request(app)
@@ -138,8 +138,8 @@ describe("POST /v1/session/onboarding-role", () => {
     const rotated = ctlSessCookieFrom(res);
     expect(rotated).toBeDefined();
     expect(sessionFrom(rotated)).toMatchObject({ onboardingRole: "GUIDE" });
-    // activeRole must NOT be touched by this endpoint.
-    expect(sessionFrom(rotated)?.activeRole).toBeUndefined();
+    // currentRole must NOT be touched by this endpoint.
+    expect(sessionFrom(rotated)?.currentRole).toBeUndefined();
 
     // A follow-up read on the persisted cookie reflects the write.
     expect(sessionFrom(rotated)?.onboardingRole).toBe("GUIDE");

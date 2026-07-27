@@ -8,14 +8,14 @@ import { OnboardingRoleDataSchema } from "../../openapi/schemas.js";
  * onboarding into a SECOND role (Profile Contract v2, CTL-97 Task 1.5-BFF3). The "Become a
  * Guide/Participant" affordance must stay in-app — it must NOT round-trip through
  * `/auth/login` (that re-runs Google OAuth / forces account re-selection, which is wrong for an
- * already-authenticated user). Mirrors `POST /session/active-role`
- * (src/api/session/active-role.handler.ts) in structure, but the two are NOT interchangeable:
- * active-role switches among roles ALREADY held; this endpoint authorises acquiring a role NOT
- * yet held, by setting `session.onboardingRole` (never `activeRole` — the role isn't held yet).
+ * already-authenticated user). Mirrors `POST /session/current-role`
+ * (src/api/session/current-role.handler.ts) in structure, but the two are NOT interchangeable:
+ * current-role switches among roles ALREADY held; this endpoint authorises acquiring a role NOT
+ * yet held, by setting `session.onboardingRole` (never `currentRole` — the role isn't held yet).
  *
  * `roles` are re-validated against Core `GET /users/me` on EVERY call (never cached in the
- * session). Already holding the role is a 409 (the UI should call active-role to switch, not
- * onboard) — this endpoint deliberately never sets `activeRole`. Eligibility is Core's
+ * session). Already holding the role is a 409 (the UI should call current-role to switch, not
+ * onboard) — this endpoint deliberately never sets `currentRole`. Eligibility is Core's
  * authoritative call (`GET /users/me/role-eligibility?role=`), e.g. a PARENT participant is
  * never GUIDE-eligible.
  *
@@ -32,7 +32,7 @@ export const setOnboardingRole = withSession(async (req, res, core) => {
 
   const cu = await core.getCurrentUser<Me>();
   if (cu.roles.includes(role)) {
-    // Already held — the UI should switch (POST /session/active-role), not onboard. Session
+    // Already held — the UI should switch (POST /session/current-role), not onboard. Session
     // unchanged.
     return sendProblem(res, 409, "Role already held by this account", {
       code: "ROLE_ALREADY_HELD",

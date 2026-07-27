@@ -27,8 +27,8 @@ import {
   Progress,
   SessionStatus,
   Userinfo,
-  ActiveRoleSchema,
-  SetActiveRoleRequestSchema,
+  CurrentRoleSchema,
+  SetCurrentRoleRequestSchema,
   OnboardingRoleSchema,
   SetOnboardingRoleRequestSchema,
   problem,
@@ -37,7 +37,7 @@ import {
   guideProgressExample,
   participantProgressExample,
   userinfoExample,
-  activeRoleExample,
+  currentRoleExample,
   onboardingRoleExample,
   envelope,
   writeEnvelope,
@@ -256,13 +256,13 @@ apiRoute({
   method: "get",
   path: "/v1/userinfo",
   tags: ["Session"],
-  summary: "Signed-in identity, held roles, and the active role",
+  summary: "Signed-in identity, held roles, and the current role",
   description:
     "Bootstrap/session read the frontend calls on every page load. BFF-OWNED aggregation " +
     "(Profile Contract v2) — no longer a transparent Core proxy: it composes Core account " +
-    "identity + held roles (`GET /users/me`) with THIS bff session's `activeRole`, which " +
+    "identity + held roles (`GET /users/me`) with THIS bff session's `currentRole`, which " +
     "Core does not know (it's per-session state, never a DB value; the Google id_token " +
-    "carries no app role either). `activeRole` is re-validated against the roles Core just " +
+    "carries no app role either). `currentRole` is re-validated against the roles Core just " +
     "returned on every call — a role the account no longer holds (revoked/suspended), or any " +
     "stale/invalid stored value, is reported as `null`, and only THAT case clears it from the " +
     "session and persists the change; an ordinary call does not write the session (it must " +
@@ -271,12 +271,12 @@ apiRoute({
     "part of the bootstrap contract.",
   responses: {
     200: enveloped(Userinfo, {
-      description: "Identity + roles + active role, wrapped in the standard success envelope.",
+      description: "Identity + roles + current role, wrapped in the standard success envelope.",
       examples: {
-        activeRole: { summary: "Session with an active role", value: userinfoExample },
-        noActiveRole: {
-          summary: "Signed in, no active role chosen yet",
-          value: envelope({ ...userinfoExample.data, activeRole: null }),
+        currentRole: { summary: "Session with a current role", value: userinfoExample },
+        noCurrentRole: {
+          summary: "Signed in, no current role chosen yet",
+          value: envelope({ ...userinfoExample.data, currentRole: null }),
         },
       },
     }),
@@ -295,8 +295,8 @@ apiRoute({
   summary: "Role-shaped signed-in home",
   description:
     "The signed-in home, aggregated from several Core reads and discriminated by `kind` " +
-    "(`guide` | `participant`). The active role is read from THIS bff session (Profile " +
-    "Contract v2 — `activeRole` is per-session state, never a Core value or an id_token " +
+    "(`guide` | `participant`). The current role is read from THIS bff session (Profile " +
+    "Contract v2 — `currentRole` is per-session state, never a Core value or an id_token " +
     "claim); guide and participant share this one endpoint. The " +
     "guide variant fans out profile + offerings and adds a computed `canPublish` gate " +
     "(true only when VERIFIED); the participant variant fans out profile + next tour + " +
@@ -327,8 +327,8 @@ apiRoute({
   summary: "Onboarding progress for a target role",
   description:
     "Progress for the TARGET role (the `role` query param), derived from Core `GET /users/me` " +
-    "alone (no `/guide/profile` read). Keyed by the target role, NOT the active role — a participant " +
-    "applying to be a guide still has `activeRole = PARTICIPANT`. Guide progress is coarse for " +
+    "alone (no `/guide/profile` read). Keyed by the target role, NOT the current role — a participant " +
+    "applying to be a guide still has `currentRole = PARTICIPANT`. Guide progress is coarse for " +
     "now (the field-level verification checklist is deferred). The frontend calls this to render " +
     "the onboarding checklist for the role being set up.\n\n" +
     "**Onboarding guard (CTL-97):** allowed iff `roles.includes(role)` (already holds it) OR " +
@@ -370,19 +370,19 @@ apiRoute({
   },
 });
 
-// POST /v1/session/active-role
+// POST /v1/session/current-role
 apiRoute({
   method: "post",
-  path: "/v1/session/active-role",
+  path: "/v1/session/current-role",
   tags: ["Session"],
-  summary: "Switch this session's active role",
+  summary: "Switch this session's current role",
   description:
-    "Manually switches THIS bff session's `activeRole` to a role the account holds. `roles` are " +
+    "Manually switches THIS bff session's `currentRole` to a role the account holds. `roles` are " +
     "re-validated against Core `GET /users/me` on EVERY call — never cached in the session (a " +
     "second staleable copy). If the account was mid-acquisition of this same role " +
     "(`session.onboardingRole === role`, e.g. onboarding just succeeded), that in-progress " +
     "marker is cleared HERE — the handler owns this cleanup, not the frontend. Core has no " +
-    "active-role endpoint and never learns which role a session has chosen.\n\n" +
+    "current-role endpoint and never learns which role a session has chosen.\n\n" +
     "A role the account does not hold → 403 with the session left UNCHANGED. A " +
     "disabled/suspended account surfaces as a Core 403 (`ACCOUNT_NOT_ACTIVE`, carried in " +
     "`Problem.title`) via the same generic 4xx passthrough.\n\n" +
@@ -390,14 +390,14 @@ apiRoute({
   request: {
     body: {
       content: {
-        "application/json": { schema: SetActiveRoleRequestSchema, example: { role: "GUIDE" } },
+        "application/json": { schema: SetCurrentRoleRequestSchema, example: { role: "GUIDE" } },
       },
     },
   },
   responses: {
-    200: enveloped(ActiveRoleSchema, {
-      description: "The now-active role, wrapped in the standard success envelope.",
-      example: activeRoleExample,
+    200: enveloped(CurrentRoleSchema, {
+      description: "The now-current role, wrapped in the standard success envelope.",
+      example: currentRoleExample,
     }),
     400: problem400(
       "INVALID_ROLE",
@@ -425,10 +425,10 @@ apiRoute({
     "affordance must stay in-app — it must NOT round-trip through `GET /auth/login` (that " +
     "re-runs Google OAuth / forces account re-selection, which is wrong for an already-" +
     "authenticated user). `roles` are re-validated against Core `GET /users/me` on EVERY call " +
-    "(never cached in the session). Distinct from `POST /session/active-role`: that switches " +
+    "(never cached in the session). Distinct from `POST /session/current-role`: that switches " +
     "among roles ALREADY held; this authorises acquiring a role NOT yet held, and never sets " +
-    "`activeRole`.\n\n" +
-    "Already holding the role → 409 (the UI should call `POST /session/active-role` to switch, " +
+    "`currentRole`.\n\n" +
+    "Already holding the role → 409 (the UI should call `POST /session/current-role` to switch, " +
     "not onboard). Otherwise, eligibility is Core's authoritative call " +
     "(`GET /users/me/role-eligibility?role=`) — not eligible (e.g. a PARENT participant may " +
     "never become a GUIDE) → 403, carrying Core's typed reason as `code` so the frontend can " +
@@ -463,7 +463,7 @@ apiRoute({
     409: problem409(
       "ROLE_ALREADY_HELD",
       "Role already held by this account",
-      "The account already holds this role — call `POST /session/active-role` to switch to it " +
+      "The account already holds this role — call `POST /session/current-role` to switch to it " +
         "instead of onboarding.",
     ),
   },
@@ -1297,7 +1297,7 @@ apiRoute({
       role: CoreRoleEnum.optional().openapi({
         description:
           "The role this entry is for (CTL-97) — written into the auth transaction and read " +
-          "back by the callback to decide activeRole/onboardingRole initialisation. Preferred " +
+          "back by the callback to decide currentRole/onboardingRole initialisation. Preferred " +
           "over inferring a role from `returnTo` (a legacy, marked-for-removal fallback).",
         example: "GUIDE",
       }),
@@ -1327,9 +1327,9 @@ apiRoute({
     "tokens, resolves the account against Core `/session?intent=` (enforcing signup vs signin), then " +
     "302-redirects into the web app. On success it establishes the `ctl_sess` session cookie and " +
     "initialises this session's role state from `requestedRole` (written by `GET /auth/login`, " +
-    "CTL-97): holding it → `activeRole` (role home); lacking it on signup (and eligible — see " +
+    "CTL-97): holding it → `currentRole` (role home); lacking it on signup (and eligible — see " +
     "Core role-eligibility) → `onboardingRole` + that role's onboarding; lacking it on signin → " +
-    "`/signup/role`; no `requestedRole` with exactly one held role → `activeRole` initialised to " +
+    "`/signup/role`; no `requestedRole` with exactly one held role → `currentRole` initialised to " +
     "it; otherwise role selection. Provider errors and role-blocked cases (e.g. PARENT→guide) " +
     "redirect back into the UI WITHOUT a session. You don't call this directly — Google does.",
   request: {
@@ -1465,7 +1465,7 @@ export const openapiSpec = generator.generateDocument({
     {
       name: "Session",
       description:
-        "Bootstrap identity/roles/active-role read the frontend calls on every page load.",
+        "Bootstrap identity/roles/current-role read the frontend calls on every page load.",
     },
     { name: "Dashboard", description: "Role-shaped signed-in home aggregate." },
     { name: "Onboarding", description: "Per-role onboarding progress aggregate." },

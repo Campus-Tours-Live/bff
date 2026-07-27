@@ -37,7 +37,7 @@ function txCookie(overrides: Partial<AuthTx> = {}): string {
 }
 
 /** Decrypt a `ctl_sess=...` Set-Cookie pair via the REAL readSession, so a test can assert on
- *  session-internal fields (activeRole/onboardingRole) that never round-trip through the
+ *  session-internal fields (currentRole/onboardingRole) that never round-trip through the
  *  response body. */
 function sessionFrom(pair: string | undefined): ReturnType<typeof readSession> {
   if (!pair) return null;
@@ -322,7 +322,7 @@ describe("GET /auth/callback — success landing + session", () => {
       kind: "resolve",
       value: coreResponse(200, {
         roles: ["PARTICIPANT"],
-        activeRole: "PARTICIPANT",
+        currentRole: "PARTICIPANT",
       }),
     };
 
@@ -354,7 +354,7 @@ describe("GET /auth/callback — success landing + session", () => {
         } as unknown as Response;
       }
       if (url.startsWith(CORE_SESSION_PREFIX)) {
-        return coreResponse(200, { roles: ["PARTICIPANT"], activeRole: "PARTICIPANT" });
+        return coreResponse(200, { roles: ["PARTICIPANT"], currentRole: "PARTICIPANT" });
       }
       throw new Error(`unexpected fetch to ${url}`);
     }) as unknown as typeof fetch);
@@ -368,7 +368,7 @@ describe("GET /auth/callback — success landing + session", () => {
     expect(res.headers.location).toBe("http://localhost:3001/dashboard");
   });
 
-  it("signup → /onboarding/guide, already holds GUIDE → /dashboard, activeRole set pre-redirect", async () => {
+  it("signup → /onboarding/guide, already holds GUIDE → /dashboard, currentRole set pre-redirect", async () => {
     coreNext = {
       kind: "resolve",
       value: coreResponse(200, { roles: ["GUIDE"] }),
@@ -382,10 +382,10 @@ describe("GET /auth/callback — success landing + session", () => {
     expect(res.headers.location).toBe("http://localhost:3001/dashboard");
     const sessCookie = cookieNamed(res, "ctl_sess");
     expect(sessCookie).toBeDefined();
-    // Holding the requested role is "effectively a login": activeRole set, onboardingRole
+    // Holding the requested role is "effectively a login": currentRole set, onboardingRole
     // cleared — and, being on the redirect response's Set-Cookie, this is already persisted
     // (not deferred to a later write) before the browser is sent anywhere.
-    expect(sessionFrom(sessCookie)).toMatchObject({ activeRole: "GUIDE" });
+    expect(sessionFrom(sessCookie)).toMatchObject({ currentRole: "GUIDE" });
     expect(sessionFrom(sessCookie)?.onboardingRole).toBeUndefined();
   });
 
@@ -406,7 +406,7 @@ describe("GET /auth/callback — success landing + session", () => {
     expect(sessCookie).toBeDefined();
     // The in-progress marker that authorizes GET /v1/onboarding?role=guide before GUIDE is held.
     expect(sessionFrom(sessCookie)).toMatchObject({ onboardingRole: "GUIDE" });
-    expect(sessionFrom(sessCookie)?.activeRole).toBeUndefined();
+    expect(sessionFrom(sessCookie)?.currentRole).toBeUndefined();
   });
 
   it("signin, lacks the requested role → /signup/role, no onboardingRole", async () => {
@@ -424,7 +424,7 @@ describe("GET /auth/callback — success landing + session", () => {
     expect(res.headers.location).toBe("http://localhost:3001/signup/role");
     const sessCookie = cookieNamed(res, "ctl_sess");
     expect(sessCookie).toBeDefined();
-    expect(sessionFrom(sessCookie)?.activeRole).toBeUndefined();
+    expect(sessionFrom(sessCookie)?.currentRole).toBeUndefined();
     expect(sessionFrom(sessCookie)?.onboardingRole).toBeUndefined();
     // Lacking a requested role on signin is not eligibility-gated — no eligibility call.
     expect(
@@ -480,7 +480,7 @@ describe("GET /auth/callback — success landing + session", () => {
     const sessCookie = cookieNamed(res, "ctl_sess");
     expect(sessCookie).toBeDefined(); // Set-Cookie present ON the redirect response itself.
 
-    // Replay it as a fresh request — activeRole must already be visible, proving the write
+    // Replay it as a fresh request — currentRole must already be visible, proving the write
     // happened BEFORE the redirect (no separate "await save" the client could race).
     fetchMock.mockImplementation((async (input: string | URL | Request) => {
       const url = typeof input === "string" ? input : input.toString();
@@ -504,7 +504,7 @@ describe("GET /auth/callback — success landing + session", () => {
 
     const userinfo = await request(app).get("/v1/userinfo").set("Cookie", sessCookie!);
     expect(userinfo.status).toBe(200);
-    expect(userinfo.body.data.activeRole).toBe("GUIDE");
+    expect(userinfo.body.data.currentRole).toBe("GUIDE");
   });
 });
 

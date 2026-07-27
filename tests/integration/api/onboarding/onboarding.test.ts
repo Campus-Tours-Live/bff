@@ -3,8 +3,8 @@ import { app } from "@/app.js";
 import { coreErr, coreOk, mintSessionCookie, mockCoreByPath } from "../../_helpers.js";
 import { EnvelopedProgressSchema } from "@/openapi/schemas.js";
 
-/** Core `GET /users/me` (Profile Contract v2): pure identity + held roles — no `activeRole`
- *  (onboarding progress is keyed by the TARGET role, so it never reads activeRole at all). */
+/** Core `GET /users/me` (Profile Contract v2): pure identity + held roles — no `currentRole`
+ *  (onboarding progress is keyed by the TARGET role, so it never reads currentRole at all). */
 function usersMeOk(roles: string[]) {
   return coreOk({
     user: {

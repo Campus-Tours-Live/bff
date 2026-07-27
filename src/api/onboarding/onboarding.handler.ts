@@ -13,8 +13,8 @@ function coreRoleOf(role: "guide" | "participant"): Role {
 
 /**
  * GET /v1/onboarding?role=guide|participant — single entry. Progress is keyed by the
- * TARGET role (the `role` query param), NOT activeRole — a participant applying to be
- * a guide still has activeRole=PARTICIPANT (which, per Profile Contract v2, is bff session
+ * TARGET role (the `role` query param), NOT currentRole — a participant applying to be
+ * a guide still has currentRole=PARTICIPANT (which, per Profile Contract v2, is bff session
  * state anyway — irrelevant here). Profile Contract v2 moved `guideStatus`/`participantType`
  * off the old Core `/userinfo` onto the role-specific profile endpoints, so this handler reads
  * Core `/users/me` for `roles` and additionally fetches the TARGET role's profile (best-effort

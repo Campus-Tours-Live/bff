@@ -3,8 +3,8 @@ import { app } from "@/app.js";
 import { coreErr, coreOk, mintSessionCookie, mockCoreByPath } from "../../_helpers.js";
 import { EnvelopedDashboardSchema } from "@/openapi/schemas.js";
 
-/** Core `GET /users/me` (Profile Contract v2): pure identity + held roles — no `activeRole`
- *  (that's bff session state now; set it via `mintSessionCookie({ activeRole })`). */
+/** Core `GET /users/me` (Profile Contract v2): pure identity + held roles — no `currentRole`
+ *  (that's bff session state now; set it via `mintSessionCookie({ currentRole })`). */
 function usersMeOk(roles: string[]) {
   return coreOk({
     user: {
@@ -29,7 +29,7 @@ describe("GET /v1/dashboard", () => {
   });
 
   it("guide-active session → 200 guide dashboard with offerings and canPublish", async () => {
-    cookie = mintSessionCookie({ activeRole: "GUIDE" });
+    cookie = mintSessionCookie({ currentRole: "GUIDE" });
     mockCoreByPath({
       "/users/me": usersMeOk(["GUIDE"]),
       "/guide/profile": coreOk({
@@ -58,7 +58,7 @@ describe("GET /v1/dashboard", () => {
   });
 
   it("guide not yet approved → canPublish false", async () => {
-    cookie = mintSessionCookie({ activeRole: "GUIDE" });
+    cookie = mintSessionCookie({ currentRole: "GUIDE" });
     mockCoreByPath({
       "/users/me": usersMeOk(["GUIDE"]),
       "/guide/profile": coreOk({ id: "g1", guideStatus: "PENDING" }),
@@ -73,7 +73,7 @@ describe("GET /v1/dashboard", () => {
   });
 
   it("participant-active session → 200 participant dashboard", async () => {
-    cookie = mintSessionCookie({ activeRole: "PARTICIPANT" });
+    cookie = mintSessionCookie({ currentRole: "PARTICIPANT" });
     mockCoreByPath({
       "/users/me": usersMeOk(["PARTICIPANT"]),
       "/participant/profile": coreOk({ id: "p1", displayName: "Pat Participant" }),
@@ -87,8 +87,8 @@ describe("GET /v1/dashboard", () => {
     expect(EnvelopedDashboardSchema.safeParse(res.body).success).toBe(true);
   });
 
-  it("no activeRole in the session → defaults to the participant dashboard (documented default)", async () => {
-    // cookie (from beforeEach) carries no activeRole at all.
+  it("no currentRole in the session → defaults to the participant dashboard (documented default)", async () => {
+    // cookie (from beforeEach) carries no currentRole at all.
     mockCoreByPath({
       "/users/me": usersMeOk([]),
       "/participant/profile": coreOk({ id: "p1" }),
@@ -103,7 +103,7 @@ describe("GET /v1/dashboard", () => {
   it("participant with no next tour (Core returns { data: null }) → 200, nextTour null", async () => {
     // Regression: CoreClient must unwrap null envelope data to null, not return the whole
     // { data: null } envelope — otherwise the dashboard reshapes it and throws a 500.
-    cookie = mintSessionCookie({ activeRole: "PARTICIPANT" });
+    cookie = mintSessionCookie({ currentRole: "PARTICIPANT" });
     mockCoreByPath({
       "/users/me": usersMeOk(["PARTICIPANT"]),
       "/participant/profile": coreOk({ id: "p1" }),
@@ -125,7 +125,7 @@ describe("GET /v1/dashboard", () => {
   });
 
   it("offerings fetch fails for a guide → degrades to offerings:[] (still 200)", async () => {
-    cookie = mintSessionCookie({ activeRole: "GUIDE" });
+    cookie = mintSessionCookie({ currentRole: "GUIDE" });
     mockCoreByPath({
       "/users/me": usersMeOk(["GUIDE"]),
       "/guide/profile": coreOk({ id: "g1", guideStatus: "VERIFIED" }),
@@ -164,7 +164,7 @@ describe("GET /v1/dashboard", () => {
   });
 
   it("Core /guide/profile 5xx (required read) → 502 CORE_UNAVAILABLE", async () => {
-    cookie = mintSessionCookie({ activeRole: "GUIDE" });
+    cookie = mintSessionCookie({ currentRole: "GUIDE" });
     mockCoreByPath({
       "/users/me": usersMeOk(["GUIDE"]),
       "/guide/profile": coreErr(503),
@@ -178,7 +178,7 @@ describe("GET /v1/dashboard", () => {
   });
 
   it("Core /participant/profile 404 (required read) → surfaces the real 404", async () => {
-    cookie = mintSessionCookie({ activeRole: "PARTICIPANT" });
+    cookie = mintSessionCookie({ currentRole: "PARTICIPANT" });
     mockCoreByPath({
       "/users/me": usersMeOk(["PARTICIPANT"]),
       "/participant/profile": coreErr(404),
@@ -191,7 +191,7 @@ describe("GET /v1/dashboard", () => {
   });
 
   it("reshapes dashboard bookings into Contract-A field names", async () => {
-    cookie = mintSessionCookie({ activeRole: "PARTICIPANT" });
+    cookie = mintSessionCookie({ currentRole: "PARTICIPANT" });
     const coreB = {
       id: "b1",
       status: "CONFIRMED",
@@ -227,7 +227,7 @@ describe("GET /v1/dashboard", () => {
   });
 
   it("forwards the session id_token as a Bearer to Core /users/me", async () => {
-    cookie = mintSessionCookie({ activeRole: "PARTICIPANT" });
+    cookie = mintSessionCookie({ currentRole: "PARTICIPANT" });
     const mock = mockCoreByPath({
       "/users/me": usersMeOk(["PARTICIPANT"]),
       "/participant/profile": coreOk({ id: "p1" }),

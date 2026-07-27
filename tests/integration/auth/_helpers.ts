@@ -57,11 +57,11 @@ export const FAKE_TOKENS = {
 } as const;
 
 /** Build a Core /session-style fetch Response stub. Profile Contract v2 shape:
- *  `{ user, roles, activeRole }` — no top-level `participantType` (that now lives
+ *  `{ user, roles, currentRole }` — no top-level `participantType` (that now lives
  *  on the participant profile; see {@link participantProfileResponse}). */
 export function coreResponse(
   status: number,
-  body?: { user?: unknown; roles?: string[]; activeRole?: string | null },
+  body?: { user?: unknown; roles?: string[]; currentRole?: string | null },
 ): Response {
   return {
     ok: status >= 200 && status < 300,

@@ -59,9 +59,9 @@ async function bearerForSession(
 
   try {
     const tokens = await refreshOnce(session.refreshToken);
-    // Spread the existing session FIRST so non-token fields (activeRole/onboardingRole) survive
+    // Spread the existing session FIRST so non-token fields (currentRole/onboardingRole) survive
     // a silent refresh — this fires on every near-expiry request, so without the spread a
-    // session's active role would be silently forgotten roughly every REFRESH_WINDOW_MS.
+    // session's current role would be silently forgotten roughly every REFRESH_WINDOW_MS.
     const updated: SessionData = {
       ...session,
       idToken: tokens.id_token ?? session.idToken,

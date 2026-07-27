@@ -57,7 +57,7 @@ export const RoleEnum = z.enum(["guide", "participant"]);
 
 /**
  * The two role values Core itself uses (`user_roles`, `GET /users/me` `roles`, and this
- * session's `activeRole`) — UPPERCASE, distinct from {@link RoleEnum}'s lowercase
+ * session's `currentRole`) — UPPERCASE, distinct from {@link RoleEnum}'s lowercase
  * request/response discriminator (dashboard `kind`, onboarding `?role=`). Used by the
  * `Userinfo` schema below.
  */
@@ -66,7 +66,7 @@ export const CoreRoleEnum = z.enum(["GUIDE", "PARTICIPANT"]);
 /**
  * Every role value an account can hold (Core `user_roles`), including the staff-only roles
  * (`ADMIN`, `SUPPORT`) that only ever appear in `Userinfo.roles` — never a switchable/onboardable
- * `activeRole`, `onboardingRole`, or switch/onboarding request `role` (those stay restricted to
+ * `currentRole`, `onboardingRole`, or switch/onboarding request `role` (those stay restricted to
  * {@link CoreRoleEnum}: you can't switch to or onboard into a staff role).
  */
 export const HeldRoleEnum = z.enum(["GUIDE", "PARTICIPANT", "ADMIN", "SUPPORT"]);
@@ -213,7 +213,7 @@ export const UserSummarySchema = z.object({
 /**
  * `GET /v1/userinfo` response `data` (src/api/userinfo/userinfo.handler.ts) — the bootstrap
  * read the frontend calls on every page load. Composes Core `GET /users/me` (`user`, `roles`)
- * with THIS session's `activeRole` (Profile Contract v2: session state, never a Core value).
+ * with THIS session's `currentRole` (Profile Contract v2: session state, never a Core value).
  */
 export const Userinfo = registry.register(
   "Userinfo",
@@ -221,23 +221,23 @@ export const Userinfo = registry.register(
     .object({
       user: UserSummarySchema.openapi({ description: "Signed-in account identity." }),
       roles: z.array(HeldRoleEnum).openapi({ description: "Roles the account holds." }),
-      activeRole: CoreRoleEnum.nullable().openapi({
+      currentRole: CoreRoleEnum.nullable().openapi({
         description:
           "The role this bff session currently has active; null when none is chosen yet, or " +
-          "the previously-active role is no longer held (re-validated against `roles` on " +
+          "the previously-current role is no longer held (re-validated against `roles` on " +
           "every call).",
         example: "GUIDE",
       }),
     })
     .openapi("Userinfo", {
-      description: "Signed-in identity, held roles, and this session's active role.",
+      description: "Signed-in identity, held roles, and this session's current role.",
     }),
 );
 
-// --- POST /v1/session/active-role (bff-owned) ---
+// --- POST /v1/session/current-role (bff-owned) ---
 
-/** Request body for `POST /v1/session/active-role`. */
-export const SetActiveRoleRequestSchema = z.object({
+/** Request body for `POST /v1/session/current-role`. */
+export const SetCurrentRoleRequestSchema = z.object({
   role: CoreRoleEnum.openapi({
     description: "The role to make active for this session — must be a role the account holds.",
     example: "GUIDE",
@@ -245,20 +245,20 @@ export const SetActiveRoleRequestSchema = z.object({
 });
 
 /**
- * `POST /v1/session/active-role` response `data` (src/api/session/active-role.handler.ts) —
- * the manual role-switch counterpart to `Userinfo.activeRole`. Deliberately lean: just the
- * now-active role, echoed back on success.
+ * `POST /v1/session/current-role` response `data` (src/api/session/current-role.handler.ts) —
+ * the manual role-switch counterpart to `Userinfo.currentRole`. Deliberately lean: just the
+ * now-current role, echoed back on success.
  */
-export const ActiveRoleSchema = registry.register(
-  "ActiveRole",
+export const CurrentRoleSchema = registry.register(
+  "CurrentRole",
   z
     .object({
-      activeRole: CoreRoleEnum.openapi({
+      currentRole: CoreRoleEnum.openapi({
         description: "The role this session is now active as (echo of the request `role`).",
         example: "GUIDE",
       }),
     })
-    .openapi("ActiveRole", { description: "This session's newly-switched active role." }),
+    .openapi("CurrentRole", { description: "This session's newly-switched current role." }),
 );
 
 // --- POST /v1/session/onboarding-role (bff-owned) ---
@@ -268,7 +268,7 @@ export const SetOnboardingRoleRequestSchema = z.object({
   role: CoreRoleEnum.openapi({
     description:
       "The role to start onboarding into for this session — must NOT already be held by " +
-      "the account (use `POST /session/active-role` for a role already held).",
+      "the account (use `POST /session/current-role` for a role already held).",
     example: "GUIDE",
   }),
 });
@@ -276,7 +276,7 @@ export const SetOnboardingRoleRequestSchema = z.object({
 /**
  * `POST /v1/session/onboarding-role` response `data`
  * (src/api/session/onboarding-role.handler.ts) — the logged-in-role-acquisition counterpart to
- * `ActiveRoleSchema`. Deliberately lean: just the role now authorised for onboarding, echoed
+ * `CurrentRoleSchema`. Deliberately lean: just the role now authorised for onboarding, echoed
  * back on success.
  */
 export const OnboardingRoleSchema = registry.register(
@@ -673,10 +673,10 @@ export const userinfoExample = envelope({
     createdAt: "2025-03-15T00:00:00.000Z",
   },
   roles: ["GUIDE"],
-  activeRole: "GUIDE",
+  currentRole: "GUIDE",
 });
 
-export const activeRoleExample = envelope({ activeRole: "GUIDE" });
+export const currentRoleExample = envelope({ currentRole: "GUIDE" });
 
 export const onboardingRoleExample = envelope({ onboardingRole: "GUIDE" });
 
@@ -1381,24 +1381,24 @@ export function envelopeOf<T extends z.ZodTypeAny>(
   return z.object({ data, meta: z.object({ requestId: z.string() }) });
 }
 
-/** GET /v1/userinfo `data` — `user`/`roles` forwarded from Core (loose); `activeRole` is
+/** GET /v1/userinfo `data` — `user`/`roles` forwarded from Core (loose); `currentRole` is
  *  BFF-derived from the session (strict — see src/api/userinfo/userinfo.handler.ts). */
 export const UserinfoDataSchema = z.object({
   user: LooseObject, // forwarded from Core — opaque
   roles: z.array(z.string()), // forwarded from Core — BFF owns "it's an array of strings"
-  activeRole: z.enum(["GUIDE", "PARTICIPANT"]).nullable(), // BFF-derived (session ∩ Core roles)
+  currentRole: z.enum(["GUIDE", "PARTICIPANT"]).nullable(), // BFF-derived (session ∩ Core roles)
 });
 
 /** Full enveloped GET /v1/userinfo response contract. */
 export const EnvelopedUserinfoSchema = envelopeOf(UserinfoDataSchema);
 
-/** POST /v1/session/active-role `data` — entirely BFF-owned (strict). */
-export const ActiveRoleDataSchema = z.object({
-  activeRole: z.enum(["GUIDE", "PARTICIPANT"]),
+/** POST /v1/session/current-role `data` — entirely BFF-owned (strict). */
+export const CurrentRoleDataSchema = z.object({
+  currentRole: z.enum(["GUIDE", "PARTICIPANT"]),
 });
 
-/** Full enveloped POST /v1/session/active-role response contract. */
-export const EnvelopedActiveRoleSchema = envelopeOf(ActiveRoleDataSchema);
+/** Full enveloped POST /v1/session/current-role response contract. */
+export const EnvelopedCurrentRoleSchema = envelopeOf(CurrentRoleDataSchema);
 
 /** POST /v1/session/onboarding-role `data` — entirely BFF-owned (strict). */
 export const OnboardingRoleDataSchema = z.object({

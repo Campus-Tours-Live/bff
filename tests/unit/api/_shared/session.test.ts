@@ -6,7 +6,7 @@ const readSession = jest.fn<
     idToken?: string;
     refreshToken?: string;
     expiresAt?: number;
-    activeRole?: string;
+    currentRole?: string;
     onboardingRole?: string;
   } | null
 >();
@@ -107,12 +107,12 @@ describe("resolveBearer / bearerForSession", () => {
     });
   });
 
-  it("preserves activeRole/onboardingRole across a silent refresh (Profile Contract v2)", async () => {
+  it("preserves currentRole/onboardingRole across a silent refresh (Profile Contract v2)", async () => {
     readSession.mockReturnValue({
       idToken: "id-old",
       refreshToken: "refresh-old",
       expiresAt: NOW + 30_000,
-      activeRole: "GUIDE",
+      currentRole: "GUIDE",
       onboardingRole: "PARTICIPANT",
     });
     refreshTokens.mockResolvedValue({
@@ -128,7 +128,7 @@ describe("resolveBearer / bearerForSession", () => {
       accessToken: "access-new",
       refreshToken: "refresh-new",
       expiresAt: NOW + 3600 * 1000,
-      activeRole: "GUIDE",
+      currentRole: "GUIDE",
       onboardingRole: "PARTICIPANT",
     });
   });

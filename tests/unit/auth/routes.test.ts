@@ -70,7 +70,7 @@ describe("landingFor (post-auth landing, no requested role)", () => {
     expect(landingFor("/guide/availability", ["GUIDE"])).toBe("/guide/availability");
   });
 
-  it("→ the returnTo even with multiple held roles (role selection is client-side on activeRole=null)", () => {
+  it("→ the returnTo even with multiple held roles (role selection is client-side on currentRole=null)", () => {
     expect(landingFor("/profile/settings", ["GUIDE", "PARTICIPANT"])).toBe("/profile/settings");
     expect(landingFor("/dashboard", ["GUIDE", "PARTICIPANT"])).toBe("/dashboard");
   });

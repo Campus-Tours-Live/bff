@@ -27,7 +27,7 @@ export class CoreClient {
 
   /**
    * Core `GET /users/me` (Profile Contract v2 — replaces the old Core `/userinfo`): pure
-   * account identity + held roles, no `activeRole` (that's bff session state; composed on top
+   * account identity + held roles, no `currentRole` (that's bff session state; composed on top
    * by the bff-owned `GET /userinfo`, see src/api/userinfo).
    */
   getCurrentUser<T>(): Promise<T> {

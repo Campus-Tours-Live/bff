@@ -1,12 +1,12 @@
 import { isRole, readSession, writeSession } from "../../session.js";
 import { sendProblem } from "../../util/problem.js";
 import { sendData, withSession, type Me } from "../_shared/index.js";
-import { ActiveRoleDataSchema } from "../../openapi/schemas.js";
+import { CurrentRoleDataSchema } from "../../openapi/schemas.js";
 
 /**
- * POST /v1/session/active-role — bff-OWNED manual role switch (Profile Contract v2). Core has
- * no active-role endpoint and never learns which role a session has chosen; this is the only
- * place `SessionData.activeRole` is set from a direct user action (the login callback sets it
+ * POST /v1/session/current-role — bff-OWNED manual role switch (Profile Contract v2). Core has
+ * no current-role endpoint and never learns which role a session has chosen; this is the only
+ * place `SessionData.currentRole` is set from a direct user action (the login callback sets it
  * too, but only from its own role-resolution logic — see src/auth/routes.ts).
  *
  * `roles` are re-validated against Core `GET /users/me` on EVERY call rather than cached in the
@@ -19,7 +19,7 @@ import { ActiveRoleDataSchema } from "../../openapi/schemas.js";
  * which `withSession`'s generic 4xx passthrough already turns into a 403 here; no special-casing
  * needed.
  */
-export const setActiveRole = withSession(async (req, res, core) => {
+export const setCurrentRole = withSession(async (req, res, core) => {
   const role = (req.body as { role?: unknown } | undefined)?.role;
   if (!isRole(role)) {
     return sendProblem(res, 400, "role must be 'GUIDE' or 'PARTICIPANT'", { code: "INVALID_ROLE" });
@@ -36,9 +36,9 @@ export const setActiveRole = withSession(async (req, res, core) => {
   // the type checker happy without an extra (unreachable) branch to test.
   /* istanbul ignore next */
   const session = readSession(req) ?? {};
-  const next = { ...session, activeRole: role };
+  const next = { ...session, currentRole: role };
   if (session.onboardingRole === role) delete next.onboardingRole;
   writeSession(res, next);
 
-  sendData(res, { activeRole: role }, ActiveRoleDataSchema);
+  sendData(res, { currentRole: role }, CurrentRoleDataSchema);
 });
