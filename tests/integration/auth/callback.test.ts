@@ -2,16 +2,27 @@ import { jest } from "@jest/globals";
 import request from "supertest";
 import { app } from "@/app.js";
 import type { AuthTx } from "@/session.js";
-import { FAKE_TOKENS, cookieNamed, coreResponse, isCleared, mintAuthTxCookie } from "./_helpers.js";
+import {
+  FAKE_TOKENS,
+  cookieNamed,
+  coreResponse,
+  isCleared,
+  mintAuthTxCookie,
+  participantProfileResponse,
+} from "./_helpers.js";
 
 /**
- * No module mocking: exchangeCode and the Core /session call both go through
- * global.fetch. We stub fetch and route by URL — Google's token endpoint returns
- * a fake TokenSet, Core's /session returns whatever the test configures. This keeps
- * the REAL google.ts (PKCE, authorize URL, exchangeCode) and the REAL routes.ts.
+ * No module mocking: exchangeCode, the Core /session call, and (when roles include
+ * PARTICIPANT) the Core /participant/profile call all go through global.fetch. We stub
+ * fetch and route by URL — Google's token endpoint returns a fake TokenSet, Core's
+ * /session returns whatever the test configures, and /participant/profile (the source
+ * of PARENT status post Profile Contract v2) defaults to "no profile yet" (404) unless
+ * a test overrides it. This keeps the REAL google.ts (PKCE, authorize URL,
+ * exchangeCode) and the REAL routes.ts.
  */
 const GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token";
 const CORE_SESSION_PREFIX = "http://core.test/session";
+const CORE_PARTICIPANT_PROFILE_URL = "http://core.test/participant/profile";
 
 const STATE = "test-state-value";
 const baseTx: AuthTx = {
@@ -28,6 +39,10 @@ function txCookie(overrides: Partial<AuthTx> = {}): string {
 const fetchMock = jest.fn<typeof fetch>();
 /** What the next Core /session call resolves to (or null/reject). */
 let coreNext: { kind: "resolve"; value: Response } | { kind: "reject"; err: unknown };
+/** What the next Core /participant/profile call resolves to. Defaults to 404 ("no
+ *  profile yet") — routes.ts treats that as "not a parent" (best-effort, catches
+ *  any non-ok status). */
+let participantProfileNext: Response;
 /** Whether the Google token exchange should succeed. */
 let tokenOk: boolean;
 /** Captured Core call args for assertions. */
@@ -36,6 +51,7 @@ let lastCoreInit: RequestInit | undefined;
 beforeEach(() => {
   tokenOk = true;
   coreNext = { kind: "resolve", value: coreResponse(200, { roles: ["PARTICIPANT"] }) };
+  participantProfileNext = participantProfileResponse(404, undefined);
   lastCoreInit = undefined;
 
   fetchMock.mockReset();
@@ -50,6 +66,9 @@ beforeEach(() => {
       lastCoreInit = init;
       if (coreNext.kind === "reject") throw coreNext.err;
       return coreNext.value;
+    }
+    if (url === CORE_PARTICIPANT_PROFILE_URL) {
+      return participantProfileNext;
     }
     throw new Error(`unexpected fetch to ${url}`);
   }) as unknown as typeof fetch);
@@ -254,9 +273,9 @@ describe("GET /auth/callback — success landing + session", () => {
       value: coreResponse(200, {
         roles: ["PARTICIPANT"],
         activeRole: "PARTICIPANT",
-        participantType: "STUDENT",
       }),
     };
+    participantProfileNext = participantProfileResponse(200, { type: "STUDENT" });
 
     const res = await request(app)
       .get("/auth/callback")
@@ -288,6 +307,9 @@ describe("GET /auth/callback — success landing + session", () => {
       if (url.startsWith(CORE_SESSION_PREFIX)) {
         return coreResponse(200, { roles: ["PARTICIPANT"], activeRole: "PARTICIPANT" });
       }
+      if (url === CORE_PARTICIPANT_PROFILE_URL) {
+        return participantProfileResponse(404, undefined);
+      }
       throw new Error(`unexpected fetch to ${url}`);
     }) as unknown as typeof fetch);
 
@@ -318,8 +340,9 @@ describe("GET /auth/callback — success landing + session", () => {
   it("signup → /onboarding/guide, lacks GUIDE (not parent) → /onboarding/guide with session", async () => {
     coreNext = {
       kind: "resolve",
-      value: coreResponse(200, { roles: ["PARTICIPANT"], participantType: "STUDENT" }),
+      value: coreResponse(200, { roles: ["PARTICIPANT"] }),
     };
+    participantProfileNext = participantProfileResponse(200, { type: "STUDENT" });
 
     const res = await request(app)
       .get("/auth/callback")
@@ -345,10 +368,13 @@ describe("GET /auth/callback — success landing + session", () => {
 
 describe("GET /auth/callback — blocked vs bare-account branches", () => {
   it("blocked PARENT→guide → /signup/role?error=parent_no_guide AND NO session (cleared)", async () => {
+    // Profile Contract v2: Core /session no longer returns participantType — routes.ts
+    // must source it from /participant/profile's `type` instead (the fix under test).
     coreNext = {
       kind: "resolve",
-      value: coreResponse(200, { roles: ["PARTICIPANT"], participantType: "PARENT" }),
+      value: coreResponse(200, { roles: ["PARTICIPANT"] }),
     };
+    participantProfileNext = participantProfileResponse(200, { type: "PARENT" });
 
     const res = await request(app)
       .get("/auth/callback")
@@ -360,6 +386,24 @@ describe("GET /auth/callback — blocked vs bare-account branches", () => {
     // clearSession path: ctl_sess present but cleared (maxAge 0), never established.
     expect(isCleared(cookieNamed(res, "ctl_sess"))).toBe(true);
     expect(isCleared(cookieNamed(res, "ctl_auth_tx"))).toBe(true);
+  });
+
+  it("non-parent participant → /onboarding/guide is NOT blocked (participant/profile type=STUDENT)", async () => {
+    coreNext = {
+      kind: "resolve",
+      value: coreResponse(200, { roles: ["PARTICIPANT"] }),
+    };
+    participantProfileNext = participantProfileResponse(200, { type: "STUDENT" });
+
+    const res = await request(app)
+      .get("/auth/callback")
+      .query({ code: "abc", state: STATE })
+      .set("Cookie", txCookie({ intent: "signup", returnTo: "/onboarding/guide" }));
+
+    expect(res.status).toBe(302);
+    expect(res.headers.location).toBe("http://localhost:3001/onboarding/guide");
+    expect(cookieNamed(res, "ctl_sess")).toBeDefined();
+    expect(isCleared(cookieNamed(res, "ctl_sess"))).toBe(false);
   });
 
   it("bare account signin (roles=[]) → /signup/role?error=complete_signup WITH a session", async () => {

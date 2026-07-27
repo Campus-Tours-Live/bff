@@ -56,10 +56,25 @@ export const FAKE_TOKENS = {
   expires_in: 3600,
 } as const;
 
-/** Build a Core /session-style fetch Response stub. */
+/** Build a Core /session-style fetch Response stub. Profile Contract v2 shape:
+ *  `{ user, roles, activeRole }` — no top-level `participantType` (that now lives
+ *  on the participant profile; see {@link participantProfileResponse}). */
 export function coreResponse(
   status: number,
-  body?: { roles?: string[]; activeRole?: string | null; participantType?: string | null },
+  body?: { user?: unknown; roles?: string[]; activeRole?: string | null },
+): Response {
+  return {
+    ok: status >= 200 && status < 300,
+    status,
+    json: async () => (body === undefined ? {} : { data: body }),
+  } as unknown as Response;
+}
+
+/** Build a Core /participant/profile-style fetch Response stub — the source of
+ *  `type` (e.g. "PARENT") post Profile Contract v2. */
+export function participantProfileResponse(
+  status: number,
+  body?: { type?: string | null },
 ): Response {
   return {
     ok: status >= 200 && status < 300,

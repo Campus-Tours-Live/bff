@@ -176,20 +176,6 @@ export const GuideProfile = registry.register(
         .string()
         .optional()
         .openapi({ description: "Guide's user id.", example: "u_guide_123" }),
-      firstName: z.string().optional().openapi({ description: "Given name.", example: "Ada" }),
-      lastName: z.string().optional().openapi({ description: "Family name.", example: "Lovelace" }),
-      displayName: z
-        .string()
-        .optional()
-        .openapi({ description: "Name shown to participants.", example: "Ada L." }),
-      email: z
-        .string()
-        .optional()
-        .openapi({ description: "Contact email.", example: "ada@example.edu" }),
-      accountStatus: z
-        .string()
-        .optional()
-        .openapi({ description: "Overall account status from Core.", example: "ACTIVE" }),
       universityId: z.string().nullable().optional().openapi({
         description: "Id of the guide's university (null until set).",
         example: "uni_mit",
@@ -252,9 +238,12 @@ export const ParticipantProfile = registry.register(
         description: "Whether the participant is the student or a booking guardian.",
         example: "STUDENT",
       }),
-      applicationStatus: ApplicationStatusEnum.nullable().optional().openapi({
+      // Loose (not ApplicationStatusEnum): the participant applicationStatus values
+      // (PENDING/VERIFIED) are disjoint from the guide ApplicationStatusEnum
+      // (DRAFT/PENDING_REVIEW/APPROVED/REJECTED) — this embed forwards Core's value as-is.
+      applicationStatus: z.string().nullable().optional().openapi({
         description: "Participant application/review status (null if not yet set).",
-        example: "APPROVED",
+        example: "VERIFIED",
       }),
       gradeLevel: z
         .string()
@@ -529,11 +518,6 @@ export const guideDashboardExample = envelope({
   kind: "guide",
   guide: {
     userId: "u_guide_123",
-    firstName: "Ada",
-    lastName: "Lovelace",
-    displayName: "Ada L.",
-    email: "ada@example.edu",
-    accountStatus: "ACTIVE",
     universityId: "uni_mit",
     universityName: "Massachusetts Institute of Technology",
     universityShortName: "MIT",

@@ -17,6 +17,7 @@ import {
 } from "./google.js";
 import { sendProblem } from "../util/problem.js";
 import { csrfGuard } from "../util/csrf.js";
+import { CoreClient, type Json } from "../api/_shared/index.js";
 
 export const authRouter: Router = Router();
 
@@ -54,6 +55,15 @@ export function safeReturnTo(raw: string | undefined): string {
 }
 function webUrl(path: string): string {
   return new URL(path, config.webBaseUrl).toString();
+}
+
+/** Best-effort: no participant profile yet (e.g. brand-new account) degrades to null,
+ *  same treatment as a non-parent — mirrors onboarding.handler.ts's participantTypeOf.
+ *  Profile Contract v2 moved `type` off /session onto this role-specific profile. */
+async function participantTypeOf(bearer: string): Promise<string | null> {
+  const core = new CoreClient(bearer);
+  const profile = await core.getParticipantProfile<Json>().catch(() => null);
+  return (profile?.type as string | null | undefined) ?? null;
 }
 
 /** Consumer home after auth. Both roles share /dashboard; the active role decides
@@ -205,12 +215,18 @@ authRouter.get("/callback", async (req, res) => {
 
   // Role-aware landing (see landingFor): entering a role's signup when you don't
   // hold that role takes you to ITS onboarding (acquire it), not a silent login.
+  // Profile Contract v2 dropped `participantType` from the Core `me(...)` builder, so
+  // it's no longer on this /session response — source PARENT status from the
+  // participant profile instead (same pattern as onboarding.handler.ts's
+  // participantTypeOf).
   const resolved = (await resolve.json().catch(() => null)) as {
-    data?: { roles?: string[]; activeRole?: string | null; participantType?: string | null };
+    data?: { roles?: string[]; activeRole?: string | null };
   } | null;
   const roles = resolved?.data?.roles ?? [];
   const activeRole = resolved?.data?.activeRole ?? null;
-  const participantType = resolved?.data?.participantType ?? null;
+  const participantType = roles.includes("PARTICIPANT")
+    ? await participantTypeOf(tokens.id_token ?? "")
+    : null;
 
   const dest = landingFor(tx.returnTo, roles, activeRole, participantType);
   clearAuthTx(res);
