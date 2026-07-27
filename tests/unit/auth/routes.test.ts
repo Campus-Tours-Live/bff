@@ -3,9 +3,10 @@ import { landingFor, safeReturnTo } from "@/auth/routes.js";
 /**
  * Pure-helper unit tests for the two security/routing decisions inside the auth
  * router. `safeReturnTo` is the open-redirect defence (mirror of the web app's
- * sanitizeReturnTo); `landingFor` is the post-auth role-landing decision. Both
- * were untested at the unit level before — only exercised behaviourally — so the
- * allowlist rejections and the PARENT/PARTICIPANT branches had no direct assertion.
+ * sanitizeReturnTo); `landingFor` is the post-auth landing decision for the
+ * NO-requested-role case (CTL-97 Task 1.5-BFF2 moved the target-role/PARENT-gate
+ * branches into the callback itself, since they now also mutate the session — see
+ * tests/integration/auth/callback.test.ts for those).
  */
 
 describe("safeReturnTo (open-redirect allowlist)", () => {
@@ -57,69 +58,29 @@ describe("safeReturnTo (open-redirect allowlist)", () => {
   });
 });
 
-describe("landingFor (post-auth role landing)", () => {
-  describe("with a GUIDE target (returnTo under /onboarding/guide)", () => {
-    const rt = "/onboarding/guide";
-
-    it("→ /dashboard when the user already holds GUIDE (effectively a login)", () => {
-      expect(landingFor(rt, ["GUIDE"], "GUIDE", null)).toBe("/dashboard");
-    });
-
-    it("→ guide onboarding when the role is lacked and acquirable", () => {
-      expect(landingFor(rt, ["PARTICIPANT"], "PARTICIPANT", "STUDENT")).toBe("/onboarding/guide");
-    });
-
-    it("→ /signup/role notice when a PARENT participant tries to become a guide", () => {
-      expect(landingFor(rt, ["PARTICIPANT"], "PARTICIPANT", "PARENT")).toBe(
-        "/signup/role?error=parent_no_guide",
-      );
-    });
-
-    it("→ guide onboarding from a bare account (no roles, no participantType)", () => {
-      expect(landingFor(rt, [], null, null)).toBe("/onboarding/guide");
-    });
+describe("landingFor (post-auth landing, no requested role)", () => {
+  it("→ /dashboard when the account holds any role and returnTo is the default", () => {
+    expect(landingFor("/dashboard", ["PARTICIPANT"])).toBe("/dashboard");
+    // "/" is not allow-listed → normalised to the default → home, not honoured.
+    expect(landingFor("/", ["GUIDE"])).toBe("/dashboard");
   });
 
-  describe("with a PARTICIPANT target (returnTo under /onboarding/participant)", () => {
-    const rt = "/onboarding/participant";
-
-    it("→ /dashboard when the user already holds PARTICIPANT", () => {
-      expect(landingFor(rt, ["PARTICIPANT"], "PARTICIPANT", "STUDENT")).toBe("/dashboard");
-    });
-
-    it("→ participant onboarding when the role is lacked", () => {
-      expect(landingFor(rt, [], null, null)).toBe("/onboarding/participant");
-    });
-
-    it("the PARENT guard does NOT apply to the PARTICIPANT target", () => {
-      // PARENT only blocks GUIDE; becoming a participant is always fine.
-      expect(landingFor(rt, [], null, "PARENT")).toBe("/onboarding/participant");
-    });
+  it("→ the returnTo when a registered user came from a specific allow-listed page", () => {
+    expect(landingFor("/profile/settings", ["PARTICIPANT"])).toBe("/profile/settings");
+    expect(landingFor("/guide/availability", ["GUIDE"])).toBe("/guide/availability");
   });
 
-  describe("with no target (plain sign-in)", () => {
-    it("→ /dashboard when the account holds any role and returnTo is the default", () => {
-      expect(landingFor("/dashboard", ["PARTICIPANT"], "PARTICIPANT", null)).toBe("/dashboard");
-      // "/" is not allow-listed → normalised to the default → home, not honoured.
-      expect(landingFor("/", ["GUIDE"], "GUIDE", null)).toBe("/dashboard");
-    });
+  it("→ the returnTo even with multiple held roles (role selection is client-side on activeRole=null)", () => {
+    expect(landingFor("/profile/settings", ["GUIDE", "PARTICIPANT"])).toBe("/profile/settings");
+    expect(landingFor("/dashboard", ["GUIDE", "PARTICIPANT"])).toBe("/dashboard");
+  });
 
-    it("→ the returnTo when a registered user came from a specific allow-listed page", () => {
-      expect(landingFor("/profile/settings", ["PARTICIPANT"], "PARTICIPANT", null)).toBe(
-        "/profile/settings",
-      );
-      expect(landingFor("/guide/availability", ["GUIDE"], "GUIDE", null)).toBe(
-        "/guide/availability",
-      );
-    });
+  it("does NOT honour an unsafe returnTo for a registered user (open-redirect guard)", () => {
+    expect(landingFor("//evil.com", ["GUIDE"])).toBe("/dashboard");
+    expect(landingFor("/secret", ["GUIDE"])).toBe("/dashboard");
+  });
 
-    it("does NOT honour an unsafe returnTo for a registered user (open-redirect guard)", () => {
-      expect(landingFor("//evil.com", ["GUIDE"], "GUIDE", null)).toBe("/dashboard");
-      expect(landingFor("/secret", ["GUIDE"], "GUIDE", null)).toBe("/dashboard");
-    });
-
-    it("→ /signup/role notice when the account holds no role yet", () => {
-      expect(landingFor("/dashboard", [], null, null)).toBe("/signup/role?error=complete_signup");
-    });
+  it("→ /signup/role notice when the account holds no role yet", () => {
+    expect(landingFor("/dashboard", [])).toBe("/signup/role?error=complete_signup");
   });
 });

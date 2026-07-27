@@ -22,16 +22,20 @@ import {
   registry,
   coreApiBaseUrl,
   RoleEnum,
+  CoreRoleEnum,
   Dashboard,
   Progress,
   SessionStatus,
   Userinfo,
+  ActiveRoleSchema,
+  SetActiveRoleRequestSchema,
   problem,
   guideDashboardExample,
   participantDashboardExample,
   guideProgressExample,
   participantProgressExample,
   userinfoExample,
+  activeRoleExample,
   envelope,
   writeEnvelope,
   BookingResponseSchema,
@@ -60,6 +64,7 @@ import {
   envelopedWrite,
   problem400,
   problem401,
+  problem403,
   problem404,
   problem409,
   problem422,
@@ -323,6 +328,10 @@ apiRoute({
     "applying to be a guide still has `activeRole = PARTICIPANT`. Guide progress is coarse for " +
     "now (the field-level verification checklist is deferred). The frontend calls this to render " +
     "the onboarding checklist for the role being set up.\n\n" +
+    "**Onboarding guard (CTL-97):** allowed iff `roles.includes(role)` (already holds it) OR " +
+    "this session's `onboardingRole === role` (mid-acquisition, set by `GET /auth/callback`) — " +
+    "else 403. This is why a brand-new signup (Core `roles: []`) is NOT bounced: it's gated by " +
+    "`onboardingRole`, not held roles.\n\n" +
     "**Auth:** requires the `ctl_sess` session cookie (sign in via `GET /auth/login` first).",
   request: {
     query: z.object({
@@ -344,12 +353,60 @@ apiRoute({
       },
     }),
     401: problem401("No/expired session or a Core 401."),
+    403: problem403(
+      "ONBOARDING_NOT_AUTHORIZED",
+      "Not authorized for this role's onboarding",
+      "`role` is neither held by the account nor this session's in-progress `onboardingRole`.",
+    ),
     422: problem422(
       "INVALID_ROLE",
       "role must be 'guide' or 'participant'",
       "`role` was missing or not 'guide'|'participant'.",
     ),
     502: problem502("The Core API was unreachable or returned a 5xx."),
+  },
+});
+
+// POST /v1/session/active-role
+apiRoute({
+  method: "post",
+  path: "/v1/session/active-role",
+  tags: ["Session"],
+  summary: "Switch this session's active role",
+  description:
+    "Manually switches THIS bff session's `activeRole` to a role the account holds. `roles` are " +
+    "re-validated against Core `GET /users/me` on EVERY call — never cached in the session (a " +
+    "second staleable copy). If the account was mid-acquisition of this same role " +
+    "(`session.onboardingRole === role`, e.g. onboarding just succeeded), that in-progress " +
+    "marker is cleared HERE — the handler owns this cleanup, not the frontend. Core has no " +
+    "active-role endpoint and never learns which role a session has chosen.\n\n" +
+    "A role the account does not hold → 403 with the session left UNCHANGED. A " +
+    "disabled/suspended account surfaces as a Core 403 (`ACCOUNT_NOT_ACTIVE`, carried in " +
+    "`Problem.title`) via the same generic 4xx passthrough.\n\n" +
+    "**CSRF-guarded** (state-changing mutation) — a cross-site POST is rejected.",
+  request: {
+    body: {
+      content: {
+        "application/json": { schema: SetActiveRoleRequestSchema, example: { role: "GUIDE" } },
+      },
+    },
+  },
+  responses: {
+    200: enveloped(ActiveRoleSchema, {
+      description: "The now-active role, wrapped in the standard success envelope.",
+      example: activeRoleExample,
+    }),
+    400: problem400(
+      "INVALID_ROLE",
+      "role must be 'GUIDE' or 'PARTICIPANT'",
+      "`role` was missing or not a recognised role value.",
+    ),
+    403: problem403(
+      "ROLE_NOT_HELD",
+      "Role not held by this account",
+      "The account does not currently hold the requested role (session left unchanged), or the " +
+        "account is disabled (Core `ACCOUNT_NOT_ACTIVE`).",
+    ),
   },
 });
 
@@ -1158,8 +1215,9 @@ apiRoute({
   description:
     "Begins the OAuth 2.0 / OIDC Authorization Code + PKCE flow and 302-redirects the browser to " +
     "Google's authorization endpoint. Sets a short-lived `ctl_auth_tx` transaction cookie holding " +
-    "the PKCE verifier, state, sanitized `returnTo`, and `intent`. This is the entry point you use " +
-    "to obtain a session cookie so protected endpoints become exercisable from `/docs`.",
+    "the PKCE verifier, state, sanitized `returnTo`, `intent`, and `requestedRole` (CTL-97). This " +
+    "is the entry point you use to obtain a session cookie so protected endpoints become " +
+    "exercisable from `/docs`.",
   request: {
     query: z.object({
       returnTo: z
@@ -1176,6 +1234,13 @@ apiRoute({
         description:
           "`signup` provisions a new account against Core; `signin` requires an existing one.",
         example: "signin",
+      }),
+      role: CoreRoleEnum.optional().openapi({
+        description:
+          "The role this entry is for (CTL-97) — written into the auth transaction and read " +
+          "back by the callback to decide activeRole/onboardingRole initialisation. Preferred " +
+          "over inferring a role from `returnTo` (a legacy, marked-for-removal fallback).",
+        example: "GUIDE",
       }),
       login_hint: z.string().optional().openapi({
         description: "Optional email hint forwarded to Google to pre-fill the account chooser.",
@@ -1202,9 +1267,12 @@ apiRoute({
     "Handles Google's redirect: validates PKCE state against `ctl_auth_tx`, exchanges the code for " +
     "tokens, resolves the account against Core `/session?intent=` (enforcing signup vs signin), then " +
     "302-redirects into the web app. On success it establishes the `ctl_sess` session cookie and " +
-    "lands the user by role (their role's home, that role's onboarding, or role selection). Provider " +
-    "errors and role-blocked cases (e.g. PARENT→guide) redirect back into the UI WITHOUT a session. " +
-    "You don't call this directly — Google does.",
+    "initialises this session's role state from `requestedRole` (written by `GET /auth/login`, " +
+    "CTL-97): holding it → `activeRole` (role home); lacking it on signup (and eligible — see " +
+    "Core role-eligibility) → `onboardingRole` + that role's onboarding; lacking it on signin → " +
+    "`/signup/role`; no `requestedRole` with exactly one held role → `activeRole` initialised to " +
+    "it; otherwise role selection. Provider errors and role-blocked cases (e.g. PARENT→guide) " +
+    "redirect back into the UI WITHOUT a session. You don't call this directly — Google does.",
   request: {
     query: z.object({
       code: z
@@ -1236,12 +1304,14 @@ apiRoute({
     400: problem400(
       "AUTH_TX_MISSING",
       "Login session expired — please start again.",
-      "Missing/expired `ctl_auth_tx` transaction cookie (`AUTH_TX_MISSING`), or missing code / " +
-        "invalid state (`AUTH_STATE_INVALID`).",
+      "Missing/expired `ctl_auth_tx` transaction cookie (`AUTH_TX_MISSING`), missing code / " +
+        "invalid state (`AUTH_STATE_INVALID`), or a missing/invalid `intent` on the transaction " +
+        "(`AUTH_INTENT_INVALID`) — never defaulted to signup.",
     ),
     502: problem502(
       "Token exchange (`AUTH_EXCHANGE_FAILED`) or account resolution against Core " +
-        "(`CORE_UNAVAILABLE` / `RESOLVE_FAILED`) failed.",
+        "(`CORE_UNAVAILABLE` / `RESOLVE_FAILED`) failed — the latter also covers a failed " +
+        "role-eligibility check on a signup that lacks `requestedRole`.",
       problem(502, "Account resolution failed", "CORE_UNAVAILABLE"),
     ),
   },

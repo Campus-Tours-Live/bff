@@ -223,6 +223,33 @@ export const Userinfo = registry.register(
     }),
 );
 
+// --- POST /v1/session/active-role (bff-owned) ---
+
+/** Request body for `POST /v1/session/active-role`. */
+export const SetActiveRoleRequestSchema = z.object({
+  role: CoreRoleEnum.openapi({
+    description: "The role to make active for this session — must be a role the account holds.",
+    example: "GUIDE",
+  }),
+});
+
+/**
+ * `POST /v1/session/active-role` response `data` (src/api/session/active-role.handler.ts) —
+ * the manual role-switch counterpart to `Userinfo.activeRole`. Deliberately lean: just the
+ * now-active role, echoed back on success.
+ */
+export const ActiveRoleSchema = registry.register(
+  "ActiveRole",
+  z
+    .object({
+      activeRole: CoreRoleEnum.openapi({
+        description: "The role this session is now active as (echo of the request `role`).",
+        example: "GUIDE",
+      }),
+    })
+    .openapi("ActiveRole", { description: "This session's newly-switched active role." }),
+);
+
 // --- Domain sub-schemas (forwarded from Core; field names per Contract A) ---
 
 /** A guide's public/profile record (Core, forwarded verbatim by the BFF). */
@@ -586,6 +613,8 @@ export const userinfoExample = envelope({
   roles: ["GUIDE"],
   activeRole: "GUIDE",
 });
+
+export const activeRoleExample = envelope({ activeRole: "GUIDE" });
 
 export const guideDashboardExample = envelope({
   kind: "guide",
@@ -1295,6 +1324,14 @@ export const UserinfoDataSchema = z.object({
 
 /** Full enveloped GET /v1/userinfo response contract. */
 export const EnvelopedUserinfoSchema = envelopeOf(UserinfoDataSchema);
+
+/** POST /v1/session/active-role `data` — entirely BFF-owned (strict). */
+export const ActiveRoleDataSchema = z.object({
+  activeRole: z.enum(["GUIDE", "PARTICIPANT"]),
+});
+
+/** Full enveloped POST /v1/session/active-role response contract. */
+export const EnvelopedActiveRoleSchema = envelopeOf(ActiveRoleDataSchema);
 
 /** GET /v1/dashboard guide `data` — strict on `kind`/`canPublish`/`offerings` (BFF-owned). */
 export const GuideDashboardDataSchema = z.object({

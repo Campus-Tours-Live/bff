@@ -33,3 +33,15 @@ export interface Me {
 export interface Userinfo extends Me {
   activeRole: Role | null;
 }
+
+/**
+ * Core `GET /users/me/role-eligibility?role=` response (`CoreClient.getRoleEligibility`) — the
+ * authoritative "can this account acquire this role" check (e.g. a PARENT participant is never
+ * GUIDE-eligible). `reason` is a typed enum, not a free string (the bff routes on it), and is
+ * `null` whenever `eligible` is `true`. Consumed by the login callback (CTL-97 Task 1.5-BFF2)
+ * to gate the PARENT→guide case.
+ */
+export interface RoleEligibility {
+  eligible: boolean;
+  reason: "PARENT_CANNOT_BECOME_GUIDE" | "ROLE_ALREADY_HELD" | null;
+}

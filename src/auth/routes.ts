@@ -3,10 +3,13 @@ import { config } from "../config.js";
 import {
   clearAuthTx,
   clearSession,
+  isRole,
   readAuthTx,
   readSession,
   writeAuthTx,
   writeSession,
+  type Role,
+  type SessionData,
 } from "../session.js";
 import {
   buildAuthorizeUrl,
@@ -17,7 +20,7 @@ import {
 } from "./google.js";
 import { sendProblem } from "../util/problem.js";
 import { csrfGuard } from "../util/csrf.js";
-import { CoreClient, type Json } from "../api/_shared/index.js";
+import { CoreClient, type RoleEligibility } from "../api/_shared/index.js";
 
 export const authRouter: Router = Router();
 
@@ -57,75 +60,58 @@ function webUrl(path: string): string {
   return new URL(path, config.webBaseUrl).toString();
 }
 
-/** Best-effort: no participant profile yet (e.g. brand-new account) degrades to null,
- *  same treatment as a non-parent — mirrors onboarding.handler.ts's participantTypeOf.
- *  Profile Contract v2 moved `type` off /session onto this role-specific profile. */
-async function participantTypeOf(bearer: string): Promise<string | null> {
-  const core = new CoreClient(bearer);
-  const profile = await core.getParticipantProfile<Json>().catch(() => null);
-  return (profile?.type as string | null | undefined) ?? null;
-}
-
 /** Consumer home after auth. Both roles share /dashboard; the active role decides
  *  the view client-side. Single source for the path. */
 const CONSUMER_HOME = "/dashboard";
 
 /**
- * Where to land after auth. The signup area the user entered implies a TARGET
- * role (via returnTo); combined with the roles they actually hold:
- *   - hold the target role            → that role's home (it's effectively a login)
- *   - lack it, and may acquire it     → that role's onboarding (add the role)
- *   - lack it, PARENT→guide excluded  → /signup/role with a notice
- *   - no target (signin)              → an existing role's home, else pick a role
+ * Where to land after auth when there is NO requested role to reason about (a role-agnostic
+ * entry, or one already resolved to a role-specific destination by the callback). Pure — the
+ * session mutation (activeRole/onboardingRole) lives in the callback, not here.
+ *   - holds any role     → the specific allow-listed page the user came from (safeRt), or
+ *                          CONSUMER_HOME when returnTo was absent/default
+ *   - holds no role yet  → role selection with a "continue signup" notice (not a rejection —
+ *                          the session is kept so the account can finish picking a role)
  */
-// Exported for unit testing — the role-routing core (the callback's only landing
-// decision). `activeRole` is currently unread but kept for a stable signature.
-export function landingFor(
-  returnTo: string,
-  roles: string[],
-  activeRole: string | null,
-  participantType: string | null,
-): string {
+// Exported for unit testing — the no-target-role landing decision.
+export function landingFor(returnTo: string, roles: string[]): string {
   // Re-validate here too: landingFor is exported and unit-tested with raw values, and the
   // returnTo honoured below must never trust an un-sanitised path (open-redirect defence).
   // safeReturnTo is idempotent, so this is a no-op on the already-sanitised callback value.
   const safeRt = safeReturnTo(returnTo);
-
-  const targetRole = safeRt.startsWith("/onboarding/guide")
-    ? "GUIDE"
-    : safeRt.startsWith("/onboarding/participant")
-      ? "PARTICIPANT"
-      : null;
-
-  if (targetRole) {
-    if (roles.includes(targetRole)) return CONSUMER_HOME;
-    if (targetRole === "GUIDE" && participantType === "PARENT") {
-      return "/signup/role?error=parent_no_guide";
-    }
-    return targetRole === "GUIDE" ? "/onboarding/guide" : "/onboarding/participant";
-  }
-
-  // A returning user who already holds a role: land them back on the specific allow-listed page
-  // they came from (safeRt), not always /dashboard. Fall back to home when returnTo was
-  // absent/default (safeRt === DEFAULT_RETURN_TO).
   if (roles.length > 0) return safeRt !== DEFAULT_RETURN_TO ? safeRt : CONSUMER_HOME;
-  // Account exists but holds no role yet (e.g. signed up then abandoned onboarding,
-  // now signing in) → send to role selection with a notice. This is a continuation,
-  // not a rejection (see the session handling in the callback).
   return "/signup/role?error=complete_signup";
 }
 
 /**
+ * Legacy fallback for `requestedRole` when the login entry didn't set one explicitly (an older
+ * client, or a link built before `?role=` existed). Derives a role purely from the onboarding
+ * area `returnTo` points at.
+ *
+ * TODO(CTL-97): remove legacy returnTo inference once entries pass ?role=
+ */
+function inferLegacyRole(returnTo: string): Role | null {
+  const safeRt = safeReturnTo(returnTo);
+  if (safeRt.startsWith("/onboarding/guide")) return "GUIDE";
+  if (safeRt.startsWith("/onboarding/participant")) return "PARTICIPANT";
+  return null;
+}
+
+/**
  * GET /auth/login — start Google sign-in.
- * Query: returnTo, intent (signup|signin), login_hint (optional email hint).
+ * Query: returnTo, intent (signup|signin), role (GUIDE|PARTICIPANT, optional), login_hint
+ * (optional email hint).
  */
 authRouter.get("/login", (req, res) => {
   const returnTo = safeReturnTo(req.query.returnTo as string | undefined);
   const intent = req.query.intent === "signup" ? "signup" : "signin";
+  // Written explicitly by THIS entry point — the callback's source of truth for
+  // `requestedRole`, not derived from `returnTo` (see inferLegacyRole's TODO for the fallback).
+  const requestedRole = isRole(req.query.role) ? req.query.role : undefined;
 
   const { verifier, challenge } = createPkce();
   const state = randomState();
-  writeAuthTx(res, { state, codeVerifier: verifier, returnTo, intent });
+  writeAuthTx(res, { state, codeVerifier: verifier, returnTo, intent, requestedRole });
   const url = buildAuthorizeUrl({
     state,
     codeChallenge: challenge,
@@ -181,6 +167,16 @@ authRouter.get("/callback", async (req, res) => {
     clearAuthTx(res);
     return sendProblem(res, 400, "Invalid authentication state", { code: "AUTH_STATE_INVALID" });
   }
+
+  // 3b) The tx cookie is decrypted JSON with no runtime schema validation, so a stale/tampered
+  // value could carry a garbage `intent`. Reject explicitly — NEVER default to "signup" (that
+  // would silently provision an account for what was meant to be a signin).
+  if (tx.intent !== "signup" && tx.intent !== "signin") {
+    console.warn(`[auth/callback] invalid tx intent: ${String(tx.intent)}`);
+    clearAuthTx(res);
+    return sendProblem(res, 400, "Invalid authentication state", { code: "AUTH_INTENT_INVALID" });
+  }
+
   let tokens;
   try {
     tokens = await exchangeCode(code, tx.codeVerifier);
@@ -213,40 +209,80 @@ authRouter.get("/callback", async (req, res) => {
     return sendProblem(res, 502, "Account resolution failed", { code: "RESOLVE_FAILED" });
   }
 
-  // Role-aware landing (see landingFor): entering a role's signup when you don't
-  // hold that role takes you to ITS onboarding (acquire it), not a silent login.
-  // Profile Contract v2 dropped `participantType` from the Core `me(...)` builder, so
-  // it's no longer on this /session response — source PARENT status from the
-  // participant profile instead (same pattern as onboarding.handler.ts's
-  // participantTypeOf).
+  // Profile Contract v2: Core's /session response is pure identity + held roles, no
+  // `activeRole` (that's bff session state, decided below) and no `participantType`
+  // (PARENT status is sourced from Core's role-eligibility check instead, only when needed).
   const resolved = (await resolve.json().catch(() => null)) as {
-    data?: { roles?: string[]; activeRole?: string | null };
+    data?: { roles?: string[] };
   } | null;
   const roles = resolved?.data?.roles ?? [];
-  const activeRole = resolved?.data?.activeRole ?? null;
-  const participantType = roles.includes("PARTICIPANT")
-    ? await participantTypeOf(tokens.id_token ?? "")
-    : null;
+  const bearer = tokens.id_token ?? "";
 
-  const dest = landingFor(tx.returnTo, roles, activeRole, participantType);
+  // requestedRole is written explicitly by GET /auth/login, NOT derived from returnTo — the
+  // legacy fallback below is a stopgap for entries that predate `?role=`.
+  // TODO(CTL-97): remove legacy returnTo inference once entries pass ?role=
+  const requestedRole: Role | null = tx.requestedRole ?? inferLegacyRole(tx.returnTo);
+
+  // Tokens established regardless of role outcome below — the role fields are set/left unset
+  // per branch, then the WHOLE session (tokens + role) is written once, before the redirect
+  // (see the persistence-order note above writeSession further down).
+  const session: SessionData = {
+    idToken: tokens.id_token,
+    accessToken: tokens.access_token,
+    refreshToken: tokens.refresh_token,
+    expiresAt: Date.now() + tokens.expires_in * 1000,
+  };
+
+  let dest: string;
+  // A blocked action (PARENT→guide → /signup/role?error=parent_no_guide) is a rejection, not a
+  // login: don't establish a session, so the user stays logged out.
+  let blocked = false;
+
+  if (requestedRole && roles.includes(requestedRole)) {
+    // Holds the requested role already — effectively a login into that role (signin or signup).
+    session.activeRole = requestedRole;
+    delete session.onboardingRole;
+    dest = CONSUMER_HOME;
+  } else if (requestedRole && tx.intent === "signup") {
+    // Lacks it, trying to acquire it via signup — gate on Core's authoritative eligibility
+    // check (e.g. a PARENT participant may never become a GUIDE) rather than a profile field.
+    let eligibility: RoleEligibility;
+    try {
+      eligibility = await new CoreClient(bearer).getRoleEligibility<RoleEligibility>(requestedRole);
+    } catch {
+      clearAuthTx(res);
+      return sendProblem(res, 502, "Account resolution failed", { code: "RESOLVE_FAILED" });
+    }
+    if (!eligibility.eligible && eligibility.reason === "PARENT_CANNOT_BECOME_GUIDE") {
+      dest = "/signup/role?error=parent_no_guide";
+      blocked = true;
+    } else {
+      session.onboardingRole = requestedRole;
+      dest = requestedRole === "GUIDE" ? "/onboarding/guide" : "/onboarding/participant";
+    }
+  } else if (requestedRole) {
+    // Lacks it, signin — can't sign in as a role the account doesn't hold.
+    delete session.onboardingRole;
+    dest = "/signup/role";
+  } else {
+    // No requested role (a role-agnostic entry). A single held role initialises activeRole
+    // HERE, explicitly — not silently on the next /userinfo read. Zero or multiple held roles
+    // leave activeRole unset (frontend shows role selection on `activeRole === null`).
+    const onlyRole = roles.length === 1 ? roles[0] : undefined;
+    if (isRole(onlyRole)) session.activeRole = onlyRole;
+    dest = landingFor(tx.returnTo, roles);
+  }
+
   clearAuthTx(res);
-
-  // A blocked action (PARENT→guide → /signup/role?error=parent_no_guide) is a
-  // rejection, not a login: don't establish a session, so the user stays logged out.
-  // (complete_signup is NOT blocked — the bare account keeps its session so it can
-  // finish picking a role.)
-  const blocked = dest.includes("error=parent_no_guide");
   if (blocked) {
     clearSession(res);
   } else {
-    writeSession(res, {
-      idToken: tokens.id_token,
-      accessToken: tokens.access_token,
-      refreshToken: tokens.refresh_token,
-      expiresAt: Date.now() + tokens.expires_in * 1000,
-    });
+    writeSession(res, session);
   }
-  console.log(`[auth/callback] roles=[${roles}] → ${dest}${blocked ? " (no session)" : ""}`);
+  console.log(
+    `[auth/callback] roles=[${roles}] requestedRole=${requestedRole ?? "-"} → ${dest}` +
+      `${blocked ? " (no session)" : ""}`,
+  );
   return res.redirect(webUrl(dest));
 });
 

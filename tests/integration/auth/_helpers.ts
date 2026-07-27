@@ -82,3 +82,17 @@ export function participantProfileResponse(
     json: async () => (body === undefined ? {} : { data: body }),
   } as unknown as Response;
 }
+
+/** Build a Core `GET /users/me/role-eligibility?role=`-style fetch Response stub (CTL-97
+ *  Task 1.5-BFF2) — the source of the PARENT→guide gate, replacing the old participant-profile
+ *  check. `reason` is `RoleIneligibilityReason`, null when eligible. */
+export function roleEligibilityResponse(
+  status: number,
+  body?: { eligible: boolean; reason: string | null },
+): Response {
+  return {
+    ok: status >= 200 && status < 300,
+    status,
+    json: async () => (body === undefined ? {} : { data: body }),
+  } as unknown as Response;
+}

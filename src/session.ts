@@ -116,6 +116,12 @@ export interface AuthTx {
   returnTo: string;
   /** "signup" provisions a new account; "signin" requires an existing one. */
   intent: "signup" | "signin";
+  /**
+   * The role `GET /auth/login` was entered for, written explicitly by that entry point (CTL-97
+   * Task 1.5-BFF2) — NOT derived from `returnTo` (which only decides the post-success
+   * destination). Absent when the entry was role-agnostic (e.g. a generic "Sign in" link).
+   */
+  requestedRole?: Role;
 }
 
 export function writeAuthTx(res: Response, tx: AuthTx): void {

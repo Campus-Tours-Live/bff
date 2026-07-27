@@ -29,6 +29,9 @@ describe("GET /v1/onboarding", () => {
   });
 
   it("?role=guide → 200 guide progress derived from /guide/profile", async () => {
+    // Lacks GUIDE but is mid-acquisition (onboardingRole set, e.g. by the login callback) —
+    // the onboarding guard authorizes via onboardingRole, not held roles.
+    cookie = mintSessionCookie({ onboardingRole: "GUIDE" });
     mockCoreByPath({
       "/users/me": usersMeOk(["PARTICIPANT"]),
       "/guide/profile": coreOk({ applicationStatus: "PENDING" }),
@@ -47,6 +50,7 @@ describe("GET /v1/onboarding", () => {
   });
 
   it("?role=guide with no guide profile yet → not started", async () => {
+    cookie = mintSessionCookie({ onboardingRole: "GUIDE" });
     mockCoreByPath({
       "/users/me": usersMeOk(["PARTICIPANT"]),
       "/guide/profile": coreErr(404),
@@ -77,6 +81,7 @@ describe("GET /v1/onboarding", () => {
   });
 
   it("?role=participant without the role yet → incomplete", async () => {
+    cookie = mintSessionCookie({ onboardingRole: "PARTICIPANT" });
     mockCoreByPath({
       "/users/me": usersMeOk(["GUIDE"]),
       "/participant/profile": coreErr(404),
@@ -90,6 +95,9 @@ describe("GET /v1/onboarding", () => {
   });
 
   it("brand-new user (no roles yet) → participant onboarding not started, incomplete", async () => {
+    // The onboarding guard is gated by onboardingRole, not held roles — this is exactly why a
+    // brand-new signup (Core roles: []) is not bounced (CTL-97).
+    cookie = mintSessionCookie({ onboardingRole: "PARTICIPANT" });
     mockCoreByPath({
       "/users/me": usersMeOk([]),
       "/participant/profile": coreErr(404),
@@ -106,6 +114,7 @@ describe("GET /v1/onboarding", () => {
   });
 
   it("brand-new user (no roles, no guide profile) → guide onboarding not started, incomplete", async () => {
+    cookie = mintSessionCookie({ onboardingRole: "GUIDE" });
     mockCoreByPath({
       "/users/me": usersMeOk([]),
       "/guide/profile": coreErr(404),
@@ -170,5 +179,41 @@ describe("GET /v1/onboarding", () => {
 
     expect(res.status).toBe(401);
     expect(res.headers["auth-required"]).toBe("reauthenticate");
+  });
+});
+
+describe("GET /v1/onboarding — onboarding guard (CTL-97)", () => {
+  it("lacks the role and no onboardingRole set → 403, no profile read", async () => {
+    const cookie = mintSessionCookie(); // no onboardingRole at all
+    const mock = mockCoreByPath({ "/users/me": usersMeOk(["PARTICIPANT"]) });
+
+    const res = await request(app).get("/v1/onboarding?role=guide").set("Cookie", cookie);
+
+    expect(res.status).toBe(403);
+    expect(res.body).toMatchObject({ status: 403, code: "ONBOARDING_NOT_AUTHORIZED" });
+    // Only /users/me was read — the guard rejects before the guide-profile fan-out.
+    expect(mock.mock.calls.map((c) => new URL(String(c[0])).pathname)).toEqual(["/users/me"]);
+  });
+
+  it("onboardingRole set for a DIFFERENT role → still 403 (not a blanket onboarding pass)", async () => {
+    const cookie = mintSessionCookie({ onboardingRole: "PARTICIPANT" });
+    mockCoreByPath({ "/users/me": usersMeOk([]) });
+
+    const res = await request(app).get("/v1/onboarding?role=guide").set("Cookie", cookie);
+
+    expect(res.status).toBe(403);
+    expect(res.body).toMatchObject({ code: "ONBOARDING_NOT_AUTHORIZED" });
+  });
+
+  it("held role authorizes even with no onboardingRole set", async () => {
+    const cookie = mintSessionCookie();
+    mockCoreByPath({
+      "/users/me": usersMeOk(["GUIDE"]),
+      "/guide/profile": coreOk({ applicationStatus: "APPROVED" }),
+    });
+
+    const res = await request(app).get("/v1/onboarding?role=guide").set("Cookie", cookie);
+
+    expect(res.status).toBe(200);
   });
 });

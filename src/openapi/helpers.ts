@@ -112,6 +112,11 @@ export function problem400(code: string, title: string, description: string): Re
   return problemResponse(description, problem(400, title, code));
 }
 
+/** Standard `403 Forbidden` with a stable `code` (e.g. ROLE_NOT_HELD). */
+export function problem403(code: string, title: string, description: string): ResponseConfig {
+  return problemResponse(description, problem(403, title, code));
+}
+
 /** Standard `404 Not Found` with a stable `code` (e.g. BOOKING_NOT_FOUND). */
 export function problem404(code: string, title: string, description: string): ResponseConfig {
   return problemResponse(description, problem(404, title, code));
