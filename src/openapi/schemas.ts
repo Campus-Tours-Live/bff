@@ -293,17 +293,16 @@ export const OnboardingRoleSchema = registry.register(
 
 // --- Domain sub-schemas (forwarded from Core; field names per Contract A) ---
 
-/** A guide's public/profile record (Core, forwarded verbatim by the BFF). */
-export const GuideProfile = registry.register(
-  "GuideProfile",
+/**
+ * A single school entry within {@link GuideProfile}.universities — a guide may be affiliated
+ * with more than one university, each verified independently (Core Task 2.3).
+ */
+export const GuideUniversitySchema = registry.register(
+  "GuideUniversity",
   z
     .object({
-      userId: z
-        .string()
-        .optional()
-        .openapi({ description: "Guide's user id.", example: "u_guide_123" }),
       universityId: z.string().nullable().optional().openapi({
-        description: "Id of the guide's university (null until set).",
+        description: "Id of this university (null until set).",
         example: "uni_mit",
       }),
       universityName: z.string().nullable().optional().openapi({
@@ -319,10 +318,43 @@ export const GuideProfile = registry.register(
         .string()
         .optional()
         .openapi({ description: "Field of study.", example: "Computer Science" }),
+      degree: z
+        .string()
+        .optional()
+        .openapi({ description: "Degree pursued at this school.", example: "Bachelor's" }),
       classYear: z
         .string()
         .optional()
         .openapi({ description: "Graduation year.", example: "2026" }),
+      verificationStatus: VerificationStatusEnum.nullable().optional().openapi({
+        description: "This school's identity verification status (often null — deferred).",
+        example: "VERIFIED",
+      }),
+    })
+    .openapi("GuideUniversity", { description: "One of a guide's university affiliations." }),
+);
+
+/** A guide's public/profile record (Core, forwarded verbatim by the BFF). */
+export const GuideProfile = registry.register(
+  "GuideProfile",
+  z
+    .object({
+      userId: z
+        .string()
+        .optional()
+        .openapi({ description: "Guide's user id.", example: "u_guide_123" }),
+      applicationStatus: ApplicationStatusEnum.nullable().optional().openapi({
+        description: "Guide application/review status (null if no guide profile yet).",
+        example: "APPROVED",
+      }),
+      universities: z
+        .array(GuideUniversitySchema)
+        .optional()
+        .openapi({
+          description:
+            "Per-school affiliations (Core Task 2.3) — a guide may list more than one " +
+            "university, each with its own major/degree/classYear/verificationStatus.",
+        }),
       bio: z.string().nullable().optional().openapi({
         description: "Free-text guide bio.",
         example: "Sophomore who loves showing off the maker space.",
@@ -343,14 +375,6 @@ export const GuideProfile = registry.register(
         .string()
         .optional()
         .openapi({ description: "ISO-4217 currency code.", example: "USD" }),
-      applicationStatus: ApplicationStatusEnum.nullable().optional().openapi({
-        description: "Guide application/review status (null if no guide profile yet).",
-        example: "APPROVED",
-      }),
-      verificationStatus: VerificationStatusEnum.nullable().optional().openapi({
-        description: "Guide identity verification status (often null — deferred).",
-        example: "VERIFIED",
-      }),
     })
     .openapi("GuideProfile", { description: "Guide profile record forwarded from Core." }),
 );
@@ -663,18 +687,23 @@ export const guideDashboardExample = envelope({
   kind: "guide",
   guide: {
     userId: "u_guide_123",
-    universityId: "uni_mit",
-    universityName: "Massachusetts Institute of Technology",
-    universityShortName: "MIT",
-    major: "Computer Science",
-    classYear: "2026",
+    applicationStatus: "APPROVED",
+    universities: [
+      {
+        universityId: "uni_mit",
+        universityName: "Massachusetts Institute of Technology",
+        universityShortName: "MIT",
+        major: "Computer Science",
+        degree: "Bachelor's",
+        classYear: "2026",
+        verificationStatus: "VERIFIED",
+      },
+    ],
     bio: "Sophomore who loves showing off the maker space.",
     languages: ["en", "es"],
     specialties: ["engineering", "campus-life"],
     basePriceCents: 2500,
     currency: "USD",
-    applicationStatus: "APPROVED",
-    verificationStatus: "VERIFIED",
   },
   guideStatus: "APPROVED",
   canPublish: true,
