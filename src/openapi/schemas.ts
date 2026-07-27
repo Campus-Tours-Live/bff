@@ -248,19 +248,13 @@ export const ParticipantProfile = registry.register(
   "ParticipantProfile",
   z
     .object({
-      firstName: z.string().optional().openapi({ description: "Given name.", example: "Grace" }),
-      lastName: z.string().optional().openapi({ description: "Family name.", example: "Hopper" }),
-      displayName: z
-        .string()
-        .optional()
-        .openapi({ description: "Name shown in the app.", example: "Grace H." }),
-      email: z
-        .string()
-        .optional()
-        .openapi({ description: "Contact email.", example: "grace@example.com" }),
-      participantType: ParticipantTypeEnum.optional().openapi({
+      type: ParticipantTypeEnum.optional().openapi({
         description: "Whether the participant is the student or a booking guardian.",
         example: "STUDENT",
+      }),
+      applicationStatus: ApplicationStatusEnum.nullable().optional().openapi({
+        description: "Participant application/review status (null if not yet set).",
+        example: "APPROVED",
       }),
       gradeLevel: z
         .string()
@@ -575,11 +569,8 @@ export const guideDashboardExample = envelope({
 export const participantDashboardExample = envelope({
   kind: "participant",
   participant: {
-    firstName: "Grace",
-    lastName: "Hopper",
-    displayName: "Grace H.",
-    email: "grace@example.com",
-    participantType: "STUDENT",
+    type: "STUDENT",
+    applicationStatus: null,
     gradeLevel: "12",
     intendedMajor: "Biology",
     topicsOfInterest: ["dorm-life", "research"],
