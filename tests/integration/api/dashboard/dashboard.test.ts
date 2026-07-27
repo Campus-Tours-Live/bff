@@ -3,6 +3,24 @@ import { app } from "@/app.js";
 import { coreErr, coreOk, mintSessionCookie, mockCoreByPath } from "../../_helpers.js";
 import { EnvelopedDashboardSchema } from "@/openapi/schemas.js";
 
+/** Profile Contract v2 /userinfo shape — session/bootstrap only, no role-scoped data. */
+function userinfoOk(roles: string[], activeRole: string | null) {
+  return coreOk({
+    user: {
+      id: "u1",
+      firstName: "Gina",
+      lastName: "Guide",
+      displayName: "Gina Guide",
+      email: "gina@example.com",
+      accountStatus: "ACTIVE",
+      ageBand: "ADULT",
+      createdAt: "2025-03-15T00:00:00.000Z",
+    },
+    roles,
+    activeRole,
+  });
+}
+
 describe("GET /v1/dashboard", () => {
   let cookie: string;
 
@@ -12,13 +30,12 @@ describe("GET /v1/dashboard", () => {
 
   it("guide-active session → 200 guide dashboard with offerings and canPublish", async () => {
     mockCoreByPath({
-      "/userinfo": coreOk({
-        roles: ["GUIDE"],
-        activeRole: "GUIDE",
-        participantType: null,
-        guideStatus: "APPROVED",
+      "/userinfo": userinfoOk(["GUIDE"], "GUIDE"),
+      "/guide/profile": coreOk({
+        id: "g1",
+        displayName: "Gina Guide",
+        applicationStatus: "APPROVED",
       }),
-      "/guide/profile": coreOk({ id: "g1", displayName: "Gina Guide" }),
       "/guide/offerings": coreOk([{ id: "o1", title: "Campus Walk" }]),
     });
 
@@ -28,7 +45,11 @@ describe("GET /v1/dashboard", () => {
     expect(res.body.data.kind).toBe("guide");
     expect(res.body.data.canPublish).toBe(true);
     expect(res.body.data.guideStatus).toBe("APPROVED");
-    expect(res.body.data.guide).toEqual({ id: "g1", displayName: "Gina Guide" });
+    expect(res.body.data.guide).toEqual({
+      id: "g1",
+      displayName: "Gina Guide",
+      applicationStatus: "APPROVED",
+    });
     expect(res.body.data.offerings).toEqual([{ id: "o1", title: "Campus Walk" }]);
     // Response-shape contract: body ↔ documented envelope schema (loose on Core-forwarded
     // fields, strict on the BFF-owned envelope/kind/canPublish/offerings shape).
@@ -37,13 +58,8 @@ describe("GET /v1/dashboard", () => {
 
   it("guide not yet approved → canPublish false", async () => {
     mockCoreByPath({
-      "/userinfo": coreOk({
-        roles: ["GUIDE"],
-        activeRole: "GUIDE",
-        participantType: null,
-        guideStatus: "PENDING",
-      }),
-      "/guide/profile": coreOk({ id: "g1" }),
+      "/userinfo": userinfoOk(["GUIDE"], "GUIDE"),
+      "/guide/profile": coreOk({ id: "g1", applicationStatus: "PENDING" }),
       "/guide/offerings": coreOk([]),
     });
 
@@ -56,12 +72,7 @@ describe("GET /v1/dashboard", () => {
 
   it("participant-active session → 200 participant dashboard", async () => {
     mockCoreByPath({
-      "/userinfo": coreOk({
-        roles: ["PARTICIPANT"],
-        activeRole: "PARTICIPANT",
-        participantType: "PROSPECTIVE",
-        guideStatus: null,
-      }),
+      "/userinfo": userinfoOk(["PARTICIPANT"], "PARTICIPANT"),
       "/participant/profile": coreOk({ id: "p1", displayName: "Pat Participant" }),
     });
 
@@ -77,12 +88,7 @@ describe("GET /v1/dashboard", () => {
     // Regression: CoreClient must unwrap null envelope data to null, not return the whole
     // { data: null } envelope — otherwise the dashboard reshapes it and throws a 500.
     mockCoreByPath({
-      "/userinfo": coreOk({
-        roles: ["PARTICIPANT"],
-        activeRole: "PARTICIPANT",
-        participantType: "PROSPECTIVE",
-        guideStatus: null,
-      }),
+      "/userinfo": userinfoOk(["PARTICIPANT"], "PARTICIPANT"),
       "/participant/profile": coreOk({ id: "p1" }),
       "/bookings/next-tour": coreOk(null),
       "/bookings/upcoming": coreOk([]),
@@ -103,13 +109,8 @@ describe("GET /v1/dashboard", () => {
 
   it("offerings fetch fails for a guide → degrades to offerings:[] (still 200)", async () => {
     mockCoreByPath({
-      "/userinfo": coreOk({
-        roles: ["GUIDE"],
-        activeRole: "GUIDE",
-        participantType: null,
-        guideStatus: "APPROVED",
-      }),
-      "/guide/profile": coreOk({ id: "g1" }),
+      "/userinfo": userinfoOk(["GUIDE"], "GUIDE"),
+      "/guide/profile": coreOk({ id: "g1", applicationStatus: "APPROVED" }),
       "/guide/offerings": coreErr(500),
     });
 
@@ -146,12 +147,7 @@ describe("GET /v1/dashboard", () => {
 
   it("Core /guide/profile 5xx (required read) → 502 CORE_UNAVAILABLE", async () => {
     mockCoreByPath({
-      "/userinfo": coreOk({
-        roles: ["GUIDE"],
-        activeRole: "GUIDE",
-        participantType: null,
-        guideStatus: "APPROVED",
-      }),
+      "/userinfo": userinfoOk(["GUIDE"], "GUIDE"),
       "/guide/profile": coreErr(503),
       "/guide/offerings": coreOk([]),
     });
@@ -164,12 +160,7 @@ describe("GET /v1/dashboard", () => {
 
   it("Core /participant/profile 404 (required read) → surfaces the real 404", async () => {
     mockCoreByPath({
-      "/userinfo": coreOk({
-        roles: ["PARTICIPANT"],
-        activeRole: "PARTICIPANT",
-        participantType: null,
-        guideStatus: null,
-      }),
+      "/userinfo": userinfoOk(["PARTICIPANT"], "PARTICIPANT"),
       "/participant/profile": coreErr(404),
     });
 
@@ -194,12 +185,7 @@ describe("GET /v1/dashboard", () => {
       currency: "USD",
     };
     mockCoreByPath({
-      "/userinfo": coreOk({
-        roles: ["PARTICIPANT"],
-        activeRole: "PARTICIPANT",
-        participantType: "PROSPECTIVE",
-        guideStatus: null,
-      }),
+      "/userinfo": userinfoOk(["PARTICIPANT"], "PARTICIPANT"),
       "/participant/profile": coreOk({ id: "p1" }),
       "/bookings/next-tour": coreOk(coreB),
       "/bookings/upcoming": coreOk([coreB]),
@@ -221,12 +207,7 @@ describe("GET /v1/dashboard", () => {
 
   it("forwards the session id_token as a Bearer to Core /userinfo", async () => {
     const mock = mockCoreByPath({
-      "/userinfo": coreOk({
-        roles: ["PARTICIPANT"],
-        activeRole: "PARTICIPANT",
-        participantType: null,
-        guideStatus: null,
-      }),
+      "/userinfo": userinfoOk(["PARTICIPANT"], "PARTICIPANT"),
       "/participant/profile": coreOk({ id: "p1" }),
     });
 

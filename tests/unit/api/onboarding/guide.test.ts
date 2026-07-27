@@ -1,19 +1,8 @@
-import type { Me } from "@/api/_shared/index.js";
 import { guideProgress } from "@/api/onboarding/guide.js";
 
-function makeMe(over: Partial<Me> = {}): Me {
-  return {
-    roles: [],
-    activeRole: null,
-    participantType: null,
-    guideStatus: null,
-    ...over,
-  } as Me;
-}
-
 describe("guideProgress", () => {
-  it("null guideStatus → not started, not complete, canSubmit true", () => {
-    const p = guideProgress(makeMe({ guideStatus: null }));
+  it("null applicationStatus (no guide profile yet) → not started, not complete, canSubmit true", () => {
+    const p = guideProgress(null);
     expect(p).toMatchObject({
       role: "guide",
       started: false,
@@ -25,7 +14,7 @@ describe("guideProgress", () => {
   });
 
   it("DRAFT → started, not complete, canSubmit true", () => {
-    const p = guideProgress(makeMe({ guideStatus: "DRAFT" }));
+    const p = guideProgress("DRAFT");
     expect(p).toMatchObject({
       started: true,
       complete: false,
@@ -38,7 +27,7 @@ describe("guideProgress", () => {
   it.each(["PENDING_REVIEW", "APPROVED", "REJECTED"])(
     "%s → submitted = complete, canSubmit false",
     (status) => {
-      const p = guideProgress(makeMe({ guideStatus: status }));
+      const p = guideProgress(status);
       expect(p).toMatchObject({
         started: true,
         complete: true,
@@ -51,15 +40,15 @@ describe("guideProgress", () => {
 
   it("verificationStatus is always null (deferred)", () => {
     for (const status of [null, "DRAFT", "PENDING_REVIEW", "APPROVED", "REJECTED"]) {
-      expect(guideProgress(makeMe({ guideStatus: status })).verificationStatus).toBeNull();
+      expect(guideProgress(status).verificationStatus).toBeNull();
     }
   });
 
   it("steps reflect submitted state", () => {
-    expect(guideProgress(makeMe({ guideStatus: null })).steps).toEqual([
+    expect(guideProgress(null).steps).toEqual([
       { key: "submitted", label: "Application submitted", done: false },
     ]);
-    expect(guideProgress(makeMe({ guideStatus: "APPROVED" })).steps).toEqual([
+    expect(guideProgress("APPROVED").steps).toEqual([
       { key: "submitted", label: "Application submitted", done: true },
     ]);
   });

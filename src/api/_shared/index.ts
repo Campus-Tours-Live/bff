@@ -9,6 +9,7 @@ export { sendData, coreUnavailable, assertShapeInDev } from "./envelope.js";
 export { withSession } from "./with-session.js";
 export { withMutation } from "./with-mutation.js";
 export type { Me, Json } from "./types.js";
+export { PUBLISHABLE_STATUS } from "./constants.js";
 export {
   toZ,
   reshapeBooking,

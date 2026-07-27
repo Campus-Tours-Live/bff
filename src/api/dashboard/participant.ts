@@ -31,7 +31,7 @@ export async function participantDashboard(res: Response, core: CoreClient, me: 
       nextTour: nextTourRaw ? reshapeBooking(nextTourRaw) : null,
       upcomingBookings: (upcomingRaw ?? []).map(reshapeBooking),
       pendingActions,
-      createdAt: me.createdAt,
+      createdAt: me.user.createdAt,
     },
     ParticipantDashboardDataSchema,
   );
