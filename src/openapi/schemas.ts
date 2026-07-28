@@ -57,7 +57,7 @@ export const CoreRoleEnum = z.enum(["GUIDE", "PARTICIPANT"]);
 /**
  * Every role value an account can hold (Core `user_roles`), including the staff-only roles
  * (`ADMIN`, `SUPPORT`) that only ever appear in `Userinfo.roles` — never a switchable/onboardable
- * `currentRole`, `onboardingRole`, or switch/onboarding request `role` (those stay restricted to
+ * `currentRole` or switch/onboarding request `role` (those stay restricted to
  * {@link CoreRoleEnum}: you can't switch to or onboard into a staff role).
  */
 export const HeldRoleEnum = z.enum(["GUIDE", "PARTICIPANT", "ADMIN", "SUPPORT"]);

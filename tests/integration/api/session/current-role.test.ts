@@ -73,8 +73,8 @@ describe("POST /v1/session/current-role", () => {
     expect(res.headers["set-cookie"]).toBeUndefined();
   });
 
-  it("held role → 200, session saved (Set-Cookie present) BEFORE the response, matching onboardingRole cleared", async () => {
-    const cookie = mintSessionCookie({ onboardingRole: "GUIDE" });
+  it("held role → 200, session saved (Set-Cookie present) BEFORE the response, currentRole set", async () => {
+    const cookie = mintSessionCookie();
     mockCoreByPath({ "/users/me": usersMeOk(["GUIDE", "PARTICIPANT"]) });
 
     const res = await request(app)
@@ -92,11 +92,10 @@ describe("POST /v1/session/current-role", () => {
     const rotated = ctlSessCookieFrom(res);
     expect(rotated).toBeDefined();
     expect(sessionFrom(rotated)).toMatchObject({ currentRole: "GUIDE" });
-    expect(sessionFrom(rotated)?.onboardingRole).toBeUndefined();
   });
 
-  it("held role, onboardingRole set for a DIFFERENT role → only currentRole changes, onboardingRole untouched", async () => {
-    const cookie = mintSessionCookie({ onboardingRole: "PARTICIPANT" });
+  it("held role, switching away from a different previously-current role → currentRole overwritten", async () => {
+    const cookie = mintSessionCookie({ currentRole: "PARTICIPANT" });
     mockCoreByPath({ "/users/me": usersMeOk(["GUIDE", "PARTICIPANT"]) });
 
     const res = await request(app)
@@ -106,13 +105,10 @@ describe("POST /v1/session/current-role", () => {
 
     expect(res.status).toBe(200);
     const rotated = ctlSessCookieFrom(res);
-    expect(sessionFrom(rotated)).toMatchObject({
-      currentRole: "GUIDE",
-      onboardingRole: "PARTICIPANT",
-    });
+    expect(sessionFrom(rotated)).toMatchObject({ currentRole: "GUIDE" });
   });
 
-  it("held role, no onboardingRole set → just sets currentRole", async () => {
+  it("held role, no currentRole set yet → just sets currentRole", async () => {
     const cookie = mintSessionCookie();
     mockCoreByPath({ "/users/me": usersMeOk(["PARTICIPANT"]) });
 

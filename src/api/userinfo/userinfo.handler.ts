@@ -15,9 +15,6 @@ import { UserinfoDataSchema } from "../../openapi/schemas.js";
  * the stale value cleared from the session and persisted (so a second call doesn't see it
  * again). An ordinary GET where the session's role is still valid (or already absent) does
  * NOT write the session — it must not extend the cookie's TTL on every page load.
- *
- * `onboardingRole` (in-progress role acquisition, CTL-97 Task 1.5-BFF2) is deliberately never
- * surfaced here — it's internal routing state, not part of the bootstrap contract.
  */
 export const getUserinfo = withSession(async (req, res, core) => {
   const cu = await core.getCurrentUser<Me>();

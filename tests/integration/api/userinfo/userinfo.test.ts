@@ -56,17 +56,6 @@ describe("GET /v1/userinfo", () => {
     expect(res.headers["set-cookie"]).toBeUndefined();
   });
 
-  it("never surfaces onboardingRole, even when set", async () => {
-    const cookie = mintSessionCookie({ currentRole: "PARTICIPANT", onboardingRole: "GUIDE" });
-    mockCoreByPath({ "/users/me": usersMeOk(["PARTICIPANT"]) });
-
-    const res = await request(app).get("/v1/userinfo").set("Cookie", cookie);
-
-    expect(res.status).toBe(200);
-    expect(res.body.data.currentRole).toBe("PARTICIPANT");
-    expect(res.body.data).not.toHaveProperty("onboardingRole");
-  });
-
   it("a role the account no longer holds is cleared, persisted, and stays cleared on a later call", async () => {
     // Session says GUIDE, but Core (the authoritative source) says the account only holds
     // PARTICIPANT now — e.g. the GUIDE role was revoked after this session was minted.

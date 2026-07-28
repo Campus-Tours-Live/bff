@@ -95,26 +95,24 @@ describe("session cookie", () => {
       expect(res.cookies[0]).toMatch(new RegExp(`Max-Age=${60 * 60 * 24 * 7}`, "i"));
     });
 
-    it("round-trips currentRole/onboardingRole (Profile Contract v2 session fields)", () => {
+    it("round-trips currentRole (Profile Contract v2 session field)", () => {
       const res = mockRes();
       const data: SessionData = {
         idToken: "id-tok",
         currentRole: "GUIDE",
-        onboardingRole: "PARTICIPANT",
       };
       writeSession(res as unknown as Response, data);
       const req = reqFromSetCookie(res.cookies[0]);
       expect(readSession(req)).toEqual(data);
     });
 
-    it("currentRole/onboardingRole are absent (not undefined-serialized) on an old-shape session", () => {
+    it("currentRole is absent (not undefined-serialized) on an old-shape session", () => {
       const res = mockRes();
       writeSession(res as unknown as Response, { idToken: "id-tok" });
       const req = reqFromSetCookie(res.cookies[0]);
       const session = readSession(req);
       expect(session).not.toBeNull();
       expect(session!.currentRole).toBeUndefined();
-      expect(session!.onboardingRole).toBeUndefined();
     });
   });
 

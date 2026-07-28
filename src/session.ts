@@ -21,9 +21,9 @@ export type Role = "GUIDE" | "PARTICIPANT";
 
 /**
  * Guards an untrusted value (a decrypted-but-otherwise-unvalidated session field) against the
- * two real Core role values. `SessionData.currentRole`/`onboardingRole` are typed as `Role`, but
- * the cookie is just decrypted JSON — an older session shape (serialized before these fields
- * existed), a stale/renamed role value, or any other drift must not be trusted as a real role.
+ * two real Core role values. `SessionData.currentRole` is typed as `Role`, but the cookie is
+ * just decrypted JSON — an older session shape (serialized before this field existed), a
+ * stale/renamed role value, or any other drift must not be trusted as a real role.
  */
 export function isRole(x: unknown): x is Role {
   return x === "GUIDE" || x === "PARTICIPANT";
@@ -44,13 +44,6 @@ export interface SessionData {
    * (from before this field existed) stay valid — absent just means "no current role yet".
    */
   currentRole?: Role;
-  /**
-   * A role the account does NOT yet hold, authorising only that role's onboarding while it is
-   * being acquired (set by the login callback — CTL-97 Task 1.5-BFF2; unused beyond this type
-   * for now). Deliberately NEVER surfaced by `GET /userinfo` — it is internal routing state,
-   * not part of the bootstrap contract.
-   */
-  onboardingRole?: Role;
 }
 
 function encrypt(payload: object): string {

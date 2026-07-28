@@ -5,9 +5,9 @@ import { writeSession, type SessionData } from "@/session.js";
  * Mint a real session cookie via the production `writeSession`, then extract the
  * `ctl_sess=...` pair for supertest's `.set("Cookie", ...)`. The idToken value is
  * irrelevant in these tests because the Core network is mocked. `overrides` lets a test set
- * session-only fields like `currentRole`/`onboardingRole` (Profile Contract v2) — passed
- * through as-is (untyped-cast-friendly) so a test can also mint a deliberately GARBAGE
- * `currentRole` to exercise the `isRole` guard.
+ * session-only fields like `currentRole` (Profile Contract v2) — passed through as-is
+ * (untyped-cast-friendly) so a test can also mint a deliberately GARBAGE `currentRole` to
+ * exercise the `isRole` guard.
  */
 export function mintSessionCookie(overrides: Partial<SessionData> = {}): string {
   const cookies: string[] = [];

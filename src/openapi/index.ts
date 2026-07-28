@@ -259,9 +259,7 @@ apiRoute({
     "returned on every call — a role the account no longer holds (revoked/suspended), or any " +
     "stale/invalid stored value, is reported as `null`, and only THAT case clears it from the " +
     "session and persists the change; an ordinary call does not write the session (it must " +
-    "not extend the cookie's TTL on every page load). `onboardingRole` (in-progress role " +
-    "acquisition) is deliberately never surfaced here — it is internal routing state, not " +
-    "part of the bootstrap contract.",
+    "not extend the cookie's TTL on every page load).",
   responses: {
     200: enveloped(Userinfo, {
       description: "Identity + roles + current role, wrapped in the standard success envelope.",
@@ -321,10 +319,8 @@ apiRoute({
   description:
     "Manually switches THIS bff session's `currentRole` to a role the account holds. `roles` are " +
     "re-validated against Core `GET /users/me` on EVERY call — never cached in the session (a " +
-    "second staleable copy). If the account was mid-acquisition of this same role " +
-    "(`session.onboardingRole === role`, e.g. onboarding just succeeded), that in-progress " +
-    "marker is cleared HERE — the handler owns this cleanup, not the frontend. Core has no " +
-    "current-role endpoint and never learns which role a session has chosen.\n\n" +
+    "second staleable copy). Core has no current-role endpoint and never learns which role a " +
+    "session has chosen.\n\n" +
     "A role the account does not hold → 403 with the session left UNCHANGED. A " +
     "disabled/suspended account surfaces as a Core 403 (`ACCOUNT_NOT_ACTIVE`, carried in " +
     "`Problem.title`) via the same generic 4xx passthrough.\n\n" +
@@ -1183,8 +1179,8 @@ apiRoute({
       role: CoreRoleEnum.optional().openapi({
         description:
           "The role this entry is for (CTL-97) — written into the auth transaction and read " +
-          "back by the callback to decide currentRole/onboardingRole initialisation. Preferred " +
-          "over inferring a role from `returnTo` (a legacy, marked-for-removal fallback).",
+          "back by the callback to decide currentRole initialisation. Preferred over inferring " +
+          "a role from `returnTo` (a legacy, marked-for-removal fallback).",
         example: "GUIDE",
       }),
       login_hint: z.string().optional().openapi({
@@ -1214,7 +1210,8 @@ apiRoute({
     "302-redirects into the web app. On success it establishes the `ctl_sess` session cookie and " +
     "initialises this session's role state from `requestedRole` (written by `GET /auth/login`, " +
     "CTL-97): holding it → `currentRole` (role home); lacking it on signup (and eligible — see " +
-    "Core role-eligibility) → `onboardingRole` + that role's onboarding; lacking it on signin → " +
+    "Core role-eligibility) → redirects to that role's onboarding, without a session marker " +
+    "(the frontend page guard re-derives access statelessly); lacking it on signin → " +
     "`/signup/role`; no `requestedRole` with exactly one held role → `currentRole` initialised to " +
     "it; otherwise role selection. Provider errors and role-blocked cases (e.g. PARENT→guide) " +
     "redirect back into the UI WITHOUT a session. You don't call this directly — Google does.",

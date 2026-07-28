@@ -67,7 +67,7 @@ const CONSUMER_HOME = "/dashboard";
 /**
  * Where to land after auth when there is NO requested role to reason about (a role-agnostic
  * entry, or one already resolved to a role-specific destination by the callback). Pure — the
- * session mutation (currentRole/onboardingRole) lives in the callback, not here.
+ * session mutation (currentRole) lives in the callback, not here.
  *   - holds any role     → the specific allow-listed page the user came from (safeRt), or
  *                          CONSUMER_HOME when returnTo was absent/default
  *   - holds no role yet  → role selection with a "continue signup" notice (not a rejection —
@@ -241,7 +241,6 @@ authRouter.get("/callback", async (req, res) => {
   if (requestedRole && roles.includes(requestedRole)) {
     // Holds the requested role already — effectively a login into that role (signin or signup).
     session.currentRole = requestedRole;
-    delete session.onboardingRole;
     dest = CONSUMER_HOME;
   } else if (requestedRole && tx.intent === "signup") {
     // Lacks it, trying to acquire it via signup — gate on Core's authoritative eligibility
@@ -262,12 +261,10 @@ authRouter.get("/callback", async (req, res) => {
           : "/signup/role";
       blocked = true;
     } else {
-      session.onboardingRole = requestedRole;
       dest = requestedRole === "GUIDE" ? "/onboarding/guide" : "/onboarding/participant";
     }
   } else if (requestedRole) {
     // Lacks it, signin — can't sign in as a role the account doesn't hold.
-    delete session.onboardingRole;
     dest = "/signup/role";
   } else {
     // No requested role (a role-agnostic entry). A single held role initialises currentRole

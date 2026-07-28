@@ -37,8 +37,7 @@ function txCookie(overrides: Partial<AuthTx> = {}): string {
 }
 
 /** Decrypt a `ctl_sess=...` Set-Cookie pair via the REAL readSession, so a test can assert on
- *  session-internal fields (currentRole/onboardingRole) that never round-trip through the
- *  response body. */
+ *  session-internal fields (currentRole) that never round-trip through the response body. */
 function sessionFrom(pair: string | undefined): ReturnType<typeof readSession> {
   if (!pair) return null;
   return readSession({ headers: { cookie: pair } } as unknown as Parameters<typeof readSession>[0]);
@@ -382,14 +381,13 @@ describe("GET /auth/callback — success landing + session", () => {
     expect(res.headers.location).toBe("http://localhost:3001/dashboard");
     const sessCookie = cookieNamed(res, "ctl_sess");
     expect(sessCookie).toBeDefined();
-    // Holding the requested role is "effectively a login": currentRole set, onboardingRole
-    // cleared — and, being on the redirect response's Set-Cookie, this is already persisted
-    // (not deferred to a later write) before the browser is sent anywhere.
+    // Holding the requested role is "effectively a login": currentRole set — and, being on
+    // the redirect response's Set-Cookie, this is already persisted (not deferred to a later
+    // write) before the browser is sent anywhere.
     expect(sessionFrom(sessCookie)).toMatchObject({ currentRole: "GUIDE" });
-    expect(sessionFrom(sessCookie)?.onboardingRole).toBeUndefined();
   });
 
-  it("signup → /onboarding/guide, lacks GUIDE, eligible → /onboarding/guide with session", async () => {
+  it("signup → /onboarding/guide, lacks GUIDE, eligible → /onboarding/guide with session, no marker", async () => {
     coreNext = {
       kind: "resolve",
       value: coreResponse(200, { roles: ["PARTICIPANT"] }),
@@ -404,12 +402,14 @@ describe("GET /auth/callback — success landing + session", () => {
     expect(res.headers.location).toBe("http://localhost:3001/onboarding/guide");
     const sessCookie = cookieNamed(res, "ctl_sess");
     expect(sessCookie).toBeDefined();
-    // The in-progress marker that authorizes GET /v1/onboarding?role=guide before GUIDE is held.
-    expect(sessionFrom(sessCookie)).toMatchObject({ onboardingRole: "GUIDE" });
+    // No session marker for the in-progress acquisition — the frontend page guard (a later
+    // task) re-derives access statelessly. The session carries tokens only; currentRole stays
+    // unset until the account actually holds GUIDE.
+    expect(sessionFrom(sessCookie)).toMatchObject({ idToken: FAKE_TOKENS.id_token });
     expect(sessionFrom(sessCookie)?.currentRole).toBeUndefined();
   });
 
-  it("signin, lacks the requested role → /signup/role, no onboardingRole", async () => {
+  it("signin, lacks the requested role → /signup/role, no currentRole", async () => {
     coreNext = { kind: "resolve", value: coreResponse(200, { roles: ["PARTICIPANT"] }) };
 
     const res = await request(app)
@@ -425,7 +425,6 @@ describe("GET /auth/callback — success landing + session", () => {
     const sessCookie = cookieNamed(res, "ctl_sess");
     expect(sessCookie).toBeDefined();
     expect(sessionFrom(sessCookie)?.currentRole).toBeUndefined();
-    expect(sessionFrom(sessCookie)?.onboardingRole).toBeUndefined();
     // Lacking a requested role on signin is not eligibility-gated — no eligibility call.
     expect(
       fetchMock.mock.calls.some((c) =>
@@ -556,7 +555,6 @@ describe("GET /auth/callback — blocked vs bare-account branches", () => {
     // clearSession path: ctl_sess present but cleared (maxAge 0), never established.
     expect(isCleared(sessCookie)).toBe(true);
     expect(isCleared(cookieNamed(res, "ctl_auth_tx"))).toBe(true);
-    expect(sessionFrom(sessCookie)?.onboardingRole).toBeUndefined();
   });
 
   it("non-parent participant → /onboarding/guide is NOT blocked (role-eligibility says eligible)", async () => {

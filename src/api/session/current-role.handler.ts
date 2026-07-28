@@ -10,9 +10,7 @@ import { CurrentRoleDataSchema } from "../../openapi/schemas.js";
  * too, but only from its own role-resolution logic — see src/auth/routes.ts).
  *
  * `roles` are re-validated against Core `GET /users/me` on EVERY call rather than cached in the
- * session (a second staleable copy). If the account is mid-acquisition of this same role
- * (`session.onboardingRole === role`, e.g. onboarding just succeeded), that in-progress marker
- * is cleared HERE — the handler owns this cleanup, not the frontend.
+ * session (a second staleable copy).
  *
  * A disabled/suspended account surfaces as a Core 403 (`ACCOUNT_NOT_ACTIVE`, carried in
  * `Problem.title`) from `GET /users/me` — that throws a `CoreError(403)` from `core.getCurrentUser`,
@@ -37,7 +35,6 @@ export const setCurrentRole = withSession(async (req, res, core) => {
   /* istanbul ignore next */
   const session = readSession(req) ?? {};
   const next = { ...session, currentRole: role };
-  if (session.onboardingRole === role) delete next.onboardingRole;
   writeSession(res, next);
 
   sendData(res, { currentRole: role }, CurrentRoleDataSchema);
