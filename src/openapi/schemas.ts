@@ -323,6 +323,85 @@ export const CurrentRoleSchema = registry.register(
     .openapi("CurrentRole", { description: "This session's newly-switched current role." }),
 );
 
+// --- POST /v1/users/me/roles/{guide|participant} (bff-owned onboarding command) ---
+
+/**
+ * `POST /v1/users/me/roles/{guide|participant}` response `data` (CTL-97 defer-provisioning
+ * onboarding command, src/api/onboarding-command) — NOT Core's response verbatim. Core's
+ * `OnboardingResponse` carries no `currentRole` (it never owns that — bff session state) and
+ * its `accountState` is an `AccountStatus` (e.g. `ACTIVE`) describing the Core account, not
+ * this bff session's discriminator. This is the frontend-facing shape the bff constructs AFTER
+ * successfully converting the caller's session (PENDING -> PROVISIONED, or re-stamping an
+ * already-PROVISIONED one acquiring a second role) — `currentRole` is added here, set to the
+ * just-acquired role.
+ */
+export const OnboardingCommandResponseSchema = registry.register(
+  "OnboardingCommandResponse",
+  z
+    .object({
+      accountState: z.literal("PROVISIONED").openapi({
+        description:
+          "Always PROVISIONED — a successful command always yields a provisioned account.",
+        example: "PROVISIONED",
+      }),
+      user: UserSummarySchema.openapi({ description: "The now-provisioned account identity." }),
+      roles: z
+        .array(HeldRoleEnum)
+        .min(1)
+        .openapi({
+          description: "Every role the account now holds, including this newly-acquired one.",
+          example: ["GUIDE"],
+        }),
+      currentRole: CoreRoleEnum.openapi({
+        description:
+          "This session's now-current role (bff-added; Core never sends this) — always the " +
+          "just-acquired role on a successful command.",
+        example: "GUIDE",
+      }),
+      acquiredRole: CoreRoleEnum.openapi({
+        description: "The role this command just provisioned (echo of the route).",
+        example: "GUIDE",
+      }),
+      profile: JsonObject.openapi({
+        description:
+          "The new role-scoped profile Core created (GuideProfile/ParticipantProfile union), " +
+          "forwarded opaque — see the role-specific profile endpoints for its real shape.",
+        example: { guideStatus: "PENDING" },
+      }),
+    })
+    .openapi("OnboardingCommandResponse", {
+      description:
+        "Result of provisioning a role in Core, with the bff-added `currentRole` — NOT Core's " +
+        "response verbatim.",
+    }),
+);
+
+export const onboardingCommandExample = envelope({
+  accountState: "PROVISIONED",
+  user: {
+    id: "u1",
+    firstName: "Gina",
+    lastName: "Guide",
+    displayName: "Gina Guide",
+    email: "gina@example.com",
+    accountStatus: "ACTIVE",
+    ageBand: "ADULT",
+    createdAt: "2025-03-15T00:00:00.000Z",
+  },
+  roles: ["GUIDE"],
+  currentRole: "GUIDE",
+  acquiredRole: "GUIDE",
+  profile: { guideStatus: "PENDING" },
+});
+
+export const onboardingCommandParticipantExample = envelope({
+  ...onboardingCommandExample.data,
+  roles: ["PARTICIPANT"],
+  currentRole: "PARTICIPANT",
+  acquiredRole: "PARTICIPANT",
+  profile: { participantStatus: null, type: "STUDENT" },
+});
+
 // --- Domain sub-schemas (forwarded from Core; field names per Contract A) ---
 
 /**
@@ -1403,6 +1482,23 @@ export const CurrentRoleDataSchema = z.object({
 
 /** Full enveloped POST /v1/session/current-role response contract. */
 export const EnvelopedCurrentRoleSchema = envelopeOf(CurrentRoleDataSchema);
+
+/** POST /v1/users/me/roles/{guide|participant} `data` (onboarding command,
+ *  src/api/onboarding-command/handler.ts) — `user` forwarded from Core (loose, EXCEPT `id`,
+ *  same rationale as `ProvisionedUserinfoDataSchema`); `roles`/`currentRole`/`acquiredRole` are
+ *  BFF-validated/derived (never Core-verbatim: Core has no `currentRole` at all); `profile` is
+ *  Core's opaque role-profile union passthrough, never re-validated here. */
+export const OnboardingCommandDataSchema = z.object({
+  accountState: z.literal("PROVISIONED"),
+  user: z.object({ id: z.string().min(1) }).catchall(z.unknown()),
+  roles: z.array(HeldRoleEnum).min(1),
+  currentRole: z.enum(["GUIDE", "PARTICIPANT"]),
+  acquiredRole: z.enum(["GUIDE", "PARTICIPANT"]),
+  profile: z.unknown(),
+});
+
+/** Full enveloped POST /v1/users/me/roles/{guide|participant} response contract. */
+export const EnvelopedOnboardingCommandSchema = envelopeOf(OnboardingCommandDataSchema);
 
 /** GET /v1/dashboard guide `data` — strict on `kind`/`canPublish`/`offerings` (BFF-owned). */
 export const GuideDashboardDataSchema = z.object({

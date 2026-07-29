@@ -27,6 +27,10 @@ import {
   Userinfo,
   CurrentRoleSchema,
   SetCurrentRoleRequestSchema,
+  OnboardingCommandResponseSchema,
+  onboardingCommandExample,
+  onboardingCommandParticipantExample,
+  JsonObject,
   problem,
   guideDashboardExample,
   participantDashboardExample,
@@ -358,6 +362,86 @@ apiRoute({
     ),
   },
 });
+
+// POST /v1/users/me/roles/guide, /v1/users/me/roles/participant
+//
+// CTL-97 defer-provisioning onboarding commands: TWO CONCRETE operations (not one generic
+// `{role}` path param) — mirrors src/api/onboarding-command/routes.ts, which registers two
+// concrete Express routes for the same reason (matching Core's type-safe two-endpoint
+// contract). Minimal registration for now — the request body's per-field shape and full
+// per-status examples are CTL-97 Task 7; this keeps `npm run openapi:lint` and the drift test
+// green with an honest (loose) request body and a complete, correctly-shaped success response.
+for (const [role, example] of [
+  ["guide", onboardingCommandExample],
+  ["participant", onboardingCommandParticipantExample],
+] as const) {
+  apiRoute({
+    method: "post",
+    path: `/v1/users/me/roles/${role}`,
+    tags: ["Onboarding"],
+    summary: `Provision the ${role.toUpperCase()} role (onboarding command)`,
+    description:
+      "CTL-97 defer-provisioning onboarding command — provisions this role in Core for the " +
+      "caller (a PENDING, not-yet-provisioned session is the ordinary case, but an already-" +
+      "PROVISIONED session acquiring a SECOND role also uses this endpoint), then converts " +
+      "THIS bff session to PROVISIONED with `currentRole` set to the newly-acquired role. The " +
+      "response is NOT Core's response verbatim — the bff adds `currentRole` (Core never owns " +
+      "it) only after the session conversion succeeds. The role-specific request body is " +
+      "forwarded to Core verbatim; its full per-field shape is documented in the Core API spec " +
+      "(see `externalDocs`) and will be modeled precisely here in a follow-up (CTL-97 Task 7).\n\n" +
+      "A Core 409 (`ROLE_ALREADY_GRANTED` — already held; or `ROLE_NOT_ELIGIBLE` — e.g. a " +
+      "PARENT participant can never become a GUIDE) or 422 `VALIDATION_FAILED` relays " +
+      "VERBATIM and never touches the session. A Core 201 whose body fails this bff's " +
+      "contract validation (bad `user.id`, `acquiredRole` not a switchable role / not matching " +
+      "this route / not itself in `roles`, or any `roles` entry outside the four known values) " +
+      "is 502 `UPSTREAM_CONTRACT_VIOLATION`, session untouched. A session-store write failure " +
+      "AFTER a genuine Core 201 (Core does NOT roll back) is 500 `SESSION_CONVERSION_FAILED` — " +
+      "reconcile via `GET /v1/userinfo` (it repairs a still-pending session once Core reports " +
+      "provisioned) rather than resending this command.\n\n" +
+      "**CSRF-guarded** (state-changing mutation) — a cross-site POST is rejected.",
+    request: {
+      body: {
+        content: {
+          "application/json": {
+            schema: JsonObject,
+            example: {},
+          },
+        },
+      },
+    },
+    responses: {
+      201: enveloped(OnboardingCommandResponseSchema, {
+        description:
+          "The role was provisioned in Core and this session is now PROVISIONED, with " +
+          "`currentRole` set to the acquired role.",
+        example,
+      }),
+      409: problem409(
+        "ROLE_ALREADY_GRANTED",
+        "Role already granted",
+        "Relayed verbatim from Core — either the account already holds this role " +
+          "(`ROLE_ALREADY_GRANTED`) or is not eligible for it (`ROLE_NOT_ELIGIBLE`, e.g. a " +
+          "PARENT participant cannot become a GUIDE). The session is left unchanged.",
+      ),
+      422: problem422(
+        "VALIDATION_FAILED",
+        "Validation failed",
+        "The request body failed Core's validation — relayed verbatim. The session is left " +
+          "unchanged.",
+      ),
+      500: problemResponse(
+        "The role WAS provisioned in Core (not rolled back), but converting this bff session " +
+          "failed after a retry. Reconcile via `GET /v1/userinfo` rather than resending this " +
+          "command.",
+        problem(500, "Session conversion failed", "SESSION_CONVERSION_FAILED"),
+      ),
+      502: problem502(
+        "The Core API was unreachable/returned a 5xx, or returned a 201 whose body failed " +
+          "this bff's contract validation (`UPSTREAM_CONTRACT_VIOLATION`).",
+      ),
+    },
+  });
+}
 
 // --- Booking / cart (participant) ---
 
@@ -1372,6 +1456,12 @@ export const openapiSpec = generator.generateDocument({
         "Bootstrap identity/roles/current-role read the frontend calls on every page load.",
     },
     { name: "Dashboard", description: "Role-shaped signed-in home aggregate." },
+    {
+      name: "Onboarding",
+      description:
+        "CTL-97 defer-provisioning role-onboarding commands — provision a role in Core, then " +
+        "convert this bff session to PROVISIONED.",
+    },
     { name: "Tours", description: "Anonymous marketplace tour discovery." },
     { name: "Booking", description: "Participant booking and cart operations." },
     {

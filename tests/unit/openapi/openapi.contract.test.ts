@@ -108,6 +108,8 @@ describe("OpenAPI contract — drift guard (Express routes ↔ spec)", () => {
         "get /auth/session",
         "get /v1/userinfo",
         "post /v1/session/current-role",
+        "post /v1/users/me/roles/guide",
+        "post /v1/users/me/roles/participant",
         "get /v1/dashboard",
         "get /v1/tours",
         "get /v1/tours/{tourId}",
@@ -235,9 +237,18 @@ describe("OpenAPI contract — protected /v1 operations", () => {
     }
   });
 
-  it("return a { data, meta } envelope with at least one example on 200", () => {
+  it("return a { data, meta } envelope with at least one example on its success response", () => {
+    // Generalised over the success status rather than hardcoding "200": every existing
+    // protected route succeeds with 200, but the onboarding-command routes (CTL-97 Task 6)
+    // succeed with 201 (a role was just created) — both must still carry the same `{ data,
+    // meta }` envelope + example.
     for (const { path, op } of protectedOps()) {
-      const json = op.responses["200"]?.content?.["application/json"];
+      const successStatus = Object.keys(op.responses).find((code) => /^2\d\d$/.test(code));
+      expect({ path, hasSuccessStatus: Boolean(successStatus) }).toEqual({
+        path,
+        hasSuccessStatus: true,
+      });
+      const json = op.responses[successStatus!]?.content?.["application/json"];
       expect({ path, hasJson: Boolean(json) }).toEqual({ path, hasJson: true });
       const schema = json?.schema as { properties?: Record<string, unknown> } | undefined;
       expect(Object.keys(schema?.properties ?? {})).toEqual(
