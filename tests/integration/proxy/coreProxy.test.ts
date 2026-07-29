@@ -40,6 +40,30 @@ describe("coreProxy (/v1/* passthrough)", () => {
       expect(res.status).toBe(404);
     });
 
+    it("relays a Core 409 ROLE_NOT_ELIGIBLE on the participant PATCH verbatim — status + code (CTL-97 Minor-3)", async () => {
+      // ParticipantService's GUIDE⊕PARENT exclusion on the PATCH participant_type change now
+      // throws ConflictException.roleNotEligible -> 409 (aligned with the onboarding command's
+      // 409), not 422. PATCH /v1/participant/profile is served by this transparent proxy, so the
+      // coded problem+json must reach the frontend UNCHANGED — status AND `code`/`role` — because
+      // the frontend keys terminal error UI on the machine code, never the 422 status or the text.
+      mockCoreByPath({
+        "/participant/profile": coreErr(409, {
+          code: "ROLE_NOT_ELIGIBLE",
+          role: "PARTICIPANT",
+          title: "Not eligible for role: PARTICIPANT",
+        }),
+      });
+
+      const res = await request(app)
+        .patch("/v1/participant/profile")
+        .set("Cookie", cookie)
+        .send({ participantType: "PARENT" });
+
+      expect(res.status).toBe(409);
+      expect(res.body.code).toBe("ROLE_NOT_ELIGIBLE");
+      expect(res.body.role).toBe("PARTICIPANT");
+    });
+
     it("proxies a different resource path (/universities) preserving the query string", async () => {
       const mock = mockCoreByPath({ "/universities": coreOk([{ id: "u1" }]) });
 
