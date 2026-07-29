@@ -30,7 +30,10 @@ import {
   OnboardingCommandResponseSchema,
   onboardingCommandExample,
   onboardingCommandParticipantExample,
-  JsonObject,
+  GuideOnboardingRequestSchema,
+  guideOnboardingRequestExample,
+  ParticipantOnboardingRequestSchema,
+  participantOnboardingRequestExample,
   problem,
   guideDashboardExample,
   participantDashboardExample,
@@ -71,6 +74,7 @@ import {
   problem422,
   problem502,
   problemResponse,
+  problemResponseMulti,
 } from "./helpers.js";
 
 // Re-export the schema surface so consumers (handlers, tests) have one import site.
@@ -368,12 +372,21 @@ apiRoute({
 // CTL-97 defer-provisioning onboarding commands: TWO CONCRETE operations (not one generic
 // `{role}` path param) — mirrors src/api/onboarding-command/routes.ts, which registers two
 // concrete Express routes for the same reason (matching Core's type-safe two-endpoint
-// contract). Minimal registration for now — the request body's per-field shape and full
-// per-status examples are CTL-97 Task 7; this keeps `npm run openapi:lint` and the drift test
-// green with an honest (loose) request body and a complete, correctly-shaped success response.
-for (const [role, example] of [
-  ["guide", onboardingCommandExample],
-  ["participant", onboardingCommandParticipantExample],
+// contract). CTL-97 Task 7: full per-field request body (Core's GuideOnboardingRequest /
+// ParticipantOnboardingRequest) + per-status/per-code examples.
+for (const { role, responseExample, requestSchema, requestExample } of [
+  {
+    role: "guide",
+    responseExample: onboardingCommandExample,
+    requestSchema: GuideOnboardingRequestSchema,
+    requestExample: guideOnboardingRequestExample,
+  },
+  {
+    role: "participant",
+    responseExample: onboardingCommandParticipantExample,
+    requestSchema: ParticipantOnboardingRequestSchema,
+    requestExample: participantOnboardingRequestExample,
+  },
 ] as const) {
   apiRoute({
     method: "post",
@@ -386,9 +399,10 @@ for (const [role, example] of [
       "PROVISIONED session acquiring a SECOND role also uses this endpoint), then converts " +
       "THIS bff session to PROVISIONED with `currentRole` set to the newly-acquired role. The " +
       "response is NOT Core's response verbatim — the bff adds `currentRole` (Core never owns " +
-      "it) only after the session conversion succeeds. The role-specific request body is " +
-      "forwarded to Core verbatim; its full per-field shape is documented in the Core API spec " +
-      "(see `externalDocs`) and will be modeled precisely here in a follow-up (CTL-97 Task 7).\n\n" +
+      "it) only after the session conversion succeeds. The request body is forwarded to Core " +
+      "verbatim and modeled here from Core's own DTO " +
+      `(\`${role === "guide" ? "GuideOnboardingRequest" : "ParticipantOnboardingRequest"}\`).` +
+      "\n\n" +
       "A Core 409 (`ROLE_ALREADY_GRANTED` — already held; or `ROLE_NOT_ELIGIBLE` — e.g. a " +
       "PARENT participant can never become a GUIDE) or 422 `VALIDATION_FAILED` relays " +
       "VERBATIM and never touches the session. A Core 201 whose body fails this bff's " +
@@ -403,8 +417,8 @@ for (const [role, example] of [
       body: {
         content: {
           "application/json": {
-            schema: JsonObject,
-            example: {},
+            schema: requestSchema,
+            example: requestExample,
           },
         },
       },
@@ -414,14 +428,31 @@ for (const [role, example] of [
         description:
           "The role was provisioned in Core and this session is now PROVISIONED, with " +
           "`currentRole` set to the acquired role.",
-        example,
+        example: responseExample,
       }),
-      409: problem409(
-        "ROLE_ALREADY_GRANTED",
-        "Role already granted",
-        "Relayed verbatim from Core — either the account already holds this role " +
-          "(`ROLE_ALREADY_GRANTED`) or is not eligible for it (`ROLE_NOT_ELIGIBLE`, e.g. a " +
-          "PARENT participant cannot become a GUIDE). The session is left unchanged.",
+      409: problemResponseMulti(
+        "Relayed verbatim from Core — the session is left unchanged either way.",
+        {
+          roleAlreadyGranted: {
+            summary: "Role already held",
+            value: problem(
+              409,
+              "Role already granted",
+              "ROLE_ALREADY_GRANTED",
+              "This account already holds this role.",
+            ),
+          },
+          roleNotEligible: {
+            summary: "Role not eligible",
+            value: problem(
+              409,
+              "Role not eligible",
+              "ROLE_NOT_ELIGIBLE",
+              "This account is not eligible for this role (e.g. a PARENT participant cannot " +
+                "become a GUIDE).",
+            ),
+          },
+        },
       ),
       422: problem422(
         "VALIDATION_FAILED",

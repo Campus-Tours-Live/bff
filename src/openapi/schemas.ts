@@ -242,7 +242,12 @@ const PendingUserinfo = z
       example: "PENDING",
     }),
     user: PendingUserSummarySchema.openapi({ description: "Pending identity (`id` is null)." }),
-    roles: z.array(CoreRoleEnum).length(0).openapi({
+    // `.max(0)` (not `.length(0)`) deliberately: zod-to-openapi@8's array mapper only reads
+    // `min_length`/`max_length` checks to derive `minItems`/`maxItems` — the exact-length
+    // check `.length()` produces isn't recognised, so it would silently vanish from the
+    // published schema. `.max(0)` is runtime-equivalent (arrays have an implicit min of 0)
+    // and DOES surface as `maxItems: 0` in the generated OpenAPI document.
+    roles: z.array(CoreRoleEnum).max(0).openapi({
       description: "Always empty — no Core account exists yet to hold any role.",
       example: [],
     }),
@@ -324,6 +329,214 @@ export const CurrentRoleSchema = registry.register(
 );
 
 // --- POST /v1/users/me/roles/{guide|participant} (bff-owned onboarding command) ---
+
+/**
+ * Participant onboarding command's `participantType` — the controlled vocabulary Core
+ * validates at first-time onboarding (`ParticipantOnboardingRequest.participantType`,
+ * backend `web/dto/ParticipantOnboardingRequest.java`). Distinct from {@link
+ * ParticipantTypeEnum} (`STUDENT`/`PARENT`), which describes the profile's booking-guardian
+ * role, not this onboarding-time category.
+ */
+export const ParticipantOnboardingTypeEnum = z.enum([
+  "HIGH_SCHOOL",
+  "PROSPECTIVE",
+  "TRANSFER",
+  "INTERNATIONAL",
+  "PARENT",
+  "OTHER",
+]);
+
+/**
+ * Controlled-vocabulary tour topic a participant can express interest in AT ONBOARDING
+ * (`ParticipantOnboardingRequest.topicsOfInterest`). Distinct from {@link
+ * ParticipantProfile}'s free-text `topicsOfInterest` (that PATCH-side profile field forwards
+ * whatever Core already stored, with no fixed vocabulary); this onboarding-time field IS
+ * validated by Core against a fixed set.
+ */
+export const OnboardingTopicOfInterestEnum = z.enum([
+  "GENERAL_CAMPUS",
+  "DORM_HOUSING",
+  "DINING_STUDENT_LIFE",
+  "MAJOR_SPECIFIC",
+  "INTERNATIONAL_STUDENT",
+  "PARENT_FOCUSED",
+  "FRESHMAN",
+  "TRANSFER",
+]);
+
+/**
+ * `POST /v1/users/me/roles/guide` request body — Core's `GuideOnboardingRequest`
+ * (backend `web/dto/GuideOnboardingRequest.java`), forwarded verbatim. Full onboarding-time
+ * create: unlike the partial-PATCH `GuideProfile` update (which uses a `submit` flag), this
+ * command implies submission just by being called, so Core enforces `universityId`, `major`,
+ * `bio`, at least one `tourTopics` entry, `verificationEmail`, and `degree` as REQUIRED —
+ * a missing one is 422 `VALIDATION_FAILED`.
+ */
+export const GuideOnboardingRequestSchema = registry.register(
+  "GuideOnboardingRequest",
+  z
+    .object({
+      firstName: z.string().optional().openapi({ description: "First name.", example: "Maya" }),
+      lastName: z.string().optional().openapi({ description: "Last name.", example: "Chen" }),
+      universityId: z.string().openapi({
+        description: "Id of the university the guide is affiliated with.",
+        example: "u1a2c3d4-0000-4000-8000-000000000003",
+      }),
+      major: z.string().openapi({ description: "Field of study.", example: "Marine Biology" }),
+      classYear: z
+        .string()
+        .regex(/^\d{4}$/)
+        .optional()
+        .openapi({
+          description: "Class year, as a 4-digit year (e.g. graduating class).",
+          example: "2027",
+        }),
+      bio: z.string().openapi({
+        description: "Guide biography.",
+        example: "Third-year student and campus tour lead.",
+      }),
+      spokenLanguages: z
+        .array(z.string())
+        .optional()
+        .openapi({
+          description: "BCP-47 language tags the guide speaks.",
+          example: ["en-US"],
+        }),
+      tourTopics: z
+        .array(z.string())
+        .min(1)
+        .openapi({
+          description:
+            "Free-text tour topics the guide focuses on — at least one entry is required.",
+          example: ["Dorm & housing tours"],
+        }),
+      verificationEmail: z.string().email().openapi({
+        description: "University email used for verification (method UNIVERSITY_EMAIL).",
+        example: "maya.chen@ncu.edu",
+      }),
+      degree: z.string().openapi({
+        description:
+          "Degree level the guide is pursuing/holds, as returned by GET /v1/meta/degrees " +
+          "for the selected university (the College Scorecard credential title).",
+        example: "Bachelor's Degree",
+      }),
+      entryYear: z.number().int().optional().openapi({
+        description: "Year the guide entered this university.",
+        example: 2023,
+      }),
+    })
+    .openapi("GuideOnboardingRequest", {
+      description:
+        "Guide onboarding command body — creates the GUIDE role + profile in one call. " +
+        "`universityId`, `major`, `bio`, `tourTopics` (≥1), `verificationEmail`, and `degree` " +
+        "are required; a missing one is 422 VALIDATION_FAILED.",
+    }),
+);
+
+/** Worked example for {@link GuideOnboardingRequestSchema} (mirrors the Java DTO's examples). */
+export const guideOnboardingRequestExample = {
+  firstName: "Maya",
+  lastName: "Chen",
+  universityId: "u1a2c3d4-0000-4000-8000-000000000003",
+  major: "Marine Biology",
+  classYear: "2027",
+  bio: "Third-year student and campus tour lead.",
+  spokenLanguages: ["en-US"],
+  tourTopics: ["Dorm & housing tours"],
+  verificationEmail: "maya.chen@ncu.edu",
+  degree: "Bachelor's Degree",
+  entryYear: 2023,
+};
+
+/**
+ * `POST /v1/users/me/roles/participant` request body — Core's `ParticipantOnboardingRequest`
+ * (backend `web/dto/ParticipantOnboardingRequest.java`), forwarded verbatim. Lighter than
+ * guide onboarding: `ParticipantService.updateProfile` defaults `participantType` to
+ * `PROSPECTIVE` server-side for the PATCH path, but THIS command requires the caller to pick
+ * one explicitly — the minimal sensible first-time-required field. A missing/invalid value is
+ * 422 `VALIDATION_FAILED`.
+ */
+export const ParticipantOnboardingRequestSchema = registry.register(
+  "ParticipantOnboardingRequest",
+  z
+    .object({
+      firstName: z.string().optional().openapi({ description: "First name.", example: "Sam" }),
+      lastName: z.string().optional().openapi({ description: "Last name.", example: "Rivera" }),
+      displayName: z.string().optional().openapi({
+        description: "Public display name.",
+        example: "Sam Rivera",
+      }),
+      participantType: ParticipantOnboardingTypeEnum.openapi({
+        description: "Participant type (controlled vocabulary).",
+        example: "PROSPECTIVE",
+      }),
+      gradeLevel: z
+        .string()
+        .optional()
+        .openapi({
+          description:
+            "Grade / education level. Free-text (no controlled vocabulary); typical values " +
+            'include "High school senior", "College freshman", or "Graduate".',
+          example: "High school senior",
+        }),
+      intendedMajor: z.string().optional().openapi({
+        description: "Intended field of study.",
+        example: "Computer Science",
+      }),
+      universitiesOfInterest: z
+        .array(z.string())
+        .optional()
+        .openapi({
+          description:
+            "College Scorecard school ids the participant is interested in, as returned by " +
+            "GET /v1/meta/universities.",
+          example: ["166683"],
+        }),
+      topicsOfInterest: z
+        .array(OnboardingTopicOfInterestEnum)
+        .optional()
+        .openapi({
+          description: "Tour topic codes the participant is interested in (controlled vocabulary).",
+          example: ["DORM_HOUSING"],
+        }),
+      preferredLanguage: z.string().optional().openapi({
+        description: "Preferred BCP-47 language tag.",
+        example: "en-US",
+      }),
+      timezone: z.string().optional().openapi({
+        description: "IANA timezone.",
+        example: "America/New_York",
+      }),
+      accessibilityPreferences: z.string().optional().openapi({
+        description: "Free-form accessibility preferences (stored as JSON).",
+        example: "wheelchair-access",
+      }),
+    })
+    .openapi("ParticipantOnboardingRequest", {
+      description:
+        "Participant onboarding command body — creates the PARTICIPANT role + profile in " +
+        "one call. Only `participantType` is required; a missing/invalid value is 422 " +
+        "VALIDATION_FAILED.",
+    }),
+);
+
+/**
+ * Worked example for {@link ParticipantOnboardingRequestSchema} (mirrors the Java DTO's
+ * examples).
+ */
+export const participantOnboardingRequestExample = {
+  firstName: "Sam",
+  lastName: "Rivera",
+  displayName: "Sam Rivera",
+  participantType: "PROSPECTIVE",
+  gradeLevel: "High school senior",
+  intendedMajor: "Computer Science",
+  universitiesOfInterest: ["166683"],
+  topicsOfInterest: ["DORM_HOUSING"],
+  preferredLanguage: "en-US",
+  timezone: "America/New_York",
+  accessibilityPreferences: "wheelchair-access",
+};
 
 /**
  * `POST /v1/users/me/roles/{guide|participant}` response `data` (CTL-97 defer-provisioning

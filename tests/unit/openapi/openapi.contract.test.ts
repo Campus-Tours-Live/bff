@@ -304,3 +304,166 @@ describe("OpenAPI contract — published nullability matches runtime validation"
     },
   );
 });
+
+/**
+ * CTL-97 Task 7 — the two onboarding command ops must be fully documented: a properly
+ * modeled (non-loose) request body per role, and per-status/per-code examples for every
+ * outcome (201 success, 409 `ROLE_ALREADY_GRANTED` / `ROLE_NOT_ELIGIBLE`, 422
+ * `VALIDATION_FAILED`, 500 `SESSION_CONVERSION_FAILED`, plus the shared 401/502).
+ */
+describe("OpenAPI contract — onboarding command ops (CTL-97 Task 7)", () => {
+  type Schema = { $ref?: string; properties?: Record<string, Schema> };
+  type ProblemExample = { code?: string };
+  type ProblemResponse = {
+    content?: {
+      "application/problem+json"?: {
+        example?: ProblemExample;
+        examples?: Record<string, { value?: ProblemExample }>;
+      };
+    };
+  };
+
+  const commandOps = [
+    { path: "/v1/users/me/roles/guide", requestSchemaName: "GuideOnboardingRequest" },
+    {
+      path: "/v1/users/me/roles/participant",
+      requestSchemaName: "ParticipantOnboardingRequest",
+    },
+  ] as const;
+
+  /** All `code`s carried by a problem response, whether a single `example` or an `examples` map. */
+  function codesOf(problemResponse: ProblemResponse | undefined): string[] {
+    const body = problemResponse?.content?.["application/problem+json"];
+    if (!body) return [];
+    if (body.example) return [body.example.code ?? ""];
+    return Object.values(body.examples ?? {}).map((e) => e.value?.code ?? "");
+  }
+
+  it.each(commandOps)(
+    "$path declares a properly modeled (non-loose) request body",
+    ({ path, requestSchemaName }) => {
+      const op = (paths[path] as Record<string, Operation>).post as unknown as {
+        requestBody?: { content?: Record<string, { schema?: Schema }> };
+      };
+      const schema = op.requestBody?.content?.["application/json"]?.schema;
+      expect(schema?.$ref).toBe(`#/components/schemas/${requestSchemaName}`);
+
+      const schemas = (openapiSpec as { components?: { schemas?: Record<string, Schema> } })
+        .components?.schemas;
+      const requestSchema = schemas?.[requestSchemaName];
+      expect(requestSchema).toBeDefined();
+      // A real per-field model, not the loose `JsonObject` (an untyped `z.record`) T6 shipped —
+      // it must declare actual named properties.
+      expect(Object.keys(requestSchema?.properties ?? {}).length).toBeGreaterThan(0);
+    },
+  );
+
+  it.each(commandOps)("$path documents 201/409/422/500/502 with real machine codes", ({ path }) => {
+    const op = (paths[path] as Record<string, Operation>).post;
+    for (const status of ["201", "409", "422", "500", "502"]) {
+      expect({ path, status, has: Boolean(op.responses[status]) }).toEqual({
+        path,
+        status,
+        has: true,
+      });
+    }
+
+    // 409 must carry BOTH machine codes (same status, two named examples — OpenAPI has only
+    // one response object per status).
+    const codes409 = codesOf(op.responses["409"] as unknown as ProblemResponse);
+    expect(codes409.sort()).toEqual(["ROLE_ALREADY_GRANTED", "ROLE_NOT_ELIGIBLE"]);
+
+    expect(codesOf(op.responses["422"] as unknown as ProblemResponse)).toEqual([
+      "VALIDATION_FAILED",
+    ]);
+    expect(codesOf(op.responses["500"] as unknown as ProblemResponse)).toEqual([
+      "SESSION_CONVERSION_FAILED",
+    ]);
+  });
+
+  it.each(commandOps)("$path documents 401 SESSION_EXPIRED", ({ path }) => {
+    const op = (paths[path] as Record<string, Operation>).post;
+    expect(codesOf(op.responses["401"] as unknown as ProblemResponse)).toEqual(["SESSION_EXPIRED"]);
+  });
+});
+
+/**
+ * CTL-97 Task 7 — `GET /v1/userinfo` must document `401 SESSION_EXPIRED` too: the central
+ * pending-expiry guard (withSession/withMutation) can fire on any protected `/v1` route,
+ * this bootstrap read included.
+ */
+describe("OpenAPI contract — 401 SESSION_EXPIRED on /v1/userinfo", () => {
+  it("documents SESSION_EXPIRED as the 401 code", () => {
+    const op = (paths["/v1/userinfo"] as Record<string, Operation>).get;
+    const example = op.responses["401"]?.content?.["application/problem+json"] as unknown as {
+      example?: { code?: string };
+    };
+    expect(example?.example?.code).toBe("SESSION_EXPIRED");
+  });
+});
+
+/**
+ * CTL-97 Task 7 — `Userinfo` must be a real OpenAPI discriminated union on `accountState`,
+ * with both variants shaped per the defer-provisioning contract: `PendingUserinfo` (empty
+ * roles, null user id) and `ProvisionedUserinfo` (roles min 1, string user id).
+ */
+describe("OpenAPI contract — Userinfo discriminated union", () => {
+  type SchemaComponent = {
+    oneOf?: { $ref: string }[];
+    discriminator?: { propertyName: string; mapping?: Record<string, string> };
+    properties?: {
+      roles?: { minItems?: number; maxItems?: number };
+      user?: { properties?: { id?: { type?: unknown; enum?: unknown[] } } };
+    };
+  };
+
+  function schemas(): Record<string, SchemaComponent> {
+    return (
+      (openapiSpec as { components?: { schemas?: Record<string, SchemaComponent> } }).components
+        ?.schemas ?? {}
+    );
+  }
+
+  it("declares an OpenAPI discriminator on accountState with both variants mapped", () => {
+    const userinfo = schemas().Userinfo;
+    expect(userinfo).toBeDefined();
+    expect(userinfo.discriminator?.propertyName).toBe("accountState");
+    expect(userinfo.discriminator?.mapping).toEqual({
+      PENDING: "#/components/schemas/PendingUserinfo",
+      PROVISIONED: "#/components/schemas/ProvisionedUserinfo",
+    });
+    expect((userinfo.oneOf ?? []).map((r) => r.$ref).sort()).toEqual(
+      ["#/components/schemas/PendingUserinfo", "#/components/schemas/ProvisionedUserinfo"].sort(),
+    );
+  });
+
+  it("PendingUserinfo has empty roles and a null user id", () => {
+    const pending = schemas().PendingUserinfo;
+    expect(pending).toBeDefined();
+    expect(pending.properties?.roles?.maxItems).toBe(0);
+    expect(pending.properties?.user?.properties?.id?.type).toBe("null");
+  });
+
+  it("ProvisionedUserinfo requires at least one role and a string user id", () => {
+    const provisioned = schemas().ProvisionedUserinfo;
+    expect(provisioned).toBeDefined();
+    expect(provisioned.properties?.roles?.minItems).toBe(1);
+    expect(provisioned.properties?.user?.properties?.id?.type).toBe("string");
+  });
+});
+
+/**
+ * CTL-97 Task 7 — the bff never documented its own `POST /session` (the removed Core
+ * endpoint was Core's, not the bff's own path); confirm no stale doc exists and the two
+ * legitimate session-shaped routes are untouched.
+ */
+describe("OpenAPI contract — no bff POST /session", () => {
+  it("has no bare /session path", () => {
+    expect(paths["/session"]).toBeUndefined();
+  });
+
+  it("keeps GET /auth/session and POST /v1/session/current-role", () => {
+    expect(paths["/auth/session"]?.get).toBeDefined();
+    expect(paths["/v1/session/current-role"]?.post).toBeDefined();
+  });
+});
