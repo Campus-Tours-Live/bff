@@ -267,7 +267,10 @@ const ProvisionedUserinfo = z
       example: "PROVISIONED",
     }),
     user: UserSummarySchema.openapi({ description: "Signed-in account identity." }),
-    roles: z.array(CoreRoleEnum).min(1).openapi({ description: "Roles the account holds." }),
+    roles: z.array(HeldRoleEnum).min(1).openapi({
+      description:
+        "Roles the account holds — includes staff-only ADMIN/SUPPORT alongside GUIDE/PARTICIPANT.",
+    }),
     currentRole: CoreRoleEnum.nullable().openapi({
       description:
         "The role this bff session currently has active; null when none is chosen yet, or " +
@@ -1374,13 +1377,14 @@ const PendingUserinfoDataSchema = z.object({
 /** GET /v1/userinfo `data`, PROVISIONED variant — `user` forwarded from Core (loose, EXCEPT
  *  `id`, which the bff's PENDING/PROVISIONED discrimination depends on being a real non-empty
  *  string — see userinfo.handler.ts's runtime Core-contract validation); `roles` is BFF-owned
- *  ("non-empty, every entry a known Role"); `currentRole` is BFF-derived (session ∩ Core
- *  roles). */
+ *  ("non-empty, every entry one of the four known {@link HeldRoleEnum} values — including the
+ *  staff-only ADMIN/SUPPORT"); `currentRole` is BFF-derived (session ∩ the GUIDE/PARTICIPANT
+ *  subset of `roles` — ADMIN/SUPPORT are never a `currentRole`). */
 const ProvisionedUserinfoDataSchema = z.object({
   accountState: z.literal("PROVISIONED"),
   user: z.object({ id: z.string().min(1) }).catchall(z.unknown()), // forwarded from Core — id strict, rest opaque
-  roles: z.array(z.enum(["GUIDE", "PARTICIPANT"])).min(1), // BFF-validated (see UPSTREAM_CONTRACT_VIOLATION)
-  currentRole: z.enum(["GUIDE", "PARTICIPANT"]).nullable(), // BFF-derived (session ∩ Core roles)
+  roles: z.array(HeldRoleEnum).min(1), // BFF-validated (see UPSTREAM_CONTRACT_VIOLATION)
+  currentRole: z.enum(["GUIDE", "PARTICIPANT"]).nullable(), // BFF-derived (session ∩ switchable roles)
 });
 
 /** GET /v1/userinfo `data`, discriminated by `accountState` (CTL-97 defer-provisioning). */

@@ -1,3 +1,4 @@
+import type { z } from "zod";
 import {
   convertToProvisioned,
   isRole,
@@ -8,8 +9,13 @@ import {
 } from "../../session.js";
 import { withSession, sendData, CoreError, type Me } from "../_shared/index.js";
 import { sendProblem } from "../../util/problem.js";
-import { UserinfoDataSchema } from "../../openapi/schemas.js";
+import { UserinfoDataSchema, HeldRoleEnum } from "../../openapi/schemas.js";
 import { pendingIdentityFromSession } from "./pendingIdentity.js";
+
+/** Every role value Core can report on an account (`GET /users/me` `roles`) — the four
+ *  {@link HeldRoleEnum} values, including the staff-only ADMIN/SUPPORT that never become a
+ *  switchable/onboardable `currentRole` (see `isRole`/`Role` in src/session.ts). */
+type HeldRole = z.infer<typeof HeldRoleEnum>;
 
 /**
  * GET /v1/userinfo — bff-OWNED aggregation (Profile Contract v2 + CTL-97 defer-provisioning).
@@ -34,16 +40,23 @@ import { pendingIdentityFromSession } from "./pendingIdentity.js";
  * destroys the session cookie centrally for every protected read, not just this endpoint.
  *
  * **Upstream contract violation:** Core returning 200 with `roles: []`, a missing/non-string
- * `user.id`, or any role `isRole` doesn't recognise is NOT a valid PROVISIONED response and is
- * NOT reinterpreted as pending — it is a 502 `UPSTREAM_CONTRACT_VIOLATION` (Core broke its own
- * contract; this is never a normal signin/signup state).
+ * `user.id`, or any role outside the four {@link HeldRoleEnum} values (GUIDE/PARTICIPANT/
+ * ADMIN/SUPPORT) is NOT a valid PROVISIONED response and is NOT reinterpreted as pending — it
+ * is a 502 `UPSTREAM_CONTRACT_VIOLATION` (Core broke its own contract; this is never a normal
+ * signin/signup state). ADMIN/SUPPORT are real, expected Core roles (staff accounts) and are
+ * always passed through in the response `roles` — only a role NONE of the four recognise is
+ * garbage.
  *
- * **Deterministic currentRole repair (no array-order reliance):** when the session's stored
- * `currentRole` is still held, it's kept; else, when the account holds EXACTLY one role, that
- * role is adopted; otherwise `null` (the frontend shows the role picker). The repaired value is
- * persisted ONLY when it differs from what the session already had — an ordinary read (role
- * unchanged) must not extend the cookie's TTL. If persisting the repair throws, this responds
- * 500 `SESSION_CONVERSION_FAILED` rather than handing back a PROVISIONED body while the client
+ * **Deterministic currentRole repair (no array-order reliance):** `currentRole` is only ever
+ * GUIDE or PARTICIPANT — ADMIN/SUPPORT are never switchable/onboardable, so they're excluded
+ * from the candidate set even though they appear in `roles`. Let `switchable` be the
+ * GUIDE/PARTICIPANT subset of the held roles: when the session's stored `currentRole` is still
+ * in `switchable`, it's kept; else, when `switchable` holds EXACTLY one role, that role is
+ * adopted; otherwise `null` (the frontend shows the role picker, or — for a staff-only account
+ * with an empty `switchable` — simply doesn't need one). The repaired value is persisted ONLY
+ * when it differs from what the session already had — an ordinary read (role unchanged) must
+ * not extend the cookie's TTL. If persisting the repair throws, this responds 500
+ * `SESSION_CONVERSION_FAILED` rather than handing back a PROVISIONED body while the client
  * still holds a stale/pending cookie.
  *
  * **The PENDING branch is read-only:** it must NEVER call `writePendingSession`/`writeSession`
@@ -81,21 +94,31 @@ export const getUserinfo = withSession(async (req, res, core) => {
   // --- PROVISIONED path: runtime-validate the Core contract before trusting it. ---
   const heldRoles = cu.roles;
   const idIsValid = typeof cu.user.id === "string" && cu.user.id.length > 0;
-  const rolesAreValid = heldRoles.length >= 1 && heldRoles.every(isRole);
+  const rolesAreValid =
+    heldRoles.length >= 1 && heldRoles.every((r) => HeldRoleEnum.safeParse(r).success);
   if (!idIsValid || !rolesAreValid) {
     // Core broke its own contract — this is an upstream problem, NOT a signin, and must never
-    // be reported as PROVISIONED (nor misread as "roles: [] → pending").
+    // be reported as PROVISIONED (nor misread as "roles: [] → pending"). Note ADMIN/SUPPORT
+    // pass this check (they're real Core roles, see HeldRoleEnum) — only a role outside the
+    // four known values is garbage.
     return sendProblem(res, 502, "Upstream contract violation", {
       code: "UPSTREAM_CONTRACT_VIOLATION",
     });
   }
-  const held = heldRoles as Role[];
+  const held = heldRoles as HeldRole[];
+  // currentRole is GUIDE/PARTICIPANT only — ADMIN/SUPPORT are never switchable/onboardable, so
+  // they're excluded from the repair candidate set even though they stay in `held`/`roles`.
+  const switchable = held.filter(isRole);
 
   /* istanbul ignore next -- see the fallback-literal note above; same unreachable-null case. */
   const session = readSession(req) ?? { accountState: "PROVISIONED" as const };
   const priorRole = session.accountState === "PROVISIONED" ? session.currentRole : undefined;
   const repairedRole: Role | null =
-    isRole(priorRole) && held.includes(priorRole) ? priorRole : held.length === 1 ? held[0]! : null;
+    isRole(priorRole) && switchable.includes(priorRole)
+      ? priorRole
+      : switchable.length === 1
+        ? switchable[0]!
+        : null;
 
   try {
     if (session.accountState === "PENDING") {

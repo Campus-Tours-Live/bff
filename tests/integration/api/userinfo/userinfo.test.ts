@@ -225,14 +225,72 @@ describe("GET /v1/userinfo — upstream Core-contract violations (never a signin
     expect(res.body).toMatchObject({ code: "UPSTREAM_CONTRACT_VIOLATION" });
   });
 
-  it("Core 200 with an unknown role value → 502 UPSTREAM_CONTRACT_VIOLATION", async () => {
+  it("Core 200 with a genuinely unknown role value → 502 UPSTREAM_CONTRACT_VIOLATION", async () => {
     const cookie = mintSessionCookie();
-    mockCoreByPath({ "/users/me": usersMeOk(["ADMIN"]) });
+    mockCoreByPath({ "/users/me": usersMeOk(["WIZARD"]) });
 
     const res = await request(app).get("/v1/userinfo").set("Cookie", cookie);
 
     expect(res.status).toBe(502);
     expect(res.body).toMatchObject({ code: "UPSTREAM_CONTRACT_VIOLATION" });
+  });
+
+  it("Core 200 with a mix of a known and a genuinely unknown role → 502 UPSTREAM_CONTRACT_VIOLATION", async () => {
+    const cookie = mintSessionCookie();
+    mockCoreByPath({ "/users/me": usersMeOk(["GUIDE", "WIZARD"]) });
+
+    const res = await request(app).get("/v1/userinfo").set("Cookie", cookie);
+
+    expect(res.status).toBe(502);
+    expect(res.body).toMatchObject({ code: "UPSTREAM_CONTRACT_VIOLATION" });
+  });
+});
+
+describe("GET /v1/userinfo — staff roles (ADMIN/SUPPORT) surface in roles, never in currentRole", () => {
+  it.each(["ADMIN", "SUPPORT"] as const)(
+    "staff-only account (roles: [%s]) → PROVISIONED, roles include it, currentRole: null (NOT 502)",
+    async (staffRole) => {
+      const cookie = mintSessionCookie(); // no currentRole
+      mockCoreByPath({ "/users/me": usersMeOk([staffRole]) });
+
+      const res = await request(app).get("/v1/userinfo").set("Cookie", cookie);
+
+      expect(res.status).toBe(200);
+      expect(res.body.data.accountState).toBe("PROVISIONED");
+      expect(res.body.data.roles).toEqual([staffRole]);
+      expect(res.body.data.currentRole).toBeNull();
+      expect(EnvelopedUserinfoSchema.safeParse(res.body).success).toBe(true);
+      // A single held role would normally auto-adopt as currentRole (see the "adopts it and
+      // persists" test above) — but ADMIN/SUPPORT are never switchable, so this must NOT
+      // write a session (no candidate to adopt, repairedRole stays null === no prior value).
+      expect(res.headers["set-cookie"]).toBeUndefined();
+    },
+  );
+
+  it("mixed roles:[GUIDE, ADMIN], no valid session currentRole → currentRole: GUIDE, roles include ADMIN", async () => {
+    const cookie = mintSessionCookie(); // no currentRole
+    mockCoreByPath({ "/users/me": usersMeOk(["GUIDE", "ADMIN"]) });
+
+    const res = await request(app).get("/v1/userinfo").set("Cookie", cookie);
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.roles).toEqual(["GUIDE", "ADMIN"]);
+    expect(res.body.data.currentRole).toBe("GUIDE");
+    // Exactly one SWITCHABLE role (GUIDE) was adopted — this differs from "no currentRole", so
+    // it persists.
+    expect(res.headers["set-cookie"]).toBeDefined();
+  });
+
+  it("mixed multi-switchable roles:[GUIDE, PARTICIPANT, SUPPORT], no valid session role → currentRole: null, roles include SUPPORT", async () => {
+    const cookie = mintSessionCookie(); // no currentRole
+    mockCoreByPath({ "/users/me": usersMeOk(["GUIDE", "PARTICIPANT", "SUPPORT"]) });
+
+    const res = await request(app).get("/v1/userinfo").set("Cookie", cookie);
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.roles).toEqual(["GUIDE", "PARTICIPANT", "SUPPORT"]);
+    expect(res.body.data.currentRole).toBeNull();
+    expect(EnvelopedUserinfoSchema.safeParse(res.body).success).toBe(true);
   });
 });
 
