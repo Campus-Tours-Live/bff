@@ -90,6 +90,23 @@ describe("GET /v1/userinfo", () => {
     expect(res.headers["set-cookie"]).toBeDefined();
   });
 
+  it("PENDING (not-yet-provisioned, not expired) session → currentRole: null, no session write", async () => {
+    // Defensive-branch coverage (CTL-97 Task 4): a PENDING session has no `currentRole` at all —
+    // this must resolve to null exactly like a PROVISIONED session with none set, never throw.
+    const cookie = mintSessionCookie({
+      accountState: "PENDING",
+      pendingSince: Date.now(),
+      pendingExpiresAt: Date.now() + 24 * 60 * 60 * 1000,
+    });
+    mockCoreByPath({ "/users/me": usersMeOk([]) });
+
+    const res = await request(app).get("/v1/userinfo").set("Cookie", cookie);
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.currentRole).toBeNull();
+    expect(res.headers["set-cookie"]).toBeUndefined();
+  });
+
   it("no cookie → 401 with Auth-Required: reauthenticate", async () => {
     mockCoreByPath({});
 

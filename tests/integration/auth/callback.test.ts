@@ -43,6 +43,12 @@ function sessionFrom(pair: string | undefined): ReturnType<typeof readSession> {
   return readSession({ headers: { cookie: pair } } as unknown as Parameters<typeof readSession>[0]);
 }
 
+/** `currentRole` only exists on a PROVISIONED session — the callback always establishes one
+ *  today (CTL-97 Task 4 note in src/auth/routes.ts), so this narrows for the assertions below. */
+function currentRoleOf(session: ReturnType<typeof sessionFrom>): string | undefined {
+  return session?.accountState === "PROVISIONED" ? session.currentRole : undefined;
+}
+
 const fetchMock = jest.fn<typeof fetch>();
 /** What the next Core /session call resolves to (or null/reject). */
 let coreNext: { kind: "resolve"; value: Response } | { kind: "reject"; err: unknown };
@@ -406,7 +412,7 @@ describe("GET /auth/callback — success landing + session", () => {
     // task) re-derives access statelessly. The session carries tokens only; currentRole stays
     // unset until the account actually holds GUIDE.
     expect(sessionFrom(sessCookie)).toMatchObject({ idToken: FAKE_TOKENS.id_token });
-    expect(sessionFrom(sessCookie)?.currentRole).toBeUndefined();
+    expect(currentRoleOf(sessionFrom(sessCookie))).toBeUndefined();
   });
 
   it("signin, lacks the requested role → /signup/role, no currentRole", async () => {
@@ -424,7 +430,7 @@ describe("GET /auth/callback — success landing + session", () => {
     expect(res.headers.location).toBe("http://localhost:3001/signup/role");
     const sessCookie = cookieNamed(res, "ctl_sess");
     expect(sessCookie).toBeDefined();
-    expect(sessionFrom(sessCookie)?.currentRole).toBeUndefined();
+    expect(currentRoleOf(sessionFrom(sessCookie))).toBeUndefined();
     // Lacking a requested role on signin is not eligibility-gated — no eligibility call.
     expect(
       fetchMock.mock.calls.some((c) =>

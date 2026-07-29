@@ -3,10 +3,13 @@ import type { Request, Response } from "express";
 
 const readSession = jest.fn<
   (...args: unknown[]) => {
+    accountState?: string;
     idToken?: string;
     refreshToken?: string;
     expiresAt?: number;
     currentRole?: string;
+    pendingSince?: number;
+    pendingExpiresAt?: number;
   } | null
 >();
 const writeSession = jest.fn<(...args: unknown[]) => void>();
@@ -33,12 +36,14 @@ jest.unstable_mockModule("@/auth/google.js", () => ({
 }));
 
 const { resolveBearer } = await import("@/api/_shared/session.js");
-const { TransientAuthError } = await import("@/api/_shared/errors.js");
+const { TransientAuthError, PendingSessionExpiredError } = await import("@/api/_shared/errors.js");
+const { clock } = await import("@/lib/clock.js");
 
 const req = {} as Request;
 const res = {} as Response;
 
 const NOW = 1_000_000_000_000;
+const REAL_CLOCK_NOW = clock.now;
 
 describe("resolveBearer / bearerForSession", () => {
   beforeEach(() => {
@@ -50,6 +55,7 @@ describe("resolveBearer / bearerForSession", () => {
 
   afterEach(() => {
     jest.restoreAllMocks();
+    clock.now = REAL_CLOCK_NOW;
   });
 
   it("returns null when there is no session", async () => {
@@ -179,5 +185,101 @@ describe("resolveBearer / bearerForSession", () => {
 
     await expect(resolveBearer(req, res)).resolves.toBeNull();
     expect(writeSession).not.toHaveBeenCalled();
+  });
+
+  /**
+   * CTL-97 Task 4 — the central pending-expiry guard. A PENDING session (authenticated with
+   * Google, not yet provisioned in Core) carries a 24h ABSOLUTE lifetime; once
+   * `clock.now() >= pendingExpiresAt` the guard must throw BEFORE returning any bearer and
+   * BEFORE any Core call (there is no Core call inside `bearerForSession` itself — the "no Core
+   * call" guarantee is proven end-to-end through `withSession`, see with-session.test.ts).
+   */
+  describe("pending session expiry guard", () => {
+    const PENDING_EXPIRES_AT = NOW + 12 * 60 * 60_000; // arbitrary, well inside a 24h window
+
+    function pendingSession(overrides: Record<string, unknown> = {}) {
+      return {
+        accountState: "PENDING",
+        pendingSince: PENDING_EXPIRES_AT - 24 * 60 * 60_000,
+        pendingExpiresAt: PENDING_EXPIRES_AT,
+        idToken: "id-pending",
+        ...overrides,
+      };
+    }
+
+    it("now < pendingExpiresAt → valid, returns the bearer, no throw", async () => {
+      clock.now = () => PENDING_EXPIRES_AT - 1;
+      readSession.mockReturnValue(pendingSession());
+
+      await expect(resolveBearer(req, res)).resolves.toBe("id-pending");
+    });
+
+    it("now === pendingExpiresAt → EXPIRED (boundary)", async () => {
+      clock.now = () => PENDING_EXPIRES_AT;
+      readSession.mockReturnValue(pendingSession());
+
+      await expect(resolveBearer(req, res)).rejects.toBeInstanceOf(PendingSessionExpiredError);
+      expect(writeSession).not.toHaveBeenCalled();
+    });
+
+    it("now > pendingExpiresAt → EXPIRED", async () => {
+      clock.now = () => PENDING_EXPIRES_AT + 1;
+      readSession.mockReturnValue(pendingSession());
+
+      const err: unknown = await resolveBearer(req, res).catch((e: unknown) => e);
+      expect(err).toBeInstanceOf(PendingSessionExpiredError);
+      expect((err as InstanceType<typeof PendingSessionExpiredError>).code).toBe("SESSION_EXPIRED");
+    });
+
+    it("a PROVISIONED session ignores pending-shaped fields entirely — state is read from accountState, never inferred from pendingExpiresAt's presence", async () => {
+      // Same "expired" clock value as above, but accountState is PROVISIONED — must NOT throw.
+      clock.now = () => PENDING_EXPIRES_AT + 1;
+      readSession.mockReturnValue({
+        accountState: "PROVISIONED",
+        idToken: "id-provisioned",
+        // A stray pending-looking field that must be ignored outright.
+        pendingExpiresAt: PENDING_EXPIRES_AT,
+      });
+
+      await expect(resolveBearer(req, res)).resolves.toBe("id-provisioned");
+    });
+  });
+
+  describe("refresh does not extend a PENDING session's absolute lifetime", () => {
+    it("keeps pendingSince/pendingExpiresAt/accountState UNCHANGED across a near-token-expiry refresh", async () => {
+      const pendingExpiresAt = NOW + 1000; // still valid; unrelated to the near-token-expiry check
+      const pendingSince = NOW - 1000;
+      clock.now = () => NOW;
+      readSession.mockReturnValue({
+        accountState: "PENDING",
+        pendingSince,
+        pendingExpiresAt,
+        idToken: "id-old",
+        refreshToken: "refresh-old",
+        expiresAt: NOW + 30_000, // inside the 5-min refresh window
+      });
+      refreshTokens.mockResolvedValue({
+        id_token: "id-new",
+        access_token: "access-new",
+        refresh_token: "refresh-new",
+        expires_in: 3600,
+      });
+
+      await expect(resolveBearer(req, res)).resolves.toBe("id-new");
+      expect(writeSession).toHaveBeenCalledTimes(1);
+      expect(writeSession).toHaveBeenCalledWith(
+        res,
+        {
+          accountState: "PENDING",
+          pendingSince,
+          pendingExpiresAt,
+          idToken: "id-new",
+          accessToken: "access-new",
+          refreshToken: "refresh-new",
+          expiresAt: NOW + 3600 * 1000,
+        },
+        1, // remaining seconds until pendingExpiresAt — NOT the default 7-day TTL
+      );
+    });
   });
 });

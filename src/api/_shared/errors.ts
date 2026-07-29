@@ -44,6 +44,30 @@ export class TransientAuthError extends Error {
 }
 
 /**
+ * A PENDING session (CTL-97 defer-provisioning: authenticated with Google, not yet
+ * provisioned in Core) has passed its 24h absolute lifetime (`now >= pendingExpiresAt`).
+ * Thrown from the shared session-resolution path (`bearerForSession`, `src/api/_shared/session.ts`)
+ * BEFORE any bearer is returned and BEFORE any Core call — `withSession` catches this to destroy
+ * the cookie and answer uniformly, across every protected `/v1` route, without ever letting the
+ * decoded (expired) session reach a handler or a Core request.
+ *
+ * Mirrors {@link TransientAuthError}'s pattern (a dedicated thrown signal distinct from the
+ * ordinary `null` "no/dead session" return), but is NOT the same case: `null` means "session
+ * absent or its refresh grant is dead" → the ordinary requireReauth flow; this is a specific,
+ * stably-coded outcome (`code: "SESSION_EXPIRED"`) for the pending-lifetime cutoff, and must be
+ * caught separately rather than collapsed into the `null` branch.
+ */
+export class PendingSessionExpiredError extends Error {
+  /** Stable machine-readable discriminant — mirrors `IdentityClaimsInvalidError.code`. */
+  readonly code = "SESSION_EXPIRED";
+
+  constructor() {
+    super("Pending session expired");
+    this.name = "PendingSessionExpiredError";
+  }
+}
+
+/**
  * The subset of an RFC7807 problem+json body {@link CoreError.fromResponse} recognizes:
  * a machine-readable `code`, human-readable `title`/`detail`, and any remaining extension
  * members (e.g. `role`, `reconciliationRequired` — see Core's `ProblemDetail.setProperty`).

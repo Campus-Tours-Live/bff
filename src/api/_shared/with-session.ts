@@ -1,10 +1,16 @@
 import type { Request, Response } from "express";
+import { clearSession } from "../../session.js";
 import { sendProblem } from "../../util/problem.js";
 import { resolveBearer } from "./session.js";
 import { requireReauth, authUpstreamUnavailable } from "./reauth.js";
 import { coreUnavailable } from "./envelope.js";
 import { CoreClient } from "./core-client.js";
-import { CoreAuthError, CoreError, TransientAuthError } from "./errors.js";
+import {
+  CoreAuthError,
+  CoreError,
+  PendingSessionExpiredError,
+  TransientAuthError,
+} from "./errors.js";
 
 /**
  * Handler wrapper for aggregation endpoints: resolve auth once, hand the handler a
@@ -13,6 +19,10 @@ import { CoreAuthError, CoreError, TransientAuthError } from "./errors.js";
  * Error mapping:
  *   - no session / silent-refresh failed, OR a Core 401 → requireReauth (web app opens
  *     the sign-in modal);
+ *   - a PENDING session past its 24h absolute lifetime → destroy the cookie + 401
+ *     SESSION_EXPIRED, with NO Core call (CTL-97 Task 4's central pending-expiry guard —
+ *     see `PendingSessionExpiredError`); distinct from the requireReauth case above, which
+ *     is why it is caught and handled separately rather than folded into it;
  *   - a Core 5xx / unreachable → 502 (upstream unavailable);
  *   - a Core 4xx → surfaced with its real status (don't mislabel a 404/422 as
  *     "unavailable");
@@ -28,6 +38,13 @@ export function withSession(
     } catch (err) {
       // Google was unreachable, not the session dead — keep the session, ask for a retry.
       if (err instanceof TransientAuthError) return authUpstreamUnavailable(res);
+      // The pending session's 24h absolute lifetime is up: destroy the cookie (expiring
+      // Set-Cookie) and answer 401 SESSION_EXPIRED WITHOUT ever constructing a CoreClient or
+      // invoking the handler below — no Core call happens for this request.
+      if (err instanceof PendingSessionExpiredError) {
+        clearSession(res);
+        return sendProblem(res, 401, "Session expired", { code: err.code });
+      }
       throw err;
     }
     if (!bearer) return requireReauth(res);

@@ -9,6 +9,7 @@ export {
   CoreError,
   TransientAuthError,
   IdentityClaimsInvalidError,
+  PendingSessionExpiredError,
 } from "./errors.js";
 export { sendData, coreUnavailable, assertShapeInDev } from "./envelope.js";
 export { withSession } from "./with-session.js";

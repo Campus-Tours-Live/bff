@@ -1,4 +1,4 @@
-import { isRole, readSession, writeSession } from "../../session.js";
+import { convertToProvisioned, isRole, readSession } from "../../session.js";
 import { sendProblem } from "../../util/problem.js";
 import { sendData, withSession, type Me } from "../_shared/index.js";
 import { CurrentRoleDataSchema } from "../../openapi/schemas.js";
@@ -30,12 +30,14 @@ export const setCurrentRole = withSession(async (req, res, core) => {
   }
 
   // withSession only reaches this handler after resolveBearer resolved a bearer FROM this
-  // request's session, so readSession(req) is guaranteed non-null here; the `?? {}` just keeps
-  // the type checker happy without an extra (unreachable) branch to test.
+  // request's session, so readSession(req) is guaranteed non-null here — and Core just
+  // confirmed (via getCurrentUser above) that this account IS provisioned, so
+  // convertToProvisioned is the right transition regardless of the session's prior
+  // accountState; the fallback literal just keeps the type checker happy without an extra
+  // (unreachable) branch to test.
   /* istanbul ignore next */
-  const session = readSession(req) ?? {};
-  const next = { ...session, currentRole: role };
-  writeSession(res, next);
+  const session = readSession(req) ?? { accountState: "PROVISIONED" as const };
+  convertToProvisioned(res, session, role);
 
   sendData(res, { currentRole: role }, CurrentRoleDataSchema);
 });

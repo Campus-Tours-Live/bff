@@ -28,7 +28,11 @@ function sessCookie(session: { idToken?: string; refreshToken?: string }): strin
       return res;
     },
   };
-  writeSession(res as unknown as ExpressResponse, { idToken: "id-tok", ...session });
+  writeSession(res as unknown as ExpressResponse, {
+    accountState: "PROVISIONED",
+    idToken: "id-tok",
+    ...session,
+  });
   const setCookie = cookies[0];
   if (!setCookie) throw new Error("writeSession did not append a cookie");
   return setCookie.split(";")[0] as string;

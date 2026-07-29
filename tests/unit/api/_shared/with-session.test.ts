@@ -1,14 +1,18 @@
 import { jest } from "@jest/globals";
 import type { Request, Response } from "express";
-import { CoreAuthError, CoreError } from "@/api/_shared/errors.js";
+import { CoreAuthError, CoreError, PendingSessionExpiredError } from "@/api/_shared/errors.js";
 
 const resolveBearer = jest.fn<(...args: unknown[]) => Promise<string | null>>();
 const requireReauth = jest.fn<(...args: unknown[]) => void>();
 const coreUnavailable = jest.fn<(...args: unknown[]) => void>();
 const sendProblem = jest.fn<(...args: unknown[]) => void>();
+const clearSession = jest.fn<(...args: unknown[]) => void>();
 
 jest.unstable_mockModule("@/api/_shared/session.js", () => ({
   resolveBearer: (...args: unknown[]) => resolveBearer(...args),
+}));
+jest.unstable_mockModule("@/session.js", () => ({
+  clearSession: (...args: unknown[]) => clearSession(...args),
 }));
 jest.unstable_mockModule("@/api/_shared/reauth.js", () => ({
   requireReauth: (...args: unknown[]) => requireReauth(...args),
@@ -35,6 +39,7 @@ describe("withSession", () => {
     requireReauth.mockReset();
     coreUnavailable.mockReset();
     sendProblem.mockReset();
+    clearSession.mockReset();
   });
 
   it("calls requireReauth and does NOT call the handler when there is no bearer", async () => {
@@ -87,6 +92,28 @@ describe("withSession", () => {
     expect(sendProblem).toHaveBeenCalledWith(res, 404, "Upstream request failed", {
       code: "UPSTREAM_ERROR",
     });
+    expect(coreUnavailable).not.toHaveBeenCalled();
+  });
+
+  /**
+   * CTL-97 Task 4 — the central pending-expiry guard, proven through `withSession` itself so
+   * this exercises the SAME code path every protected `/v1` route goes through (not just
+   * `/userinfo` or `/dashboard` individually).
+   */
+  it("on PendingSessionExpiredError: destroys the session, answers 401 SESSION_EXPIRED, and makes NO Core call", async () => {
+    resolveBearer.mockRejectedValue(new PendingSessionExpiredError());
+    const handler = jest.fn<(...a: unknown[]) => Promise<void>>().mockResolvedValue(undefined);
+
+    await withSession(handler as never)(req, res);
+
+    expect(clearSession).toHaveBeenCalledWith(res);
+    expect(sendProblem).toHaveBeenCalledWith(res, 401, expect.any(String), {
+      code: "SESSION_EXPIRED",
+    });
+    // The handler is where a Core client would be constructed and used — never invoked here,
+    // so no Core call happens for this request.
+    expect(handler).not.toHaveBeenCalled();
+    expect(requireReauth).not.toHaveBeenCalled();
     expect(coreUnavailable).not.toHaveBeenCalled();
   });
 

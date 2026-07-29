@@ -9,7 +9,7 @@ import {
   writeAuthTx,
   writeSession,
   type Role,
-  type SessionData,
+  type ProvisionedSessionData,
 } from "../session.js";
 import {
   buildAuthorizeUrl,
@@ -226,7 +226,12 @@ authRouter.get("/callback", async (req, res) => {
   // Tokens established regardless of role outcome below — the role fields are set/left unset
   // per branch, then the WHOLE session (tokens + role) is written once, before the redirect
   // (see the persistence-order note above writeSession further down).
-  const session: SessionData = {
+  // CTL-97 Task 4 note: this callback still always establishes a PROVISIONED session (Core's
+  // `/session?intent=` call above already confirmed the account exists) — the ephemeral
+  // pre-commit token exchange above it does NOT pass through the pending-expiry guard, and
+  // writing a PENDING session here is a later phase's change, not this one's.
+  const session: ProvisionedSessionData = {
+    accountState: "PROVISIONED",
     idToken: tokens.id_token,
     accessToken: tokens.access_token,
     refreshToken: tokens.refresh_token,

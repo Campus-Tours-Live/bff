@@ -1,4 +1,4 @@
-import { isRole, readSession, writeSession } from "../../session.js";
+import { convertToProvisioned, isRole, readSession } from "../../session.js";
 import { withSession, sendData, type Me } from "../_shared/index.js";
 import { UserinfoDataSchema } from "../../openapi/schemas.js";
 
@@ -19,16 +19,20 @@ import { UserinfoDataSchema } from "../../openapi/schemas.js";
 export const getUserinfo = withSession(async (req, res, core) => {
   const cu = await core.getCurrentUser<Me>();
   // withSession only reaches this handler after resolveBearer resolved a bearer FROM this
-  // request's session, so readSession(req) is guaranteed non-null here; the `?? {}` just keeps
-  // the type checker happy without an extra (unreachable) branch to test.
+  // request's session, so readSession(req) is guaranteed non-null here; the fallback literal
+  // just keeps the type checker happy without an extra (unreachable) branch to test. A PENDING
+  // session (no currentRole — there is no Core account yet to have a role on) falls straight
+  // through to `requestedRole: undefined` below, same as a PROVISIONED session with none set.
   /* istanbul ignore next */
-  const session = readSession(req) ?? {};
-  const requestedRole = session.currentRole;
+  const session = readSession(req) ?? { accountState: "PROVISIONED" as const };
+  const requestedRole = session.accountState === "PROVISIONED" ? session.currentRole : undefined;
   const current = isRole(requestedRole) && cu.roles.includes(requestedRole) ? requestedRole : null;
 
   if (requestedRole && !current) {
-    const { currentRole: _stale, ...rest } = session;
-    writeSession(res, rest);
+    // Core just confirmed (via getCurrentUser above) that this account IS provisioned —
+    // convertToProvisioned drops the stale currentRole (by omitting it) while carrying the
+    // token fields forward.
+    convertToProvisioned(res, session, undefined);
   }
 
   sendData(res, { user: cu.user, roles: cu.roles, currentRole: current }, UserinfoDataSchema);

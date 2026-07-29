@@ -27,7 +27,7 @@ const FULL_CLAIMS = {
 
 describe("pendingIdentityFromSession", () => {
   it("maps a full id_token's claims to a PendingUserInfo with id: null", () => {
-    const session: SessionData = { idToken: makeIdToken(FULL_CLAIMS) };
+    const session: SessionData = { accountState: "PROVISIONED", idToken: makeIdToken(FULL_CLAIMS) };
 
     const result = pendingIdentityFromSession(session);
 
@@ -43,28 +43,28 @@ describe("pendingIdentityFromSession", () => {
 
   it("maps a missing given_name claim to firstName: null (not an error)", () => {
     const { given_name: _given_name, ...rest } = FULL_CLAIMS;
-    const session: SessionData = { idToken: makeIdToken(rest) };
+    const session: SessionData = { accountState: "PROVISIONED", idToken: makeIdToken(rest) };
 
     expect(pendingIdentityFromSession(session).firstName).toBeNull();
   });
 
   it("maps a missing family_name claim to lastName: null (not an error)", () => {
     const { family_name: _family_name, ...rest } = FULL_CLAIMS;
-    const session: SessionData = { idToken: makeIdToken(rest) };
+    const session: SessionData = { accountState: "PROVISIONED", idToken: makeIdToken(rest) };
 
     expect(pendingIdentityFromSession(session).lastName).toBeNull();
   });
 
   it("maps a missing name claim to displayName: null (not an error)", () => {
     const { name: _name, ...rest } = FULL_CLAIMS;
-    const session: SessionData = { idToken: makeIdToken(rest) };
+    const session: SessionData = { accountState: "PROVISIONED", idToken: makeIdToken(rest) };
 
     expect(pendingIdentityFromSession(session).displayName).toBeNull();
   });
 
   it("throws IdentityClaimsInvalidError (code IDENTITY_CLAIMS_INVALID) when the email claim is missing", () => {
     const { email: _email, ...rest } = FULL_CLAIMS;
-    const session: SessionData = { idToken: makeIdToken(rest) };
+    const session: SessionData = { accountState: "PROVISIONED", idToken: makeIdToken(rest) };
 
     expect(() => pendingIdentityFromSession(session)).toThrow(IdentityClaimsInvalidError);
     try {
@@ -78,6 +78,7 @@ describe("pendingIdentityFromSession", () => {
 
   it("throws IdentityClaimsInvalidError when email_verified is false", () => {
     const session: SessionData = {
+      accountState: "PROVISIONED",
       idToken: makeIdToken({ ...FULL_CLAIMS, email_verified: false }),
     };
 
@@ -86,6 +87,7 @@ describe("pendingIdentityFromSession", () => {
 
   it('throws IdentityClaimsInvalidError when email_verified is the string "true" (strict boolean required)', () => {
     const session: SessionData = {
+      accountState: "PROVISIONED",
       idToken: makeIdToken({ ...FULL_CLAIMS, email_verified: "true" }),
     };
 
@@ -94,19 +96,20 @@ describe("pendingIdentityFromSession", () => {
 
   it("throws IdentityClaimsInvalidError when email_verified is missing", () => {
     const { email_verified: _email_verified, ...rest } = FULL_CLAIMS;
-    const session: SessionData = { idToken: makeIdToken(rest) };
+    const session: SessionData = { accountState: "PROVISIONED", idToken: makeIdToken(rest) };
 
     expect(() => pendingIdentityFromSession(session)).toThrow(IdentityClaimsInvalidError);
   });
 
   it("throws IdentityClaimsInvalidError for a malformed id_token (not 3 dot-separated segments)", () => {
-    const session: SessionData = { idToken: "only-one-segment" };
+    const session: SessionData = { accountState: "PROVISIONED", idToken: "only-one-segment" };
 
     expect(() => pendingIdentityFromSession(session)).toThrow(IdentityClaimsInvalidError);
   });
 
   it("throws IdentityClaimsInvalidError for a malformed id_token (payload segment is not valid base64)", () => {
     const session: SessionData = {
+      accountState: "PROVISIONED",
       idToken: `${seg({ alg: "RS256" })}.%%%not-base64%%%.dummy-signature`,
     };
 
@@ -115,6 +118,7 @@ describe("pendingIdentityFromSession", () => {
 
   it("throws IdentityClaimsInvalidError for a malformed id_token (payload decodes to non-JSON text)", () => {
     const session: SessionData = {
+      accountState: "PROVISIONED",
       idToken: `${seg({ alg: "RS256" })}.${Buffer.from("not json at all").toString("base64url")}.dummy-signature`,
     };
 
@@ -123,6 +127,7 @@ describe("pendingIdentityFromSession", () => {
 
   it("throws IdentityClaimsInvalidError when the payload decodes to non-object JSON (e.g. a bare number)", () => {
     const session: SessionData = {
+      accountState: "PROVISIONED",
       idToken: `${seg({ alg: "RS256" })}.${Buffer.from("42").toString("base64url")}.dummy-signature`,
     };
 
@@ -130,13 +135,16 @@ describe("pendingIdentityFromSession", () => {
   });
 
   it("throws IdentityClaimsInvalidError when the session has no idToken", () => {
-    const session: SessionData = {};
+    const session: SessionData = { accountState: "PROVISIONED" };
 
     expect(() => pendingIdentityFromSession(session)).toThrow(IdentityClaimsInvalidError);
   });
 
   it("reads only the session's idToken — an accessToken present without an idToken is never used as a substitute", () => {
-    const session: SessionData = { accessToken: makeIdToken(FULL_CLAIMS) };
+    const session: SessionData = {
+      accountState: "PROVISIONED",
+      accessToken: makeIdToken(FULL_CLAIMS),
+    };
 
     expect(() => pendingIdentityFromSession(session)).toThrow(IdentityClaimsInvalidError);
   });
@@ -144,7 +152,7 @@ describe("pendingIdentityFromSession", () => {
   it("takes only the server-side session (type-level guard: no request/header/query param accepted)", () => {
     // If this compiles, `pendingIdentityFromSession`'s parameter is (at most) `SessionData` —
     // a plain object literal satisfies it; no `Request`, header bag, or query object is needed.
-    const session: SessionData = { idToken: makeIdToken(FULL_CLAIMS) };
+    const session: SessionData = { accountState: "PROVISIONED", idToken: makeIdToken(FULL_CLAIMS) };
     const result: PendingUserInfo = pendingIdentityFromSession(session);
     expect(result.id).toBeNull();
   });

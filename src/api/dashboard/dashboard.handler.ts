@@ -19,9 +19,12 @@ import { participantDashboard } from "./participant.js";
 export const getDashboard = withSession(async (req, res, core) => {
   const me = await core.getCurrentUser<Me>();
   // withSession only reaches this handler once resolveBearer resolved a bearer FROM this
-  // session, so readSession(req) is guaranteed non-null; `?.` just satisfies the type checker.
-  /* istanbul ignore next */
-  const currentRole = readSession(req)?.currentRole;
+  // session, so readSession(req) is guaranteed non-null; the `accountState` narrowing (rather
+  // than a `?.`) is what lets `currentRole` be read at all now that it only exists on
+  // ProvisionedSessionData — a PENDING session (no currentRole, no Core account) has no
+  // dashboard "home" of its own, so it also falls into the participant-variant default below.
+  const session = readSession(req);
+  const currentRole = session?.accountState === "PROVISIONED" ? session.currentRole : undefined;
   if (currentRole === "GUIDE") return guideDashboard(res, core, me);
   return participantDashboard(res, core, me);
 });

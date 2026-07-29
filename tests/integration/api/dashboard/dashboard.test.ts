@@ -140,6 +140,26 @@ describe("GET /v1/dashboard", () => {
     expect(res.body.data.canPublish).toBe(true);
   });
 
+  it("PENDING (not-yet-provisioned, not expired) session → still 200, defaults to participant (no currentRole to read)", async () => {
+    // Defensive-branch coverage (CTL-97 Task 4): a PENDING session has no `currentRole` field at
+    // all (there's no Core account yet to have chosen one), so it must fall into the SAME
+    // participant default as a PROVISIONED session with no role set — never throw.
+    cookie = mintSessionCookie({
+      accountState: "PENDING",
+      pendingSince: Date.now(),
+      pendingExpiresAt: Date.now() + 24 * 60 * 60 * 1000,
+    });
+    mockCoreByPath({
+      "/users/me": usersMeOk([]),
+      "/participant/profile": coreOk({ id: "p1" }),
+    });
+
+    const res = await request(app).get("/v1/dashboard").set("Cookie", cookie);
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.kind).toBe("participant");
+  });
+
   it("no cookie → 401 with Auth-Required: reauthenticate", async () => {
     mockCoreByPath({}); // Core should never be called
 
