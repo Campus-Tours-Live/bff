@@ -96,6 +96,63 @@ describe("withSession", () => {
   });
 
   /**
+   * CTL-97 Task 3 (I8) — a bad ACCOUNT STATE destroys the session centrally, for every
+   * protected read (not just `/userinfo`), BEFORE the generic 4xx passthrough above ever sees
+   * it.
+   */
+  it.each(["ACCOUNT_SUSPENDED", "ACCOUNT_DELETED"] as const)(
+    "on a CoreError(403, %s): destroys the session and answers 403 with the coded error",
+    async (code) => {
+      resolveBearer.mockResolvedValue("bearer");
+      const handler = jest
+        .fn<(...a: unknown[]) => Promise<void>>()
+        .mockRejectedValue(new CoreError(403, undefined, undefined, code));
+      await withSession(handler as never)(req, res);
+      expect(clearSession).toHaveBeenCalledWith(res);
+      expect(sendProblem).toHaveBeenCalledWith(res, 403, expect.any(String), { code });
+      expect(coreUnavailable).not.toHaveBeenCalled();
+      expect(requireReauth).not.toHaveBeenCalled();
+    },
+  );
+
+  it("on a CoreError(409, ACCOUNT_STATE_INVALID): destroys the session and answers 409 with the coded error", async () => {
+    resolveBearer.mockResolvedValue("bearer");
+    const handler = jest
+      .fn<(...a: unknown[]) => Promise<void>>()
+      .mockRejectedValue(new CoreError(409, undefined, undefined, "ACCOUNT_STATE_INVALID"));
+    await withSession(handler as never)(req, res);
+    expect(clearSession).toHaveBeenCalledWith(res);
+    expect(sendProblem).toHaveBeenCalledWith(res, 409, expect.any(String), {
+      code: "ACCOUNT_STATE_INVALID",
+    });
+    expect(coreUnavailable).not.toHaveBeenCalled();
+  });
+
+  it("a CoreError(403) with a DIFFERENT code is NOT treated as a bad-account-state destroy (generic 4xx passthrough)", async () => {
+    resolveBearer.mockResolvedValue("bearer");
+    const handler = jest
+      .fn<(...a: unknown[]) => Promise<void>>()
+      .mockRejectedValue(new CoreError(403, undefined, undefined, "ROLE_NOT_HELD"));
+    await withSession(handler as never)(req, res);
+    expect(clearSession).not.toHaveBeenCalled();
+    expect(sendProblem).toHaveBeenCalledWith(res, 403, "Upstream request failed", {
+      code: "UPSTREAM_ERROR",
+    });
+  });
+
+  it("a CoreError(409) with a DIFFERENT code is NOT treated as a bad-account-state destroy (generic 4xx passthrough)", async () => {
+    resolveBearer.mockResolvedValue("bearer");
+    const handler = jest
+      .fn<(...a: unknown[]) => Promise<void>>()
+      .mockRejectedValue(new CoreError(409, undefined, undefined, "BOOKING_CONFLICT"));
+    await withSession(handler as never)(req, res);
+    expect(clearSession).not.toHaveBeenCalled();
+    expect(sendProblem).toHaveBeenCalledWith(res, 409, "Upstream request failed", {
+      code: "UPSTREAM_ERROR",
+    });
+  });
+
+  /**
    * CTL-97 Task 4 — the central pending-expiry guard, proven through `withSession` itself so
    * this exercises the SAME code path every protected `/v1` route goes through (not just
    * `/userinfo` or `/dashboard` individually).

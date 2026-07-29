@@ -31,6 +31,7 @@ import {
   guideDashboardExample,
   participantDashboardExample,
   userinfoExample,
+  pendingUserinfoExample,
   currentRoleExample,
   envelope,
   writeEnvelope,
@@ -252,7 +253,10 @@ apiRoute({
   summary: "Signed-in identity, held roles, and the current role",
   description:
     "Bootstrap/session read the frontend calls on every page load. BFF-OWNED aggregation " +
-    "(Profile Contract v2) — no longer a transparent Core proxy: it composes Core account " +
+    "(Profile Contract v2 + CTL-97 defer-provisioning) — no longer a transparent Core proxy: " +
+    "the response is discriminated by `accountState`. `PENDING` means Google sign-in " +
+    "succeeded but Core has no account yet (identity is read straight from the session's " +
+    "id_token; `roles: []`, `currentRole: null`). `PROVISIONED` composes Core account " +
     "identity + held roles (`GET /users/me`) with THIS bff session's `currentRole`, which " +
     "Core does not know (it's per-session state, never a DB value; the Google id_token " +
     "carries no app role either). `currentRole` is re-validated against the roles Core just " +
@@ -268,6 +272,10 @@ apiRoute({
         noCurrentRole: {
           summary: "Signed in, no current role chosen yet",
           value: envelope({ ...userinfoExample.data, currentRole: null }),
+        },
+        pending: {
+          summary: "Signed in with Google, awaiting Core provisioning",
+          value: pendingUserinfoExample,
         },
       },
     }),

@@ -202,27 +202,95 @@ export const UserSummarySchema = z.object({
 });
 
 /**
+ * The pending identity summary (`PendingUserInfo`, src/api/userinfo/pendingIdentity.ts) —
+ * surfaced instead of {@link UserSummarySchema} when Core has no `users` row for this
+ * principal yet (CTL-97 defer-provisioning). `id` is always `null`; every other field is
+ * extracted from the session's Google id_token, never from Core.
+ */
+export const PendingUserSummarySchema = z.object({
+  id: z.null().openapi({
+    description: "Always null — no Core account exists yet.",
+    example: null,
+  }),
+  email: z.string().openapi({
+    description: "Verified email extracted from the Google id_token.",
+    example: "ana@example.com",
+  }),
+  firstName: z
+    .string()
+    .nullable()
+    .openapi({ description: "First name (id_token `given_name`).", example: "Ana" }),
+  lastName: z
+    .string()
+    .nullable()
+    .openapi({ description: "Last name (id_token `family_name`).", example: "Silva" }),
+  displayName: z
+    .string()
+    .nullable()
+    .openapi({ description: "Display name (id_token `name`).", example: "Ana Silva" }),
+});
+
+/**
+ * `GET /v1/userinfo` PENDING variant (CTL-97 defer-provisioning) — Google sign-in succeeded but
+ * Core has no `users` row for this principal yet. `roles` is always empty and `currentRole`
+ * always null: there is no Core account to hold a role or have one active.
+ */
+const PendingUserinfo = z
+  .object({
+    accountState: z.literal("PENDING").openapi({
+      description: "Discriminator — authenticated with Google, awaiting Core provisioning.",
+      example: "PENDING",
+    }),
+    user: PendingUserSummarySchema.openapi({ description: "Pending identity (`id` is null)." }),
+    roles: z.array(CoreRoleEnum).length(0).openapi({
+      description: "Always empty — no Core account exists yet to hold any role.",
+      example: [],
+    }),
+    currentRole: z.null().openapi({
+      description: "Always null — there is no Core account yet to have chosen a role.",
+      example: null,
+    }),
+  })
+  .openapi("PendingUserinfo", {
+    description: "Signed in with Google; awaiting Core provisioning.",
+  });
+
+/**
+ * `GET /v1/userinfo` PROVISIONED variant — Core has a `users` row for this principal. Composes
+ * Core `GET /users/me` (`user`, `roles`) with THIS session's `currentRole` (Profile Contract v2:
+ * session state, never a Core value).
+ */
+const ProvisionedUserinfo = z
+  .object({
+    accountState: z.literal("PROVISIONED").openapi({
+      description: "Discriminator — Core has provisioned this account.",
+      example: "PROVISIONED",
+    }),
+    user: UserSummarySchema.openapi({ description: "Signed-in account identity." }),
+    roles: z.array(CoreRoleEnum).min(1).openapi({ description: "Roles the account holds." }),
+    currentRole: CoreRoleEnum.nullable().openapi({
+      description:
+        "The role this bff session currently has active; null when none is chosen yet, or " +
+        "the previously-current role is no longer held (re-validated against `roles` on " +
+        "every call).",
+      example: "GUIDE",
+    }),
+  })
+  .openapi("ProvisionedUserinfo", {
+    description: "Signed-in, provisioned account.",
+  });
+
+/**
  * `GET /v1/userinfo` response `data` (src/api/userinfo/userinfo.handler.ts) — the bootstrap
- * read the frontend calls on every page load. Composes Core `GET /users/me` (`user`, `roles`)
- * with THIS session's `currentRole` (Profile Contract v2: session state, never a Core value).
+ * read the frontend calls on every page load, discriminated by `accountState` (CTL-97
+ * defer-provisioning): `PENDING` (authenticated with Google, no Core account yet) vs
+ * `PROVISIONED` (Core has an account — see {@link ProvisionedUserinfo}).
  */
 export const Userinfo = registry.register(
   "Userinfo",
   z
-    .object({
-      user: UserSummarySchema.openapi({ description: "Signed-in account identity." }),
-      roles: z.array(HeldRoleEnum).openapi({ description: "Roles the account holds." }),
-      currentRole: CoreRoleEnum.nullable().openapi({
-        description:
-          "The role this bff session currently has active; null when none is chosen yet, or " +
-          "the previously-current role is no longer held (re-validated against `roles` on " +
-          "every call).",
-        example: "GUIDE",
-      }),
-    })
-    .openapi("Userinfo", {
-      description: "Signed-in identity, held roles, and this session's current role.",
-    }),
+    .discriminatedUnion("accountState", [PendingUserinfo, ProvisionedUserinfo])
+    .openapi({ description: "Signed-in identity, discriminated PENDING vs PROVISIONED." }),
 );
 
 // --- POST /v1/session/current-role (bff-owned) ---
@@ -574,6 +642,7 @@ export const SessionStatus = registry.register(
 // --- Example bodies ---
 
 export const userinfoExample = envelope({
+  accountState: "PROVISIONED",
   user: {
     id: "u1",
     firstName: "Gina",
@@ -586,6 +655,20 @@ export const userinfoExample = envelope({
   },
   roles: ["GUIDE"],
   currentRole: "GUIDE",
+});
+
+/** `GET /v1/userinfo` PENDING example (CTL-97 defer-provisioning) — no Core account yet. */
+export const pendingUserinfoExample = envelope({
+  accountState: "PENDING",
+  user: {
+    id: null,
+    email: "ana@example.com",
+    firstName: "Ana",
+    lastName: "Silva",
+    displayName: "Ana Silva",
+  },
+  roles: [],
+  currentRole: null,
 });
 
 export const currentRoleExample = envelope({ currentRole: "GUIDE" });
@@ -1271,13 +1354,40 @@ export function envelopeOf<T extends z.ZodTypeAny>(
   return z.object({ data, meta: z.object({ requestId: z.string() }) });
 }
 
-/** GET /v1/userinfo `data` — `user`/`roles` forwarded from Core (loose); `currentRole` is
- *  BFF-derived from the session (strict — see src/api/userinfo/userinfo.handler.ts). */
-export const UserinfoDataSchema = z.object({
-  user: LooseObject, // forwarded from Core — opaque
-  roles: z.array(z.string()), // forwarded from Core — BFF owns "it's an array of strings"
+/** GET /v1/userinfo `data`, PENDING variant (CTL-97 defer-provisioning) — entirely BFF-derived
+ *  from the session's Google id_token; no Core call succeeded, so nothing here is Core
+ *  passthrough (strict throughout). `id` is always null; `roles` is always empty; `currentRole`
+ *  is always null. */
+const PendingUserinfoDataSchema = z.object({
+  accountState: z.literal("PENDING"),
+  user: z.object({
+    id: z.null(),
+    email: z.string(),
+    firstName: z.string().nullable(),
+    lastName: z.string().nullable(),
+    displayName: z.string().nullable(),
+  }),
+  roles: z.array(z.string()).length(0),
+  currentRole: z.null(),
+});
+
+/** GET /v1/userinfo `data`, PROVISIONED variant — `user` forwarded from Core (loose, EXCEPT
+ *  `id`, which the bff's PENDING/PROVISIONED discrimination depends on being a real non-empty
+ *  string — see userinfo.handler.ts's runtime Core-contract validation); `roles` is BFF-owned
+ *  ("non-empty, every entry a known Role"); `currentRole` is BFF-derived (session ∩ Core
+ *  roles). */
+const ProvisionedUserinfoDataSchema = z.object({
+  accountState: z.literal("PROVISIONED"),
+  user: z.object({ id: z.string().min(1) }).catchall(z.unknown()), // forwarded from Core — id strict, rest opaque
+  roles: z.array(z.enum(["GUIDE", "PARTICIPANT"])).min(1), // BFF-validated (see UPSTREAM_CONTRACT_VIOLATION)
   currentRole: z.enum(["GUIDE", "PARTICIPANT"]).nullable(), // BFF-derived (session ∩ Core roles)
 });
+
+/** GET /v1/userinfo `data`, discriminated by `accountState` (CTL-97 defer-provisioning). */
+export const UserinfoDataSchema = z.discriminatedUnion("accountState", [
+  PendingUserinfoDataSchema,
+  ProvisionedUserinfoDataSchema,
+]);
 
 /** Full enveloped GET /v1/userinfo response contract. */
 export const EnvelopedUserinfoSchema = envelopeOf(UserinfoDataSchema);
