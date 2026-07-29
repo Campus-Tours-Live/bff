@@ -7,6 +7,28 @@ export class CoreAuthError extends Error {
 }
 
 /**
+ * The session's Google `id_token` cannot yield a trustworthy pending identity: the token is
+ * missing/malformed, or its payload lacks a verified `email` claim. Thrown by
+ * `src/api/userinfo/pendingIdentity.ts` while extracting claims for an authenticated-but-not-yet-
+ * provisioned user (Core `GET /users/me` → 404 `ACCOUNT_NOT_PROVISIONED`).
+ *
+ * This is deliberately NOT a normal "no session" / 4xx case: the OAuth callback already
+ * completed the token exchange, so an id_token that can't produce a verified email at this point
+ * means Google (or our handling of its response) misbehaved — a system/upstream problem. Callers
+ * (the `/userinfo` PENDING branch, CTL-97 Task 3) must map this to a 5xx, never to a normal
+ * pending-signin response.
+ */
+export class IdentityClaimsInvalidError extends Error {
+  /** Stable machine-readable discriminant — check this, not `instanceof`, across module reloads. */
+  readonly code = "IDENTITY_CLAIMS_INVALID";
+
+  constructor(reason: string) {
+    super(`Pending identity claims invalid: ${reason}`);
+    this.name = "IdentityClaimsInvalidError";
+  }
+}
+
+/**
  * A silent token refresh failed for a reason that says nothing about the session's
  * validity (Google 5xx / 429 / network / timeout).
  *

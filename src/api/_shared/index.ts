@@ -4,7 +4,12 @@ export { requireReauth, authUpstreamUnavailable } from "./reauth.js";
 export { resolveBearer } from "./session.js";
 export { CoreClient } from "./core-client.js";
 export type { CoreWriteEnvelope } from "./core-client.js";
-export { CoreAuthError, CoreError, TransientAuthError } from "./errors.js";
+export {
+  CoreAuthError,
+  CoreError,
+  TransientAuthError,
+  IdentityClaimsInvalidError,
+} from "./errors.js";
 export { sendData, coreUnavailable, assertShapeInDev } from "./envelope.js";
 export { withSession } from "./with-session.js";
 export { withMutation } from "./with-mutation.js";
