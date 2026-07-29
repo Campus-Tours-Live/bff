@@ -348,10 +348,12 @@ export const ParticipantOnboardingTypeEnum = z.enum([
 
 /**
  * Controlled-vocabulary tour topic a participant can express interest in AT ONBOARDING
- * (`ParticipantOnboardingRequest.topicsOfInterest`). Distinct from {@link
- * ParticipantProfile}'s free-text `topicsOfInterest` (that PATCH-side profile field forwards
- * whatever Core already stored, with no fixed vocabulary); this onboarding-time field IS
- * validated by Core against a fixed set.
+ * (`ParticipantOnboardingRequest.topicsOfInterest`). Core enforces this fixed set at the
+ * onboarding command via the `@TourTopicCodes` bean-validation constraint (derived from the
+ * `TourTopic` enum) — an out-of-vocabulary value there is `422 VALIDATION_FAILED` (CTL-97). This
+ * is DELIBERATELY distinct from {@link ParticipantProfile}'s `topicsOfInterest`, which is FREE-FORM
+ * on the PATCH-side profile edit (any string; no fixed vocabulary — Core's PATCH DTO carries no
+ * `allowableValues`). Do not "unify" the two: onboarding is controlled, profile is free-form.
  */
 export const OnboardingTopicOfInterestEnum = z.enum([
   "GENERAL_CAMPUS",
