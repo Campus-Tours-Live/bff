@@ -391,6 +391,36 @@ describe("GET /v1/userinfo — PENDING (CTL-97 defer-provisioning)", () => {
     expect(res.body.data.currentRole).toBeNull();
     expect(res.headers["set-cookie"]).toBeDefined();
   });
+
+  it("PENDING session with a malformed id_token (email_verified: false) → 5xx, NEVER a 200 PENDING body (safety guard)", async () => {
+    // pendingIdentityFromSession throws IdentityClaimsInvalidError when the id_token's payload
+    // lacks a verified email — the handler deliberately lets this propagate (uncaught) so
+    // withSession's generic catch-all maps it to a 500, rather than ever serving a
+    // 200 accountState:"PENDING" body built from unusable identity claims.
+    const malformedIdToken = makeIdToken({
+      email: "ana@example.com",
+      email_verified: false,
+      given_name: "Ana",
+      family_name: "Silva",
+      name: "Ana Silva",
+    });
+    const cookie = mintPendingCookie({ idToken: malformedIdToken });
+    mockCoreByPath({
+      "/users/me": coreCodedErr(404, "ACCOUNT_NOT_PROVISIONED"),
+    });
+
+    const res = await request(app).get("/v1/userinfo").set("Cookie", cookie);
+
+    // Confirmed against the current code: withSession's catch-all (not CoreAuthError, not
+    // CoreError) → sendProblem(500, ..., { code: "INTERNAL" }).
+    expect(res.status).toBe(500);
+    expect(res.body).toMatchObject({ status: 500, code: "INTERNAL" });
+    // Never a valid-looking pending document, under any status.
+    expect(res.body.data).toBeUndefined();
+    expect(res.body.accountState).toBeUndefined();
+    // The pending branch must not write — a broken identity must not even rotate the cookie.
+    expect(res.headers["set-cookie"]).toBeUndefined();
+  });
 });
 
 describe("GET /v1/userinfo — I8 destroy-on-bad-account-state (via the shared with-session guard)", () => {

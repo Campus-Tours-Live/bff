@@ -531,6 +531,62 @@ describe("GET /auth/callback — Core GET /users/me resolution (CTL-97 Task 5 tr
   });
 });
 
+describe("GET /auth/callback — exact bad-state code gating (I8 must not fire on a non-matching code)", () => {
+  it("403 with a code OTHER than ACCOUNT_SUSPENDED/ACCOUNT_DELETED → system error (502 RESOLVE_FAILED), NOT the suspended/deleted redirect, no session", async () => {
+    coreNext = { kind: "resolve", value: usersMeCodedErr(403, "SOME_OTHER_FORBIDDEN") };
+
+    const res = await request(app)
+      .get("/auth/callback")
+      .query({ code: "abc", state: STATE })
+      .set("Cookie", txCookie({ intent: "signin" }));
+
+    // The catch-all system-error branch (a JSON problem+json response), never the I8
+    // suspended/deleted redirect — a non-matching 403 code must not trip that exact-code gate.
+    expect(res.status).toBe(502);
+    expect(res.body).toMatchObject({ status: 502, code: "RESOLVE_FAILED" });
+    expect(res.headers.location).toBeUndefined();
+    expect(cookieNamed(res, "ctl_sess")).toBeUndefined();
+    expect(isCleared(cookieNamed(res, "ctl_auth_tx"))).toBe(true);
+  });
+
+  it("409 with a code OTHER than ACCOUNT_STATE_INVALID → system error (502 RESOLVE_FAILED), NOT the account_error redirect, no session", async () => {
+    coreNext = { kind: "resolve", value: usersMeCodedErr(409, "SOME_OTHER_CONFLICT") };
+
+    const res = await request(app)
+      .get("/auth/callback")
+      .query({ code: "abc", state: STATE })
+      .set("Cookie", txCookie({ intent: "signin" }));
+
+    expect(res.status).toBe(502);
+    expect(res.body).toMatchObject({ status: 502, code: "RESOLVE_FAILED" });
+    expect(res.headers.location).toBeUndefined();
+    expect(cookieNamed(res, "ctl_sess")).toBeUndefined();
+    expect(isCleared(cookieNamed(res, "ctl_auth_tx"))).toBe(true);
+  });
+});
+
+describe("GET /auth/callback — intent/requestedRole come ONLY from the signed tx, not the query string", () => {
+  it("tx intent=signin (no requestedRole) with ?intent=signup&role=guide on the URL → follows the tx (not_registered), NOT the query (which would PENDING-provision)", async () => {
+    // The callback handler never reads req.query.intent/req.query.role — only the decrypted,
+    // signed ctl_auth_tx cookie. If it wrongly honored same-named query params, a 404
+    // ACCOUNT_NOT_PROVISIONED here would instead commit a PENDING session and redirect to
+    // /onboarding/guide (the signup+requestedRole=GUIDE row). Proving it follows the tx: a
+    // signin with no requestedRole hitting the same Core response lands on
+    // /signin?error=not_registered with NO session at all.
+    coreNext = { kind: "resolve", value: usersMeCodedErr(404, "ACCOUNT_NOT_PROVISIONED") };
+
+    const res = await request(app)
+      .get("/auth/callback")
+      .query({ code: "abc", state: STATE, intent: "signup", role: "guide" })
+      .set("Cookie", txCookie({ intent: "signin", returnTo: "/dashboard" }));
+
+    expect(res.status).toBe(302);
+    expect(res.headers.location).toBe("http://localhost:3001/signin?error=not_registered");
+    expect(cookieNamed(res, "ctl_sess")).toBeUndefined();
+    expect(isCleared(cookieNamed(res, "ctl_auth_tx"))).toBe(true);
+  });
+});
+
 describe("GET /auth/callback — success landing + session (row: 200 provisioned)", () => {
   it("signin with roles → /dashboard AND a ctl_sess PROVISIONED session cookie established", async () => {
     coreNext = {
