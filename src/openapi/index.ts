@@ -1214,15 +1214,23 @@ apiRoute({
   summary: "Google OAuth redirect target",
   description:
     "Handles Google's redirect: validates PKCE state against `ctl_auth_tx`, exchanges the code for " +
-    "tokens, resolves the account against Core `/session?intent=` (enforcing signup vs signin), then " +
-    "302-redirects into the web app. On success it establishes the `ctl_sess` session cookie and " +
-    "initialises this session's role state from `requestedRole` (written by `GET /auth/login`, " +
-    "CTL-97): holding it → `currentRole` (role home); lacking it on signup (and eligible — see " +
-    "Core role-eligibility) → redirects to that role's onboarding, without a session marker " +
-    "(the frontend page guard re-derives access statelessly); lacking it on signin → " +
-    "`/signup/role`; no `requestedRole` with exactly one held role → `currentRole` initialised to " +
-    "it; otherwise role selection. Provider errors and role-blocked cases (e.g. PARENT→guide) " +
-    "redirect back into the UI WITHOUT a session. You don't call this directly — Google does.",
+    "tokens, then resolves account state against Core `GET /users/me` (Profile Contract v2, CTL-97) " +
+    "BEFORE any session is established, branching on its status+code: 200 → an existing, " +
+    "provisioned account (see the role-landing logic below); 404 `ACCOUNT_NOT_PROVISIONED` on a " +
+    "signup → a brand-new signup, so a **PENDING** session (24h absolute TTL) is committed and the " +
+    "user is sent to `/onboarding/{role}` (or `/signup/role` to pick one first); the same 404 on a " +
+    "signin → `/signin?error=not_registered` with NO session; 403 `ACCOUNT_SUSPENDED`/" +
+    "`ACCOUNT_DELETED` or 409 `ACCOUNT_STATE_INVALID` → a coded `/signin?error=` destination with NO " +
+    "session; anything else (a 404 with a different/no code, 401, 5xx, a transport failure) is a " +
+    "system error — 502 `RESOLVE_FAILED`, NO session. On the 200 path it 302-redirects into the web " +
+    "app and initialises this session's role state from `requestedRole` (written by `GET /auth/login`" +
+    ", CTL-97, re-validated against the Role enum here): holding it → `currentRole` (role home); " +
+    "lacking it on signup (and eligible — see Core role-eligibility) → redirects to that role's " +
+    "onboarding, without a session marker (the frontend page guard re-derives access statelessly); " +
+    "lacking it on signin → `/signup/role`; no `requestedRole` with exactly one held role → " +
+    "`currentRole` initialised to it; otherwise role selection. Provider errors and role-blocked " +
+    "cases (e.g. PARENT→guide) redirect back into the UI WITHOUT a session. You don't call this " +
+    "directly — Google does.",
   request: {
     query: z.object({
       code: z
@@ -1246,10 +1254,13 @@ apiRoute({
   responses: {
     302: {
       description:
-        "Redirect into the web app. `Location` depends on the outcome: on success the role-aware " +
-        "landing (e.g. /dashboard, /onboarding/guide) with `ctl_sess` set; on a cancelled/failed " +
-        "provider error or an unregistered signin, a UI page (e.g. /signin?error=not_registered) " +
-        "with NO session.",
+        "Redirect into the web app. `Location` depends on the outcome: on success (Core 200) the " +
+        "role-aware landing (e.g. /dashboard, /onboarding/guide) with `ctl_sess` set to a " +
+        "PROVISIONED session; on a brand-new signup (Core 404 `ACCOUNT_NOT_PROVISIONED`) " +
+        "`/onboarding/{role}` (or `/signup/role`) with `ctl_sess` set to a **PENDING** session; on " +
+        "a cancelled/failed provider error, an unregistered signin, a suspended/deleted account, " +
+        "or an account-state integrity error, a UI page (e.g. /signin?error=not_registered, " +
+        "?error=account_suspended, ?error=account_deleted, ?error=account_error) with NO session.",
     },
     400: problem400(
       "AUTH_TX_MISSING",
@@ -1260,9 +1271,11 @@ apiRoute({
     ),
     502: problem502(
       "Token exchange (`AUTH_EXCHANGE_FAILED`) or account resolution against Core " +
-        "(`CORE_UNAVAILABLE` / `RESOLVE_FAILED`) failed — the latter also covers a failed " +
-        "role-eligibility check on a signup that lacks `requestedRole`.",
-      problem(502, "Account resolution failed", "CORE_UNAVAILABLE"),
+        "(`RESOLVE_FAILED`) failed — the latter covers any `GET /users/me` outcome that isn't a " +
+        "clean 200/404-`ACCOUNT_NOT_PROVISIONED`/403-suspended-or-deleted/409-invalid (a " +
+        "differently-coded or uncoded 404, a 401, a 5xx, or a transport failure), and also a " +
+        "failed role-eligibility check on a signup that lacks `requestedRole`.",
+      problem(502, "Account resolution failed", "RESOLVE_FAILED"),
     ),
   },
 });

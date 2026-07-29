@@ -1,27 +1,29 @@
 import { jest } from "@jest/globals";
 import request from "supertest";
 import { app } from "@/app.js";
-import { readSession, type AuthTx } from "@/session.js";
+import { readSession, type AuthTx, type PendingSessionData } from "@/session.js";
 import {
   FAKE_TOKENS,
   cookieNamed,
-  coreResponse,
   isCleared,
   mintAuthTxCookie,
   roleEligibilityResponse,
+  usersMeCodedErr,
+  usersMeNonJsonErr,
+  usersMeResponse,
 } from "./_helpers.js";
 
 /**
- * No module mocking: exchangeCode, the Core /session call, and (on a signup that lacks the
- * requested role) the Core role-eligibility call all go through global.fetch. We stub fetch
- * and route by URL — Google's token endpoint returns a fake TokenSet, Core's /session
- * returns whatever the test configures, and `/users/me/role-eligibility` (the source of the
- * PARENT→guide gate post Profile Contract v2 / CTL-97) defaults to "eligible" unless a test
- * overrides it. This keeps the REAL google.ts (PKCE, authorize URL, exchangeCode) and the
- * REAL routes.ts.
+ * No module mocking: exchangeCode, the Core `GET /users/me` call (CTL-97 Task 5 — replaces the
+ * old `POST /session?intent=`), and (on a signup that lacks the requested role) the Core
+ * role-eligibility call all go through global.fetch. We stub fetch and route by URL — Google's
+ * token endpoint returns a fake TokenSet, Core's `/users/me` returns whatever the test
+ * configures, and `/users/me/role-eligibility` (the source of the PARENT→guide gate post
+ * Profile Contract v2 / CTL-97) defaults to "eligible" unless a test overrides it. This keeps
+ * the REAL google.ts (PKCE, authorize URL, exchangeCode) and the REAL routes.ts.
  */
 const GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token";
-const CORE_SESSION_PREFIX = "http://core.test/session";
+const CORE_USERS_ME_URL = "http://core.test/users/me";
 const CORE_ROLE_ELIGIBILITY_PREFIX = "http://core.test/users/me/role-eligibility";
 
 const STATE = "test-state-value";
@@ -37,20 +39,25 @@ function txCookie(overrides: Partial<AuthTx> = {}): string {
 }
 
 /** Decrypt a `ctl_sess=...` Set-Cookie pair via the REAL readSession, so a test can assert on
- *  session-internal fields (currentRole) that never round-trip through the response body. */
+ *  session-internal fields (currentRole, accountState, pendingSince/pendingExpiresAt) that
+ *  never round-trip through the response body. */
 function sessionFrom(pair: string | undefined): ReturnType<typeof readSession> {
   if (!pair) return null;
   return readSession({ headers: { cookie: pair } } as unknown as Parameters<typeof readSession>[0]);
 }
 
-/** `currentRole` only exists on a PROVISIONED session — the callback always establishes one
- *  today (CTL-97 Task 4 note in src/auth/routes.ts), so this narrows for the assertions below. */
+/** `currentRole` only exists on a PROVISIONED session — narrows for the 200-branch assertions. */
 function currentRoleOf(session: ReturnType<typeof sessionFrom>): string | undefined {
   return session?.accountState === "PROVISIONED" ? session.currentRole : undefined;
 }
 
+/** Narrows to the PENDING session shape for the 404-signup-pending assertions below. */
+function pendingOf(session: ReturnType<typeof sessionFrom>): PendingSessionData | undefined {
+  return session?.accountState === "PENDING" ? session : undefined;
+}
+
 const fetchMock = jest.fn<typeof fetch>();
-/** What the next Core /session call resolves to (or null/reject). */
+/** What the next Core `GET /users/me` call resolves to (or null/reject). */
 let coreNext: { kind: "resolve"; value: Response } | { kind: "reject"; err: unknown };
 /** What the next Core /users/me/role-eligibility call resolves to. Defaults to eligible — most
  *  scenarios below aren't exercising the PARENT gate. */
@@ -62,7 +69,7 @@ let lastCoreInit: RequestInit | undefined;
 
 beforeEach(() => {
   tokenOk = true;
-  coreNext = { kind: "resolve", value: coreResponse(200, { roles: ["PARTICIPANT"] }) };
+  coreNext = { kind: "resolve", value: usersMeResponse(200, { roles: ["PARTICIPANT"] }) };
   roleEligibilityNext = roleEligibilityResponse(200, { eligible: true, reason: null });
   lastCoreInit = undefined;
 
@@ -74,7 +81,7 @@ beforeEach(() => {
         return { ok: false, status: 400, json: async () => ({}) } as unknown as Response;
       return { ok: true, status: 200, json: async () => FAKE_TOKENS } as unknown as Response;
     }
-    if (url.startsWith(CORE_SESSION_PREFIX)) {
+    if (url === CORE_USERS_ME_URL) {
       lastCoreInit = init;
       if (coreNext.kind === "reject") throw coreNext.err;
       return coreNext.value;
@@ -233,9 +240,105 @@ describe("GET /auth/callback — token exchange", () => {
   });
 });
 
-describe("GET /auth/callback — Core /session resolution", () => {
-  it("Core 404 on signin (unregistered) → /signin?error=not_registered, NO session cookie", async () => {
-    coreNext = { kind: "resolve", value: coreResponse(404, undefined) };
+describe("GET /auth/callback — Core GET /users/me resolution (CTL-97 Task 5 truth table)", () => {
+  it("targets the configured Core base with the exchanged Bearer id_token", async () => {
+    coreNext = { kind: "resolve", value: usersMeResponse(200, { roles: ["PARTICIPANT"] }) };
+
+    await request(app)
+      .get("/auth/callback")
+      .query({ code: "abc", state: STATE })
+      .set("Cookie", txCookie({ intent: "signin", returnTo: "/dashboard" }));
+
+    const url = fetchMock.mock.calls.map((c) => String(c[0])).find((u) => u === CORE_USERS_ME_URL);
+    expect(url).toBe(CORE_USERS_ME_URL);
+    expect(lastCoreInit?.headers).toMatchObject({ Authorization: "Bearer fake" });
+  });
+
+  describe("row: 404 ACCOUNT_NOT_PROVISIONED + signup → PENDING session", () => {
+    it("requestedRole=GUIDE → PENDING session + /onboarding/guide, tx cleared", async () => {
+      coreNext = { kind: "resolve", value: usersMeCodedErr(404, "ACCOUNT_NOT_PROVISIONED") };
+
+      const res = await request(app)
+        .get("/auth/callback")
+        .query({ code: "abc", state: STATE })
+        .set(
+          "Cookie",
+          txCookie({ intent: "signup", returnTo: "/onboarding/guide", requestedRole: "GUIDE" }),
+        );
+
+      expect(res.status).toBe(302);
+      expect(res.headers.location).toBe("http://localhost:3001/onboarding/guide");
+      expect(isCleared(cookieNamed(res, "ctl_auth_tx"))).toBe(true);
+
+      const sessCookie = cookieNamed(res, "ctl_sess");
+      expect(sessCookie).toBeDefined();
+      expect(isCleared(sessCookie)).toBe(false);
+      const pending = pendingOf(sessionFrom(sessCookie));
+      expect(pending).toBeDefined();
+      expect(pending!.accountState).toBe("PENDING");
+      expect(pending!.idToken).toBe(FAKE_TOKENS.id_token);
+      expect(typeof pending!.pendingSince).toBe("number");
+      // ~24h absolute lifetime.
+      expect(pending!.pendingExpiresAt - pending!.pendingSince).toBe(24 * 60 * 60 * 1000);
+    });
+
+    it("requestedRole=PARTICIPANT → PENDING session + /onboarding/participant", async () => {
+      coreNext = { kind: "resolve", value: usersMeCodedErr(404, "ACCOUNT_NOT_PROVISIONED") };
+
+      const res = await request(app)
+        .get("/auth/callback")
+        .query({ code: "abc", state: STATE })
+        .set(
+          "Cookie",
+          txCookie({
+            intent: "signup",
+            returnTo: "/onboarding/participant",
+            requestedRole: "PARTICIPANT",
+          }),
+        );
+
+      expect(res.headers.location).toBe("http://localhost:3001/onboarding/participant");
+      const sessCookie = cookieNamed(res, "ctl_sess");
+      expect(pendingOf(sessionFrom(sessCookie))).toBeDefined();
+    });
+
+    it("no requestedRole (role-agnostic entry) → PENDING session + /signup/role (pick a role first)", async () => {
+      coreNext = { kind: "resolve", value: usersMeCodedErr(404, "ACCOUNT_NOT_PROVISIONED") };
+
+      const res = await request(app)
+        .get("/auth/callback")
+        .query({ code: "abc", state: STATE })
+        .set("Cookie", txCookie({ intent: "signup", returnTo: "/dashboard" }));
+
+      expect(res.headers.location).toBe("http://localhost:3001/signup/role");
+      const sessCookie = cookieNamed(res, "ctl_sess");
+      expect(pendingOf(sessionFrom(sessCookie))).toBeDefined();
+    });
+
+    it("hardening: garbage tx.requestedRole (decrypted-JSON drift) is treated as absent → /signup/role, PENDING session still committed", async () => {
+      coreNext = { kind: "resolve", value: usersMeCodedErr(404, "ACCOUNT_NOT_PROVISIONED") };
+
+      const res = await request(app)
+        .get("/auth/callback")
+        .query({ code: "abc", state: STATE })
+        .set(
+          "Cookie",
+          txCookie({
+            intent: "signup",
+            returnTo: "/dashboard",
+            // A tampered/stale tx cookie has no runtime schema validation on requestedRole.
+            requestedRole: "WIZARD" as unknown as AuthTx["requestedRole"],
+          }),
+        );
+
+      expect(res.headers.location).toBe("http://localhost:3001/signup/role");
+      const sessCookie = cookieNamed(res, "ctl_sess");
+      expect(pendingOf(sessionFrom(sessCookie))).toBeDefined();
+    });
+  });
+
+  it("row: 404 ACCOUNT_NOT_PROVISIONED + signin (unregistered) → /signin?error=not_registered, NO session cookie", async () => {
+    coreNext = { kind: "resolve", value: usersMeCodedErr(404, "ACCOUNT_NOT_PROVISIONED") };
 
     const res = await request(app)
       .get("/auth/callback")
@@ -244,50 +347,171 @@ describe("GET /auth/callback — Core /session resolution", () => {
 
     expect(res.status).toBe(302);
     expect(res.headers.location).toBe("http://localhost:3001/signin?error=not_registered");
+    // NOT just cleared — no ctl_sess Set-Cookie at all (never established, never touched).
     expect(cookieNamed(res, "ctl_sess")).toBeUndefined();
     expect(isCleared(cookieNamed(res, "ctl_auth_tx"))).toBe(true);
-
-    // Core called with the configured base + intent + bearer id_token.
-    expect(lastCoreInit?.method).toBe("POST");
-    expect((lastCoreInit?.headers as Record<string, string>).Authorization).toBe("Bearer fake");
   });
 
-  it("Core network failure (fetch rejects) → 502 CORE_UNAVAILABLE, no session", async () => {
-    coreNext = { kind: "reject", err: new Error("ECONNREFUSED") };
+  it("row: 403 ACCOUNT_SUSPENDED → /signin?error=account_suspended, no session (I8, clearSession defensively)", async () => {
+    coreNext = { kind: "resolve", value: usersMeCodedErr(403, "ACCOUNT_SUSPENDED") };
 
     const res = await request(app)
       .get("/auth/callback")
       .query({ code: "abc", state: STATE })
-      .set("Cookie", txCookie());
+      .set("Cookie", txCookie({ intent: "signin" }));
 
-    expect(res.status).toBe(502);
-    expect(res.body).toMatchObject({ status: 502, code: "CORE_UNAVAILABLE" });
-    expect(cookieNamed(res, "ctl_sess")).toBeUndefined();
+    expect(res.status).toBe(302);
+    expect(res.headers.location).toBe("http://localhost:3001/signin?error=account_suspended");
+    expect(isCleared(cookieNamed(res, "ctl_sess"))).toBe(true);
+    expect(isCleared(cookieNamed(res, "ctl_auth_tx"))).toBe(true);
   });
 
-  it("Core non-ok, non-404 (500) → 502 RESOLVE_FAILED, no session", async () => {
-    coreNext = { kind: "resolve", value: coreResponse(500, undefined) };
+  it("row: 403 ACCOUNT_DELETED → /signin?error=account_deleted, no session (I8, clearSession defensively)", async () => {
+    coreNext = { kind: "resolve", value: usersMeCodedErr(403, "ACCOUNT_DELETED") };
 
     const res = await request(app)
       .get("/auth/callback")
       .query({ code: "abc", state: STATE })
-      .set("Cookie", txCookie());
+      .set("Cookie", txCookie({ intent: "signup", returnTo: "/onboarding/guide" }));
 
-    expect(res.status).toBe(502);
-    expect(res.body).toMatchObject({ status: 502, code: "RESOLVE_FAILED" });
-    expect(cookieNamed(res, "ctl_sess")).toBeUndefined();
+    expect(res.status).toBe(302);
+    expect(res.headers.location).toBe("http://localhost:3001/signin?error=account_deleted");
+    expect(isCleared(cookieNamed(res, "ctl_sess"))).toBe(true);
+    expect(isCleared(cookieNamed(res, "ctl_auth_tx"))).toBe(true);
+  });
+
+  it("row: 409 ACCOUNT_STATE_INVALID → /signin?error=account_error, no session (integrity error)", async () => {
+    coreNext = { kind: "resolve", value: usersMeCodedErr(409, "ACCOUNT_STATE_INVALID") };
+
+    const res = await request(app)
+      .get("/auth/callback")
+      .query({ code: "abc", state: STATE })
+      .set("Cookie", txCookie({ intent: "signin" }));
+
+    expect(res.status).toBe(302);
+    expect(res.headers.location).toBe("http://localhost:3001/signin?error=account_error");
+    expect(isCleared(cookieNamed(res, "ctl_sess"))).toBe(true);
+    expect(isCleared(cookieNamed(res, "ctl_auth_tx"))).toBe(true);
+  });
+
+  describe("row: everything else → system error, no session (I7 — a 404 with a different/no code is never pending/not_registered)", () => {
+    it("404 with a DIFFERENT code (PROFILE_NOT_FOUND) on signin → 502 RESOLVE_FAILED, no session", async () => {
+      coreNext = { kind: "resolve", value: usersMeCodedErr(404, "PROFILE_NOT_FOUND") };
+
+      const res = await request(app)
+        .get("/auth/callback")
+        .query({ code: "abc", state: STATE })
+        .set("Cookie", txCookie({ intent: "signin" }));
+
+      expect(res.status).toBe(502);
+      expect(res.body).toMatchObject({ status: 502, code: "RESOLVE_FAILED" });
+      expect(cookieNamed(res, "ctl_sess")).toBeUndefined();
+      expect(isCleared(cookieNamed(res, "ctl_auth_tx"))).toBe(true);
+    });
+
+    it("404 with a DIFFERENT code (PROFILE_NOT_FOUND) on signup → STILL a system error, never pending", async () => {
+      coreNext = { kind: "resolve", value: usersMeCodedErr(404, "PROFILE_NOT_FOUND") };
+
+      const res = await request(app)
+        .get("/auth/callback")
+        .query({ code: "abc", state: STATE })
+        .set("Cookie", txCookie({ intent: "signup", returnTo: "/onboarding/guide" }));
+
+      expect(res.status).toBe(502);
+      expect(res.body).toMatchObject({ status: 502, code: "RESOLVE_FAILED" });
+      expect(cookieNamed(res, "ctl_sess")).toBeUndefined();
+    });
+
+    it("404 with a non-JSON body (no code) → 502 RESOLVE_FAILED, no session", async () => {
+      coreNext = { kind: "resolve", value: usersMeNonJsonErr(404) };
+
+      const res = await request(app)
+        .get("/auth/callback")
+        .query({ code: "abc", state: STATE })
+        .set("Cookie", txCookie({ intent: "signup", returnTo: "/onboarding/guide" }));
+
+      expect(res.status).toBe(502);
+      expect(res.body).toMatchObject({ status: 502, code: "RESOLVE_FAILED" });
+      expect(cookieNamed(res, "ctl_sess")).toBeUndefined();
+    });
+
+    it("Core 401 (CoreAuthError) → 502 RESOLVE_FAILED, no session", async () => {
+      coreNext = { kind: "resolve", value: usersMeCodedErr(401) };
+
+      const res = await request(app)
+        .get("/auth/callback")
+        .query({ code: "abc", state: STATE })
+        .set("Cookie", txCookie({ intent: "signin" }));
+
+      expect(res.status).toBe(502);
+      expect(res.body).toMatchObject({ status: 502, code: "RESOLVE_FAILED" });
+      expect(cookieNamed(res, "ctl_sess")).toBeUndefined();
+    });
+
+    it("Core 503 (CoreError 5xx) → 502 RESOLVE_FAILED, no session", async () => {
+      coreNext = { kind: "resolve", value: usersMeCodedErr(503) };
+
+      const res = await request(app)
+        .get("/auth/callback")
+        .query({ code: "abc", state: STATE })
+        .set("Cookie", txCookie({ intent: "signin" }));
+
+      expect(res.status).toBe(502);
+      expect(res.body).toMatchObject({ status: 502, code: "RESOLVE_FAILED" });
+      expect(cookieNamed(res, "ctl_sess")).toBeUndefined();
+    });
+
+    it("Core network failure (fetch rejects — transport CoreError(502)) → 502 RESOLVE_FAILED, no session", async () => {
+      coreNext = { kind: "reject", err: new Error("ECONNREFUSED") };
+
+      const res = await request(app)
+        .get("/auth/callback")
+        .query({ code: "abc", state: STATE })
+        .set("Cookie", txCookie());
+
+      expect(res.status).toBe(502);
+      expect(res.body).toMatchObject({ status: 502, code: "RESOLVE_FAILED" });
+      expect(cookieNamed(res, "ctl_sess")).toBeUndefined();
+      expect(isCleared(cookieNamed(res, "ctl_auth_tx"))).toBe(true);
+    });
+
+    it("Core 200 with a malformed (non-JSON) body → 502 RESOLVE_FAILED, no session (never crashes on cu.roles)", async () => {
+      coreNext = {
+        kind: "resolve",
+        value: {
+          ok: true,
+          status: 200,
+          headers: new Headers({ "content-type": "application/json" }),
+          json: async () => {
+            throw new Error("not json");
+          },
+          text: async () => {
+            throw new Error("not json");
+          },
+        } as unknown as Response,
+      };
+
+      const res = await request(app)
+        .get("/auth/callback")
+        .query({ code: "abc", state: STATE })
+        .set("Cookie", txCookie({ intent: "signin", returnTo: "/dashboard" }));
+
+      expect(res.status).toBe(502);
+      expect(res.body).toMatchObject({ status: 502, code: "RESOLVE_FAILED" });
+      expect(cookieNamed(res, "ctl_sess")).toBeUndefined();
+    });
   });
 
   it("role-eligibility check unreachable (signup, lacks requestedRole) → 502 RESOLVE_FAILED, no session", async () => {
-    coreNext = { kind: "resolve", value: coreResponse(200, { roles: ["PARTICIPANT"] }) };
+    coreNext = { kind: "resolve", value: usersMeResponse(200, { roles: ["PARTICIPANT"] }) };
     fetchMock.mockImplementation((async (input: string | URL | Request, init?: RequestInit) => {
       const url = typeof input === "string" ? input : input.toString();
       if (url === GOOGLE_TOKEN_URL) {
         return { ok: true, status: 200, json: async () => FAKE_TOKENS } as unknown as Response;
       }
-      if (url.startsWith(CORE_SESSION_PREFIX)) {
+      if (url === CORE_USERS_ME_URL) {
         lastCoreInit = init;
-        return coreResponse(200, { roles: ["PARTICIPANT"] });
+        return usersMeResponse(200, { roles: ["PARTICIPANT"] });
       }
       if (url.startsWith(CORE_ROLE_ELIGIBILITY_PREFIX)) {
         throw new Error("ECONNREFUSED");
@@ -305,30 +529,13 @@ describe("GET /auth/callback — Core /session resolution", () => {
     expect(cookieNamed(res, "ctl_sess")).toBeUndefined();
     expect(isCleared(cookieNamed(res, "ctl_auth_tx"))).toBe(true);
   });
-
-  it("targets the configured Core base with the tx intent in the query", async () => {
-    coreNext = { kind: "resolve", value: coreResponse(200, { roles: ["PARTICIPANT"] }) };
-
-    await request(app)
-      .get("/auth/callback")
-      .query({ code: "abc", state: STATE })
-      .set("Cookie", txCookie({ intent: "signup", returnTo: "/onboarding/participant" }));
-
-    const url = fetchMock.mock.calls
-      .map((c) => String(c[0]))
-      .find((u) => u.startsWith(CORE_SESSION_PREFIX));
-    expect(url).toBe("http://core.test/session?intent=signup");
-  });
 });
 
-describe("GET /auth/callback — success landing + session", () => {
-  it("signin with roles → /dashboard AND a ctl_sess session cookie established", async () => {
+describe("GET /auth/callback — success landing + session (row: 200 provisioned)", () => {
+  it("signin with roles → /dashboard AND a ctl_sess PROVISIONED session cookie established", async () => {
     coreNext = {
       kind: "resolve",
-      value: coreResponse(200, {
-        roles: ["PARTICIPANT"],
-        currentRole: "PARTICIPANT",
-      }),
+      value: usersMeResponse(200, { roles: ["PARTICIPANT"] }),
     };
 
     const res = await request(app)
@@ -344,6 +551,7 @@ describe("GET /auth/callback — success landing + session", () => {
     expect(sess).toMatch(/^ctl_sess=.+/);
     expect(sess).toMatch(/HttpOnly/i);
     expect(isCleared(sess)).toBe(false);
+    expect(sessionFrom(sess)?.accountState).toBe("PROVISIONED");
     expect(isCleared(cookieNamed(res, "ctl_auth_tx"))).toBe(true);
   });
 
@@ -358,8 +566,8 @@ describe("GET /auth/callback — success landing + session", () => {
           json: async () => ({ access_token: "a", expires_in: 3600 }),
         } as unknown as Response;
       }
-      if (url.startsWith(CORE_SESSION_PREFIX)) {
-        return coreResponse(200, { roles: ["PARTICIPANT"], currentRole: "PARTICIPANT" });
+      if (url === CORE_USERS_ME_URL) {
+        return usersMeResponse(200, { roles: ["PARTICIPANT"] });
       }
       throw new Error(`unexpected fetch to ${url}`);
     }) as unknown as typeof fetch);
@@ -376,7 +584,7 @@ describe("GET /auth/callback — success landing + session", () => {
   it("signup → /onboarding/guide, already holds GUIDE → /dashboard, currentRole set pre-redirect", async () => {
     coreNext = {
       kind: "resolve",
-      value: coreResponse(200, { roles: ["GUIDE"] }),
+      value: usersMeResponse(200, { roles: ["GUIDE"] }),
     };
 
     const res = await request(app)
@@ -396,7 +604,7 @@ describe("GET /auth/callback — success landing + session", () => {
   it("signup → /onboarding/guide, lacks GUIDE, eligible → /onboarding/guide with session, no marker", async () => {
     coreNext = {
       kind: "resolve",
-      value: coreResponse(200, { roles: ["PARTICIPANT"] }),
+      value: usersMeResponse(200, { roles: ["PARTICIPANT"] }),
     };
     // roleEligibilityNext defaults to eligible:true (see beforeEach).
 
@@ -416,7 +624,7 @@ describe("GET /auth/callback — success landing + session", () => {
   });
 
   it("signin, lacks the requested role → /signup/role, no currentRole", async () => {
-    coreNext = { kind: "resolve", value: coreResponse(200, { roles: ["PARTICIPANT"] }) };
+    coreNext = { kind: "resolve", value: usersMeResponse(200, { roles: ["PARTICIPANT"] }) };
 
     const res = await request(app)
       .get("/auth/callback")
@@ -440,7 +648,7 @@ describe("GET /auth/callback — success landing + session", () => {
   });
 
   it("signup → /onboarding/participant, lacks PARTICIPANT, eligible → /onboarding/participant with session", async () => {
-    coreNext = { kind: "resolve", value: coreResponse(200, { roles: [] }) };
+    coreNext = { kind: "resolve", value: usersMeResponse(200, { roles: [] }) };
 
     const res = await request(app)
       .get("/auth/callback")
@@ -454,7 +662,7 @@ describe("GET /auth/callback — success landing + session", () => {
   it("uses the entry's explicit requestedRole over inferring one from returnTo", async () => {
     // returnTo looks like a guide-onboarding link, but the entry explicitly requested
     // PARTICIPANT — the explicit tx field must win over inferLegacyRole(returnTo).
-    coreNext = { kind: "resolve", value: coreResponse(200, { roles: ["PARTICIPANT"] }) };
+    coreNext = { kind: "resolve", value: usersMeResponse(200, { roles: ["PARTICIPANT"] }) };
 
     const res = await request(app)
       .get("/auth/callback")
@@ -474,7 +682,7 @@ describe("GET /auth/callback — success landing + session", () => {
   });
 
   it("session cookie (with the role) is set on the redirect, and a replayed /userinfo reflects it", async () => {
-    coreNext = { kind: "resolve", value: coreResponse(200, { roles: ["GUIDE"] }) };
+    coreNext = { kind: "resolve", value: usersMeResponse(200, { roles: ["GUIDE"] }) };
 
     const res = await request(app)
       .get("/auth/callback")
@@ -489,8 +697,8 @@ describe("GET /auth/callback — success landing + session", () => {
     // happened BEFORE the redirect (no separate "await save" the client could race).
     fetchMock.mockImplementation((async (input: string | URL | Request) => {
       const url = typeof input === "string" ? input : input.toString();
-      if (url === "http://core.test/users/me") {
-        return coreResponse(200, {
+      if (url === CORE_USERS_ME_URL) {
+        return usersMeResponse(200, {
           user: {
             id: "u1",
             firstName: "Gina",
@@ -513,13 +721,13 @@ describe("GET /auth/callback — success landing + session", () => {
   });
 });
 
-describe("GET /auth/callback — blocked vs bare-account branches", () => {
+describe("GET /auth/callback — blocked vs bare-account branches (row: 200 provisioned)", () => {
   it("blocked PARENT→guide → /signup/role?error=parent_no_guide AND NO session (cleared)", async () => {
     // Profile Contract v2 / CTL-97: PARENT status is sourced from Core's authoritative
     // role-eligibility check, not a profile field.
     coreNext = {
       kind: "resolve",
-      value: coreResponse(200, { roles: ["PARTICIPANT"] }),
+      value: usersMeResponse(200, { roles: ["PARTICIPANT"] }),
     };
     roleEligibilityNext = roleEligibilityResponse(200, {
       eligible: false,
@@ -543,7 +751,7 @@ describe("GET /auth/callback — blocked vs bare-account branches", () => {
     // otherwise a reason like ROLE_ALREADY_HELD would silently fall through into onboarding.
     coreNext = {
       kind: "resolve",
-      value: coreResponse(200, { roles: ["PARTICIPANT"] }),
+      value: usersMeResponse(200, { roles: ["PARTICIPANT"] }),
     };
     roleEligibilityNext = roleEligibilityResponse(200, {
       eligible: false,
@@ -566,7 +774,7 @@ describe("GET /auth/callback — blocked vs bare-account branches", () => {
   it("non-parent participant → /onboarding/guide is NOT blocked (role-eligibility says eligible)", async () => {
     coreNext = {
       kind: "resolve",
-      value: coreResponse(200, { roles: ["PARTICIPANT"] }),
+      value: usersMeResponse(200, { roles: ["PARTICIPANT"] }),
     };
     // roleEligibilityNext defaults to eligible:true (see beforeEach).
 
@@ -582,7 +790,7 @@ describe("GET /auth/callback — blocked vs bare-account branches", () => {
   });
 
   it("bare account signin (roles=[]) → /signup/role?error=complete_signup WITH a session", async () => {
-    coreNext = { kind: "resolve", value: coreResponse(200, { roles: [] }) };
+    coreNext = { kind: "resolve", value: usersMeResponse(200, { roles: [] }) };
 
     const res = await request(app)
       .get("/auth/callback")
@@ -594,26 +802,5 @@ describe("GET /auth/callback — blocked vs bare-account branches", () => {
     const sess = cookieNamed(res, "ctl_sess");
     expect(sess).toBeDefined();
     expect(isCleared(sess)).toBe(false);
-  });
-
-  it("malformed Core JSON body (json throws) → treated as no roles → complete_signup with session", async () => {
-    coreNext = {
-      kind: "resolve",
-      value: {
-        ok: true,
-        status: 200,
-        json: async () => {
-          throw new Error("not json");
-        },
-      } as unknown as Response,
-    };
-
-    const res = await request(app)
-      .get("/auth/callback")
-      .query({ code: "abc", state: STATE })
-      .set("Cookie", txCookie({ intent: "signin", returnTo: "/dashboard" }));
-
-    expect(res.headers.location).toBe("http://localhost:3001/signup/role?error=complete_signup");
-    expect(cookieNamed(res, "ctl_sess")).toBeDefined();
   });
 });

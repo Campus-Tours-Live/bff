@@ -7,6 +7,7 @@ import {
   readAuthTx,
   readSession,
   writeAuthTx,
+  writePendingSession,
   writeSession,
   type Role,
   type ProvisionedSessionData,
@@ -20,7 +21,7 @@ import {
 } from "./google.js";
 import { sendProblem } from "../util/problem.js";
 import { csrfGuard } from "../util/csrf.js";
-import { CoreClient, type RoleEligibility } from "../api/_shared/index.js";
+import { CoreClient, CoreError, type Me, type RoleEligibility } from "../api/_shared/index.js";
 
 export const authRouter: Router = Router();
 
@@ -185,51 +186,87 @@ authRouter.get("/callback", async (req, res) => {
     return sendProblem(res, 502, "Authentication failed", { code: "AUTH_EXCHANGE_FAILED" });
   }
 
-  // Enforce signup vs signin against the Core BEFORE establishing a session:
-  // signup provisions a new account; signin requires an existing one (404).
-  let resolve: Response;
-  try {
-    resolve = await fetch(`${config.coreApiBaseUrl}/session?intent=${tx.intent}`, {
-      method: "POST",
-      headers: { Authorization: `Bearer ${tokens.id_token ?? ""}`, Accept: "application/json" },
-    });
-  } catch {
-    clearAuthTx(res);
-    return sendProblem(res, 502, "Account resolution failed", { code: "CORE_UNAVAILABLE" });
-  }
+  // Resolve account state against Core BEFORE establishing a session (CTL-97 Task 5): a signup
+  // provisions a new account, a signin requires an existing one — `GET /users/me` (Profile
+  // Contract v2) tells us which by its status+code, never by trusting `tx.intent` alone. The
+  // ephemeral pre-decision token-exchange result above must NOT reach a cookie until this
+  // branch below has decided the outcome (see the truth table in the Task 5 brief / I7-I8).
+  const bearer = tokens.id_token ?? "";
+  // requestedRole is written explicitly by GET /auth/login, NOT derived from returnTo — the tx
+  // cookie is decrypted JSON with no runtime schema validation, so a stale/tampered value could
+  // carry a garbage role; re-validate with `isRole` before it can reach any redirect decision.
+  // inferLegacyRole is a stopgap for entries that predate `?role=`.
+  // TODO(CTL-97): remove legacy returnTo inference once entries pass ?role=
+  const requestedRole: Role | null =
+    (isRole(tx.requestedRole) ? tx.requestedRole : undefined) ?? inferLegacyRole(tx.returnTo);
 
-  console.log(`[auth/callback] intent=${tx.intent} core /session -> ${resolve.status}`);
-  if (resolve.status === 404) {
-    // Signing in with a Google account that was never registered.
-    clearAuthTx(res);
-    return res.redirect(webUrl("/signin?error=not_registered"));
-  }
-  if (!resolve.ok) {
+  let cu: Me;
+  try {
+    cu = await new CoreClient(bearer).getCurrentUser<Me>();
+  } catch (err) {
+    if (err instanceof CoreError && err.status === 404 && err.code === "ACCOUNT_NOT_PROVISIONED") {
+      if (tx.intent === "signup") {
+        // Brand-new signup: Google auth succeeded, Core has no `users` row yet. Commit a
+        // PENDING session (24h absolute TTL) so onboarding (and a `/userinfo`-backed page
+        // guard) sees an authenticated-but-unprovisioned identity — this is NOT a rejection.
+        writePendingSession(res, {
+          idToken: tokens.id_token,
+          accessToken: tokens.access_token,
+          refreshToken: tokens.refresh_token,
+          expiresAt: Date.now() + tokens.expires_in * 1000,
+        });
+        clearAuthTx(res);
+        const dest = requestedRole
+          ? requestedRole === "GUIDE"
+            ? "/onboarding/guide"
+            : "/onboarding/participant"
+          : "/signup/role";
+        console.log(`[auth/callback] signup, not yet provisioned → PENDING session → ${dest}`);
+        return res.redirect(webUrl(dest));
+      }
+      // Signing in with a Google account that was never registered — NOT a signup, so no
+      // session (pending or otherwise) is established.
+      clearAuthTx(res);
+      return res.redirect(webUrl("/signin?error=not_registered"));
+    }
+    if (
+      err instanceof CoreError &&
+      err.status === 403 &&
+      (err.code === "ACCOUNT_SUSPENDED" || err.code === "ACCOUNT_DELETED")
+    ) {
+      // I8: a suspended/deleted account must never keep (or gain) a session.
+      clearAuthTx(res);
+      clearSession(res);
+      const errorParam = err.code === "ACCOUNT_SUSPENDED" ? "account_suspended" : "account_deleted";
+      return res.redirect(webUrl(`/signin?error=${errorParam}`));
+    }
+    if (err instanceof CoreError && err.status === 409 && err.code === "ACCOUNT_STATE_INVALID") {
+      // Integrity error — Core sees this account in a state it can't reconcile. No session.
+      clearAuthTx(res);
+      clearSession(res);
+      return res.redirect(webUrl("/signin?error=account_error"));
+    }
+    // Everything else — a 404 with a DIFFERENT/no code, CoreAuthError (401), a CoreError 5xx,
+    // or a transport failure (CoreError 502) — is a system error, never reinterpreted as
+    // not_registered or pending (I7). No session established or kept.
     clearAuthTx(res);
     return sendProblem(res, 502, "Account resolution failed", { code: "RESOLVE_FAILED" });
   }
 
-  // Profile Contract v2: Core's /session response is pure identity + held roles, no
-  // `currentRole` (that's bff session state, decided below) and no `participantType`
-  // (PARENT status is sourced from Core's role-eligibility check instead, only when needed).
-  const resolved = (await resolve.json().catch(() => null)) as {
-    data?: { roles?: string[] };
-  } | null;
-  const roles = resolved?.data?.roles ?? [];
-  const bearer = tokens.id_token ?? "";
-
-  // requestedRole is written explicitly by GET /auth/login, NOT derived from returnTo — the
-  // legacy fallback below is a stopgap for entries that predate `?role=`.
-  // TODO(CTL-97): remove legacy returnTo inference once entries pass ?role=
-  const requestedRole: Role | null = tx.requestedRole ?? inferLegacyRole(tx.returnTo);
+  // Defensive: a 200 whose body failed to parse as JSON resolves `cu` to `null` rather than
+  // throwing (CoreClient's unwrap falls back to the raw, unparseable body) — treat that the
+  // same as any other unusable Core response (system error, no session) rather than crashing
+  // on `cu.roles` below.
+  if (!cu || !Array.isArray(cu.roles)) {
+    clearAuthTx(res);
+    return sendProblem(res, 502, "Account resolution failed", { code: "RESOLVE_FAILED" });
+  }
+  const roles = cu.roles;
 
   // Tokens established regardless of role outcome below — the role fields are set/left unset
   // per branch, then the WHOLE session (tokens + role) is written once, before the redirect
-  // (see the persistence-order note above writeSession further down).
-  // CTL-97 Task 4 note: this callback still always establishes a PROVISIONED session (Core's
-  // `/session?intent=` call above already confirmed the account exists) — the ephemeral
-  // pre-commit token exchange above it does NOT pass through the pending-expiry guard, and
-  // writing a PENDING session here is a later phase's change, not this one's.
+  // (see the persistence-order note above writeSession further down). Reaching this point means
+  // `GET /users/me` returned 200 — Core confirmed the account exists (`cu` above).
   const session: ProvisionedSessionData = {
     accountState: "PROVISIONED",
     idToken: tokens.id_token,

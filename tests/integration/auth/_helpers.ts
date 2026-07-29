@@ -56,17 +56,50 @@ export const FAKE_TOKENS = {
   expires_in: 3600,
 } as const;
 
-/** Build a Core /session-style fetch Response stub. Profile Contract v2 shape:
- *  `{ user, roles, currentRole }` — no top-level `participantType` (that now lives
- *  on the participant profile; see {@link participantProfileResponse}). */
-export function coreResponse(
+/** Build a Core `GET /users/me`-style fetch Response stub (Profile Contract v2, CTL-97 Task 5):
+ *  `{ user, roles }` — no `currentRole` (that's bff session state, decided by the callback).
+ *  Carries `headers`/`text` (not just `json`) so a non-ok response round-trips through
+ *  `CoreError.fromResponse` the same way the real `CoreClient` does. */
+export function usersMeResponse(
   status: number,
-  body?: { user?: unknown; roles?: string[]; currentRole?: string | null },
+  body?: { user?: unknown; roles?: string[] },
 ): Response {
+  const payload = body === undefined ? {} : { data: body };
   return {
     ok: status >= 200 && status < 300,
     status,
-    json: async () => (body === undefined ? {} : { data: body }),
+    headers: new Headers({ "content-type": "application/json" }),
+    json: async () => payload,
+    text: async () => JSON.stringify(payload),
+  } as unknown as Response;
+}
+
+/** A Core `GET /users/me` problem+json error carrying a stable `code` — the discriminant the
+ *  callback's truth table (I7/I8) branches on (`ACCOUNT_NOT_PROVISIONED`, `ACCOUNT_SUSPENDED`,
+ *  `ACCOUNT_DELETED`, `ACCOUNT_STATE_INVALID`, or any other/absent code for the system-error
+ *  catch-all row). */
+export function usersMeCodedErr(status: number, code?: string, title = "Error"): Response {
+  const payload = code === undefined ? { title, status } : { title, status, code };
+  return {
+    ok: false,
+    status,
+    headers: new Headers({ "content-type": "application/json" }),
+    json: async () => payload,
+    text: async () => JSON.stringify(payload),
+  } as unknown as Response;
+}
+
+/** A Core `GET /users/me` error whose body is NOT JSON (content-type text/plain) — I7 requires
+ *  this is NEVER treated as pending/not_registered, even on a 404. */
+export function usersMeNonJsonErr(status: number, body = "Not Found"): Response {
+  return {
+    ok: false,
+    status,
+    headers: new Headers({ "content-type": "text/plain" }),
+    json: async () => {
+      throw new Error("not json");
+    },
+    text: async () => body,
   } as unknown as Response;
 }
 
