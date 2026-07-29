@@ -9,14 +9,16 @@ import type { Request, Response } from "express";
 const resolveBearer = jest.fn<(...args: unknown[]) => Promise<string | null>>();
 const requireReauth = jest.fn<(...args: unknown[]) => void>();
 const authUpstreamUnavailable = jest.fn<(...args: unknown[]) => void>();
-// The REAL TransientAuthError — coreProxy branches on `instanceof`, so a stand-in would
-// silently never match. (N2)
-const { TransientAuthError } = await import("@/api/_shared/errors.js");
+// The REAL TransientAuthError/PendingSessionExpiredError — coreProxy branches on `instanceof`,
+// so a stand-in would silently never match. (N2; PendingSessionExpiredError added for the
+// CTL-97 Task 4 review fix.)
+const { TransientAuthError, PendingSessionExpiredError } = await import("@/api/_shared/errors.js");
 jest.unstable_mockModule("@/api/_shared/index.js", () => ({
   resolveBearer: (...args: unknown[]) => resolveBearer(...args),
   requireReauth: (...args: unknown[]) => requireReauth(...args),
   authUpstreamUnavailable: (...args: unknown[]) => authUpstreamUnavailable(...args),
   TransientAuthError,
+  PendingSessionExpiredError,
 }));
 
 const { coreProxy } = await import("@/proxy/coreProxy.js");

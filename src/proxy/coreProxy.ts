@@ -1,11 +1,13 @@
 import crypto from "node:crypto";
 import type { Request, Response } from "express";
 import { config } from "../config.js";
+import { clearSession } from "../session.js";
 import { sendProblem } from "../util/problem.js";
 import {
   requireReauth,
   authUpstreamUnavailable,
   resolveBearer,
+  PendingSessionExpiredError,
   TransientAuthError,
 } from "../api/_shared/index.js";
 import { isCrossSiteMutation } from "../util/csrf.js";
@@ -89,6 +91,15 @@ export async function coreProxy(req: Request, res: Response): Promise<void> {
       // Google blip can't log the user out irrecoverably (the refresh token survives).
       if (err instanceof TransientAuthError) {
         authUpstreamUnavailable(res);
+        return;
+      }
+      // The pending session's 24h absolute lifetime is up: destroy the cookie (expiring
+      // Set-Cookie) and answer 401 SESSION_EXPIRED WITHOUT ever calling Core (CTL-97 Task 4
+      // review fix — this proxy is a third `resolveBearer` call site and must enforce the
+      // same guard `withSession` does).
+      if (err instanceof PendingSessionExpiredError) {
+        clearSession(res);
+        sendProblem(res, 401, "Session expired", { code: err.code });
         return;
       }
       throw err;

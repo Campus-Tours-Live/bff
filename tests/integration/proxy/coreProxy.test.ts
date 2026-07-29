@@ -114,6 +114,38 @@ describe("coreProxy (/v1/* passthrough)", () => {
       expect(res.status).toBe(502);
       expect(res.body).toMatchObject({ code: "CORE_UNAVAILABLE" });
     });
+
+    /**
+     * CTL-97 Task 4 (review fix) — the central pending-expiry guard must be enforced uniformly
+     * on proxied `/v1/*` routes too, not just `withSession` reads. Mirrors
+     * `tests/integration/api/session/pending-expiry.test.ts`, but through `coreProxy` (the third
+     * `resolveBearer` call site), which previously only handled `TransientAuthError` in its catch
+     * — a `PendingSessionExpiredError` fell through to a bare `throw err`, which Express 4 does
+     * not route to error middleware from an async handler.
+     */
+    it("an EXPIRED PENDING session on a proxied route (GET /v1/guide/profile) → 401 SESSION_EXPIRED, destroys the cookie, and never calls Core", async () => {
+      const now = Date.now();
+      const pendingCookie = mintSessionCookie({
+        accountState: "PENDING",
+        pendingSince: now - 25 * 60 * 60 * 1000,
+        pendingExpiresAt: now - 1,
+      });
+      const fetchMock = mockCoreByPath({}); // Core must NEVER be called for this request
+
+      const res = await request(app).get("/v1/guide/profile").set("Cookie", pendingCookie);
+
+      expect(res.status).toBe(401);
+      expect(res.body).toMatchObject({ status: 401, code: "SESSION_EXPIRED" });
+      expect(fetchMock).not.toHaveBeenCalled();
+
+      const setCookie = (res.headers["set-cookie"] as unknown as string[] | undefined)?.find((c) =>
+        c.startsWith("ctl_sess="),
+      );
+      expect(setCookie).toBeDefined();
+      // An expiring Set-Cookie: empty value + Max-Age=0.
+      expect(setCookie).toMatch(/^ctl_sess=;/);
+      expect(setCookie).toMatch(/Max-Age=0/i);
+    });
   });
 
   // M1: the public/private decision and the upstream target must agree on ONE canonical path, so a
