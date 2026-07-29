@@ -94,6 +94,32 @@ describe("CoreClient.get", () => {
     });
   });
 
+  it("throws CoreError with the parsed RFC7807 code/title/detail/properties on a coded 404 (CTL-97)", async () => {
+    global.fetch = (async () =>
+      ({
+        ok: false,
+        status: 404,
+        headers: new Headers({ "content-type": "application/problem+json" }),
+        text: async () =>
+          JSON.stringify({
+            code: "ACCOUNT_NOT_PROVISIONED",
+            title: "Account not provisioned",
+            detail: "No account is provisioned for this principal yet",
+            role: "GUIDE",
+          }),
+      }) as Response) as unknown as typeof fetch;
+    await expect(new CoreClient("t").get("/users/me")).rejects.toMatchObject({
+      name: "CoreError",
+      status: 404,
+      code: "ACCOUNT_NOT_PROVISIONED",
+      title: "Account not provisioned",
+      detail: "No account is provisioned for this principal yet",
+      properties: { role: "GUIDE" },
+      // Additive-safety regression guard: body/contentType are still populated.
+      contentType: "application/problem+json",
+    });
+  });
+
   it("throws CoreError(500) for a 500 response", async () => {
     global.fetch = (async () =>
       ({
@@ -252,6 +278,27 @@ describe("CoreClient.post/del", () => {
       status: 422,
       body: '{"title":"That time slot was just taken"}',
       contentType: "application/problem+json",
+    });
+  });
+
+  it("throws CoreError with parsed code + properties on a coded 409 conflict (write path, CTL-97)", async () => {
+    global.fetch = (async () =>
+      ({
+        ok: false,
+        status: 409,
+        headers: new Headers({ "content-type": "application/problem+json" }),
+        text: async () =>
+          JSON.stringify({
+            code: "ROLE_ALREADY_GRANTED",
+            title: "Role already granted: GUIDE",
+            role: "GUIDE",
+            reconciliationRequired: true,
+          }),
+      }) as Response) as unknown as typeof fetch;
+    await expect(new CoreClient("t").post("/onboarding/guide", {}, {})).rejects.toMatchObject({
+      status: 409,
+      code: "ROLE_ALREADY_GRANTED",
+      properties: { role: "GUIDE", reconciliationRequired: true },
     });
   });
 
