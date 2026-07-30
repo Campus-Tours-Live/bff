@@ -6,13 +6,12 @@ import { coreErr, coreOk, mintSessionCookie, mockCoreByPath, pathOf } from "../.
 import { EnvelopedOnboardingCommandSchema } from "@/openapi/schemas.js";
 
 /** A successful Core `POST /users/me/roles/{guide|participant}` 201 body — the enveloped
- *  `OnboardingResponse` (Profile Contract v2 onboarding command). `accountState` here is Core's
- *  `AccountStatus` (e.g. "ACTIVE"), deliberately DIFFERENT from the bff's own `accountState:
- *  "PROVISIONED"` session discriminator — the two must never be confused (see the
- *  not-verbatim assertions below). */
+ *  `OnboardingResponse` (Profile Contract v2 onboarding command). Core sends NO `accountState`
+ *  and NO `currentRole` — both are bff session state (Core's account-lifecycle status is on
+ *  `user.accountStatus`). The bff SYNTHESIZES its own `accountState: "PROVISIONED"` discriminator
+ *  + `currentRole`; the two must never be confused (see the not-verbatim assertions below). */
 function coreOnboardingOk(overrides: Record<string, unknown> = {}) {
   return coreOk({
-    accountState: "ACTIVE",
     user: {
       id: "u1",
       firstName: "Gina",
@@ -133,9 +132,10 @@ describe("POST /v1/users/me/roles/{role} — Core 201 success, session conversio
     const res = await request(app).post("/v1/users/me/roles/guide").set("Cookie", cookie).send({});
 
     expect(res.status).toBe(201);
-    // NOT Core's body verbatim: Core sent accountState "ACTIVE" (an AccountStatus) and no
-    // currentRole at all; the bff's response has accountState "PROVISIONED" (its own session
-    // discriminator) AND a currentRole the bff itself added.
+    // NOT Core's body verbatim: Core's 201 has NO accountState and NO currentRole at all (its
+    // lifecycle status is on user.accountStatus); the bff SYNTHESIZES its own session
+    // discriminator accountState "PROVISIONED" AND a currentRole it itself added — proving the
+    // response is constructed by the bff, never passed through.
     expect(res.body.data.accountState).toBe("PROVISIONED");
     expect(res.body.data.currentRole).toBe("GUIDE");
     expect(res.body.data.acquiredRole).toBe("GUIDE");

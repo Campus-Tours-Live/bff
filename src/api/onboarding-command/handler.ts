@@ -27,7 +27,9 @@ const ROUTE_ROLE: Record<"guide" | "participant", Role> = {
  * `currentRole` — Core never owns it (bff session state, see src/session.ts).
  */
 interface CoreOnboardingResponse {
-  accountState: string;
+  // Core's OnboardingResponse has NO accountState and NO currentRole — both are bff session
+  // state. Core's account-lifecycle status lives on user.accountStatus. The bff synthesizes the
+  // frontend-facing accountState: "PROVISIONED" discriminator + currentRole after conversion.
   user: { id: string; [key: string]: unknown };
   roles: string[];
   acquiredRole: string;
@@ -79,12 +81,11 @@ function convertSessionWithOneRetry(res: Response, session: SessionData, role: R
  * still-pending session once Core reports provisioned — the I11 recovery path), NOT to resend
  * this command (Core already granted the role; a resend would now 409 `ROLE_ALREADY_GRANTED`).
  *
- * **The bff response is NOT Core's response verbatim:** Core's `OnboardingResponse` has no
- * `currentRole` and its `accountState` is an `AccountStatus` (e.g. `"ACTIVE"`) describing the
- * Core account, not this bff's session discriminator. On success this constructs the
- * frontend-facing `OnboardingCommandResponse` — `accountState: "PROVISIONED"` (the bff session
- * discriminator) plus the bff-added `currentRole` — only AFTER the session conversion above
- * actually succeeded.
+ * **The bff response is NOT Core's response verbatim:** Core's `OnboardingResponse` has NO
+ * `accountState` and NO `currentRole` — both are bff session state (Core's account-lifecycle
+ * status lives on `user.accountStatus`). On success this constructs the frontend-facing
+ * `OnboardingCommandResponse` — `accountState: "PROVISIONED"` (the bff session discriminator)
+ * plus the bff-added `currentRole` — only AFTER the session conversion above actually succeeded.
  */
 export function onboardingCommand(
   role: "guide" | "participant",

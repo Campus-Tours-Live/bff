@@ -543,9 +543,9 @@ export const participantOnboardingRequestExample = {
 /**
  * `POST /v1/users/me/roles/{guide|participant}` response `data` (CTL-97 defer-provisioning
  * onboarding command, src/api/onboarding-command) — NOT Core's response verbatim. Core's
- * `OnboardingResponse` carries no `currentRole` (it never owns that — bff session state) and
- * its `accountState` is an `AccountStatus` (e.g. `ACTIVE`) describing the Core account, not
- * this bff session's discriminator. This is the frontend-facing shape the bff constructs AFTER
+ * `OnboardingResponse` carries no `accountState` and no `currentRole` — both are bff session
+ * state (Core's account-lifecycle status lives on `user.accountStatus`). This is the
+ * frontend-facing shape the bff constructs AFTER
  * successfully converting the caller's session (PENDING -> PROVISIONED, or re-stamping an
  * already-PROVISIONED one acquiring a second role) — `currentRole` is added here, set to the
  * just-acquired role.
