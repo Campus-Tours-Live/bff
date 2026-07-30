@@ -458,4 +458,107 @@ describe("coreProxy (/v1/* passthrough)", () => {
       expect(global.fetch).not.toHaveBeenCalled();
     });
   });
+
+  describe("GET /v1/meta/enrollment-years — cache header fidelity", () => {
+    it("relays Core's computed Cache-Control unchanged", async () => {
+      // Core contracts this value near the year boundary; the proxy must not flatten it.
+      mockCoreByPath({
+        "/meta/enrollment-years": coreOk(
+          { entryYear: { min: 2016, max: 2027 } },
+          { "cache-control": "public, max-age=3600" },
+        ),
+      });
+
+      const res = await request(app).get("/v1/meta/enrollment-years");
+
+      expect(res.status).toBe(200);
+      expect(res.headers["cache-control"]).toBe("public, max-age=3600");
+    });
+
+    it("does not impose the static-meta 5-minute policy on it", async () => {
+      mockCoreByPath({
+        "/meta/enrollment-years": coreOk({}, { "cache-control": "public, max-age=86400" }),
+      });
+
+      const res = await request(app).get("/v1/meta/enrollment-years");
+
+      // 300 is the flat policy the proxy owns for tour-topics/tour-features. Applying it here
+      // would move the caching decision out of Core — the only place that knows when the year
+      // turns over.
+      expect(res.headers["cache-control"]).not.toContain("max-age=300");
+      expect(res.headers["cache-control"]).toBe("public, max-age=86400");
+    });
+
+    it("still owns the policy for the static vocabularies (unchanged)", async () => {
+      mockCoreByPath({
+        "/meta/tour-topics": coreOk([], { "cache-control": "public, max-age=999999" }),
+      });
+
+      const res = await request(app).get("/v1/meta/tour-topics");
+
+      // Regression guard: this path's policy is deliberately the proxy's, not Core's.
+      expect(res.headers["cache-control"]).toBe("public, max-age=300");
+    });
+
+    it("does not relay Cache-Control for paths in neither set", async () => {
+      mockCoreByPath({
+        "/meta/universities": coreOk([], { "cache-control": "public, max-age=999999" }),
+      });
+
+      const res = await request(app).get("/v1/meta/universities?q=north");
+
+      expect(res.headers["cache-control"]).toBeUndefined();
+    });
+
+    /**
+     * This plan assumes `isPublicGet` already covers `/meta/` and therefore adds no auth wiring —
+     * an assumption nothing currently asserts. Pin it: rules are public configuration, and a later
+     * tightening of isPublicGet must not silently turn a config endpoint into a logged-in one.
+     * The form needs these rules to render its fields at all, so a 401 here is not a degraded
+     * experience, it is a blank pair of inputs.
+     */
+    it("serves the rules anonymously — no session cookie required", async () => {
+      const mock = mockCoreByPath({
+        "/meta/enrollment-years": coreOk(
+          {
+            entryYear: { min: 2016, max: 2027 },
+            maxYearsToGraduate: [],
+            defaultMaxYearsToGraduate: 8,
+          },
+          { "cache-control": "public, max-age=86400" },
+        ),
+      });
+
+      // Deliberately NO .set("Cookie", ...).
+      const res = await request(app).get("/v1/meta/enrollment-years");
+
+      expect(res.status).toBe(200);
+      // Named URL, not a bare toHaveBeenCalled(): auth resolution can produce its own upstream
+      // traffic, so "something was called" would not prove THIS request reached Core.
+      expect(mock.mock.calls.some(([url]) => String(url).includes("/meta/enrollment-years"))).toBe(
+        true,
+      );
+    });
+
+    /**
+     * Fail-closed the other way: when Core sends no Cache-Control, the bff must send none either.
+     * Written as a regression guard against a future
+     * `upstreamCacheControl ?? "public, max-age=300"`, which reads like a harmless default and
+     * would quietly restore the bff-owned policy this task exists to remove.
+     */
+    it("does not invent a Cache-Control when Core omits one", async () => {
+      mockCoreByPath({
+        "/meta/enrollment-years": coreOk({
+          entryYear: { min: 2016, max: 2027 },
+          maxYearsToGraduate: [],
+          defaultMaxYearsToGraduate: 8,
+        }),
+      });
+
+      const res = await request(app).get("/v1/meta/enrollment-years");
+
+      expect(res.status).toBe(200);
+      expect(res.headers["cache-control"]).toBeUndefined();
+    });
+  });
 });

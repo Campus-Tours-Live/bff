@@ -30,12 +30,17 @@ export function mintSessionCookie(overrides: Record<string, unknown> = {}): stri
   return cookie.split(";")[0]!;
 }
 
-/** A successful Core response wrapping `payload` in the `{ data }` envelope the BFF unwraps. */
-export function coreOk(payload: unknown): Response {
+/**
+ * A successful Core response wrapping `payload` in the `{ data }` envelope the BFF unwraps.
+ * `headers` lets a test layer extra upstream response headers (e.g. `cache-control`) on top of
+ * the default `content-type`, for tests asserting header-fidelity through the proxy — without a
+ * second, parallel mocking style for the same upstream stub.
+ */
+export function coreOk(payload: unknown, headers: Record<string, string> = {}): Response {
   return {
     ok: true,
     status: 200,
-    headers: new Headers({ "content-type": "application/json" }),
+    headers: new Headers({ "content-type": "application/json", ...headers }),
     json: async () => ({ data: payload }),
     text: async () => JSON.stringify({ data: payload }),
   } as unknown as Response;
