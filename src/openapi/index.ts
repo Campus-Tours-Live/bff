@@ -256,20 +256,18 @@ apiRoute({
 
 // --- Public reference data (transparent Core proxy — CTL-97 enrollment-years bff plan) ---
 
-// Deliberately NOT the real Core rule values (bachelor 6, default 8, a 2016/2027 window,
-// per CTL-97 backend Task 6) — those are either a rule number Core owns or a value Core
-// computes from its clock, correct only during 2026. Copying them here would be a SECOND,
-// silently-rotting copy of exactly the data this whole feature exists to keep in one place
-// (Core). This is a documentation-shape illustration only; the field descriptions on
-// EnrollmentYearRulesSchema carry the real meaning, and Spectral (`bff-response-has-example`)
+// DELIBERATELY SYNTHETIC — not a plausible stand-in for Core's real rule values (bachelor 6,
+// default 8, a 2016/2027 window, per CTL-97 backend Task 6), and not meant to be. An
+// out-of-range year window, a non-vocabulary `matches` string, and uniform placeholder years
+// are all chosen so nothing here could be mistaken for "roughly" the live rules — a reader
+// must not be able to derive a real window length, a real degree keyword, or a real years
+// value from this example. Live values come from Core; the field descriptions on
+// EnrollmentYearRulesSchema carry the real meaning. Spectral (`bff-response-has-example`)
 // requires SOME worked example on every response body — this is that, not a pinned fact.
 const enrollmentYearRulesExample = {
-  entryYear: { min: 2015, max: 2026 },
-  maxYearsToGraduate: [
-    { matches: ["associate"], years: 3 },
-    { matches: ["bachelor"], years: 5 },
-  ],
-  defaultMaxYearsToGraduate: 7,
+  entryYear: { min: 1900, max: 2100 },
+  maxYearsToGraduate: [{ matches: ["example-degree-keyword"], years: 1 }],
+  defaultMaxYearsToGraduate: 1,
 };
 
 // GET /v1/meta/enrollment-years
