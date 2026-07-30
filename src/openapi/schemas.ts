@@ -657,10 +657,15 @@ export const GuideUniversitySchema = registry.register(
         .string()
         .optional()
         .openapi({ description: "Graduation year.", example: "2026" }),
-      entryYear: z.number().int().nullable().optional().openapi({
-        description: "Year this guide entered/started at this university (null until set).",
-        example: 2023,
-      }),
+      entryYear: z
+        .number()
+        .int()
+        .openapi({
+          description:
+            "Year this guide entered/started at this university. Always present — Core stores it " +
+            "NOT NULL and requires it at onboarding.",
+          example: 2023,
+        }),
       verificationStatus: VerificationStatusEnum.nullable().optional().openapi({
         description: "This school's identity verification status (often null — deferred).",
         example: "VERIFIED",
