@@ -4,15 +4,15 @@ import { GuideDashboardDataSchema } from "../../openapi/schemas.js";
 
 /**
  * Guide workspace: profile (required — throws → mapped by withSession) + offerings
- * (best-effort — degrades to empty list) + stats (best-effort — degrades to null) +
+ * (best-effort — degrades to empty list) + earnings (best-effort — degrades to null) +
  * `canPublish`, a computed convenience field mirroring the Core's publish gate. All
  * three Core reads are fanned out in parallel to cut latency.
  */
 export async function guideDashboard(res: Response, core: CoreClient, me: Me): Promise<void> {
-  const [guide, offerings, stats] = await Promise.all([
+  const [guide, offerings, earnings] = await Promise.all([
     core.getGuideProfile<Json>(),
     core.getOfferings<Json[]>().catch(() => [] as Json[]),
-    core.getGuideDashboardStats<Json>().catch(() => null),
+    core.getGuideEarnings<Json>().catch(() => null),
   ]);
   sendData(
     res,
@@ -22,7 +22,7 @@ export async function guideDashboard(res: Response, core: CoreClient, me: Me): P
       guideStatus: me.guideStatus,
       canPublish: me.guideStatus === "APPROVED",
       offerings,
-      stats,
+      earnings,
       createdAt: me.createdAt,
     },
     GuideDashboardDataSchema,

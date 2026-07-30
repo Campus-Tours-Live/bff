@@ -46,8 +46,8 @@ export class CoreClient {
   getPendingActions<T>(): Promise<T> {
     return this.get<T>("/bookings/pending-actions");
   }
-  getGuideDashboardStats<T>(): Promise<T> {
-    return this.get<T>("/guide/dashboard/stats");
+  getGuideEarnings<T>(): Promise<T> {
+    return this.get<T>("/guide/earnings");
   }
 
   /**
