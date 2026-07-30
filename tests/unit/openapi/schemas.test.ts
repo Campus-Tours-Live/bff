@@ -192,6 +192,10 @@ describe("GuideProfile (CTL-97 universities[])", () => {
     const result = GuideUniversitySchema.strict().safeParse({
       universityId: "uni_mit",
       universityName: "MIT",
+      // entryYear is this schema's ONLY required field (CTL-97 made it non-null). It must be
+      // supplied or the parse fails on the missing year and this test passes without ever
+      // exercising .strict() — leaving the schoolEmail leak it guards against undetected.
+      entryYear: 2023,
       schoolEmail: "guide@mit.edu",
     });
     expect(result.success).toBe(false);
