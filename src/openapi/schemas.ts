@@ -1640,6 +1640,63 @@ export function writeEnvelope<T>(
   return { data, affectedBookings, meta: { requestId: REQUEST_ID_EXAMPLE } };
 }
 
+// --- GET /v1/meta/enrollment-years (transparent Core proxy — see src/proxy/coreProxy.ts) ---
+
+/**
+ * `GET /v1/meta/enrollment-years` response `data` — proxied from Core verbatim (this is a
+ * pass-through path, not an aggregation). Rule DATA rather than a lookup table: degree titles are
+ * free-text College Scorecard credentials, so the client applies the same ordered, first-hit
+ * substring match the server does. Array order is part of the contract.
+ */
+// NO `example` values anywhere below. Every candidate here is either a rule number owned by Core
+// (bachelor 6, default 8) or a year window Core computes from its clock (2016/2027, correct only
+// during 2026). Both would be a SECOND copy of data this whole feature exists to keep in one
+// place, and nothing in this repo can pin them — the backend plan deleted its equivalents for the
+// same reason. Descriptions carry the meaning; live values come from Core.
+export const EnrollmentYearRulesSchema = registry.register(
+  "EnrollmentYearRules",
+  z
+    .object({
+      entryYear: z
+        .object({
+          min: z.number().int(),
+          max: z.number().int(),
+        })
+        .openapi({
+          description:
+            "Inclusive window of acceptable enrolment years, computed from Core's UTC clock — " +
+            "it shifts every 1 January, so do not hardcode or cache it indefinitely.",
+        }),
+      maxYearsToGraduate: z
+        .array(
+          z.object({
+            matches: z
+              .array(z.string())
+              .openapi({ description: "Lower-case substrings; ANY hit selects this rule." }),
+            years: z
+              .number()
+              .int()
+              .openapi({ description: "Longest years to graduate, counted from enrolment." }),
+          }),
+        )
+        .openapi({
+          description:
+            "Ordered degree rules. Lower-case and trim the degree, then take the FIRST rule any " +
+            "of whose `matches` it contains. Order is significant — do not sort or re-key.",
+        }),
+      defaultMaxYearsToGraduate: z
+        .number()
+        .int()
+        .openapi({ description: "Used when a degree matches no rule." }),
+    })
+    .openapi("EnrollmentYearRules", {
+      description:
+        "Validation rules for a guide's enrolment year and expected graduation year. Cacheable, " +
+        "but the max-age contracts to expire when the server's year turns over — do not cache " +
+        "the body indefinitely.",
+    }),
+);
+
 // --- Runtime response-shape contracts (loose on Core passthrough, strict on BFF-owned) ---
 //
 // These are used by the dev-only assertion in src/api/_shared/envelope.ts and by the

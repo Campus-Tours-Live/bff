@@ -61,6 +61,7 @@ import {
   OverrideMultiPreviewRequestSchema,
   OverrideReplaceRequestSchema,
   RulesReplaceRequestSchema,
+  EnrollmentYearRulesSchema,
 } from "./schemas.js";
 import {
   apiRoute,
@@ -249,6 +250,59 @@ apiRoute({
     },
     404: problemResponse("No discoverable tour has this id.", tourNotFoundExample),
     422: problemResponse("Core rejected the tour id.", invalidTourIdExample),
+    502: problem502("The Core API was unreachable."),
+  },
+});
+
+// --- Public reference data (transparent Core proxy — CTL-97 enrollment-years bff plan) ---
+
+// Deliberately NOT the real Core rule values (bachelor 6, default 8, a 2016/2027 window,
+// per CTL-97 backend Task 6) — those are either a rule number Core owns or a value Core
+// computes from its clock, correct only during 2026. Copying them here would be a SECOND,
+// silently-rotting copy of exactly the data this whole feature exists to keep in one place
+// (Core). This is a documentation-shape illustration only; the field descriptions on
+// EnrollmentYearRulesSchema carry the real meaning, and Spectral (`bff-response-has-example`)
+// requires SOME worked example on every response body — this is that, not a pinned fact.
+const enrollmentYearRulesExample = {
+  entryYear: { min: 2015, max: 2026 },
+  maxYearsToGraduate: [
+    { matches: ["associate"], years: 3 },
+    { matches: ["bachelor"], years: 5 },
+  ],
+  defaultMaxYearsToGraduate: 7,
+};
+
+// GET /v1/meta/enrollment-years
+apiRoute({
+  method: "get",
+  path: "/v1/meta/enrollment-years",
+  protected: false,
+  tags: ["Meta"],
+  summary: "Get the guide enrolment/graduation-year validation rules",
+  description:
+    "Transparent Core proxy — `coreProxy`'s generic `/v1/meta/*` passthrough already serves " +
+    "this path anonymously (`isPublicGet`) and relays Core's `Cache-Control` unchanged " +
+    "(`UPSTREAM_CACHE_CONTROL_PATHS`, see src/proxy/coreProxy.ts); there is no bff-owned route " +
+    "or handler for it. Documented here so a consumer does not have to read Core's source to " +
+    "learn the shape it validates a guide's `entryYear` against at onboarding — see " +
+    "`GuideOnboardingRequest.entryYear` above, which references this same endpoint.",
+  responses: {
+    200: {
+      ...enveloped(EnrollmentYearRulesSchema, {
+        description: "The current enrolment/graduation-year validation rules.",
+        example: envelope(enrollmentYearRulesExample),
+      }),
+      headers: {
+        "Cache-Control": {
+          description:
+            "Cache policy computed by Core, not by this bff. `max-age` is capped at 24 hours " +
+            "and contracts to expire at the next 1 January 00:00 UTC, because the `entryYear` " +
+            "window in the body stops being true at that instant. Do not cache the body beyond " +
+            "it.",
+          schema: { type: "string" },
+        },
+      },
+    },
     502: problem502("The Core API was unreachable."),
   },
 });
@@ -1494,6 +1548,12 @@ export const openapiSpec = generator.generateDocument({
         "convert this bff session to PROVISIONED.",
     },
     { name: "Tours", description: "Anonymous marketplace tour discovery." },
+    {
+      name: "Meta",
+      description:
+        "Public reference/config data proxied transparently from Core (e.g. enrolment-year " +
+        "validation rules).",
+    },
     { name: "Booking", description: "Participant booking and cart operations." },
     {
       name: "Availability",

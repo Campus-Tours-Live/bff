@@ -220,7 +220,7 @@ describe("OpenAPI contract — every operation is self-describing", () => {
 });
 
 describe("OpenAPI contract — protected /v1 operations", () => {
-  const publicV1Paths = new Set(["/v1/tours", "/v1/tours/{tourId}"]);
+  const publicV1Paths = new Set(["/v1/tours", "/v1/tours/{tourId}", "/v1/meta/enrollment-years"]);
   const protectedOps = () =>
     operations().filter((o) => o.path.startsWith("/v1/") && !publicV1Paths.has(o.path));
 
@@ -484,5 +484,86 @@ describe("OpenAPI contract — no bff POST /session", () => {
   it("keeps GET /auth/session and POST /v1/session/current-role", () => {
     expect(paths["/auth/session"]?.get).toBeDefined();
     expect(paths["/v1/session/current-role"]?.post).toBeDefined();
+  });
+});
+
+/**
+ * Enrollment-years bff plan, Task 3 — `GET /v1/meta/enrollment-years` needs no route/handler
+ * change (it already falls through `coreProxy`'s `/v1/meta/*` passthrough, `isPublicGet`, and
+ * `UPSTREAM_CACHE_CONTROL_PATHS` — see src/proxy/coreProxy.ts), but it was previously
+ * undocumented: a frontend consumer had to read Core's source to learn its shape. This pins
+ * that the PUBLISHED contract actually mirrors Core's response field-for-field (a `data` object
+ * with the right top-level keys and wrong innards would pass a shallower check) and that the
+ * relayed `Cache-Control` header — the one thing Task 1 of this plan changed — is documented on
+ * the 200, not just the body.
+ */
+describe("OpenAPI contract — GET /v1/meta/enrollment-years (enrollment-years bff Task 3)", () => {
+  // Local `$ref`/`allOf` resolver, in the same idiom as this file's other `Schema` types above
+  // (e.g. the onboarding-command block) rather than an imported/generic JSON-schema resolver.
+  // `allOf` shows up here (and not in those earlier blocks) because `Envelope()` re-annotates a
+  // NAMED/registered schema with a call-site `.openapi({ description })` (see Envelope() in
+  // src/openapi/schemas.ts), which zod-to-openapi renders as `allOf: [{ $ref }, { description }]`
+  // rather than a bare `$ref`.
+  type Schema = {
+    $ref?: string;
+    allOf?: Schema[];
+    type?: string;
+    required?: string[];
+    properties?: Record<string, Schema>;
+    items?: Schema;
+  };
+
+  function componentSchemas(): Record<string, Schema> {
+    return (
+      (openapiSpec as { components?: { schemas?: Record<string, Schema> } }).components?.schemas ??
+      {}
+    );
+  }
+
+  function resolveSchema(schema: Schema | undefined): Schema {
+    if (!schema) throw new Error("resolveSchema: schema is undefined");
+    if (schema.$ref) {
+      const name = schema.$ref.replace("#/components/schemas/", "");
+      const resolved = componentSchemas()[name];
+      if (!resolved) throw new Error(`resolveSchema: no component named "${name}"`);
+      return resolveSchema(resolved);
+    }
+    if (schema.allOf) {
+      return schema.allOf.map(resolveSchema).reduce((acc, part) => ({ ...acc, ...part }), {});
+    }
+    return schema;
+  }
+
+  it("documents GET /v1/meta/enrollment-years with the shape Core actually returns", () => {
+    const operation = paths["/v1/meta/enrollment-years"]?.get as Operation | undefined;
+    expect(operation).toBeDefined();
+
+    const responseSchema = operation!.responses["200"]?.content?.["application/json"]
+      ?.schema as Schema;
+    const data = resolveSchema(responseSchema.properties?.data);
+
+    // The three top-level fields, by name — this is the claim "mirrors Core field-for-field".
+    expect(data.required).toEqual(
+      expect.arrayContaining(["entryYear", "maxYearsToGraduate", "defaultMaxYearsToGraduate"]),
+    );
+
+    // ...and the nested shape, because a `data` object with the right three keys and wrong
+    // innards is exactly the drift this test exists to catch.
+    const entryYear = resolveSchema(data.properties?.entryYear);
+    expect(entryYear.required).toEqual(expect.arrayContaining(["min", "max"]));
+
+    const rule = resolveSchema(resolveSchema(data.properties?.maxYearsToGraduate).items);
+    expect(rule.required).toEqual(expect.arrayContaining(["matches", "years"]));
+    expect(resolveSchema(rule.properties?.matches).type).toBe("array");
+    expect(rule.properties?.years?.type).toBe("integer");
+  });
+
+  it("documents the Cache-Control header on the enrollment-years 200", () => {
+    // The header IS the feature (Task 1). A contract describing only the body would omit the
+    // one thing this PR changes, and a consumer reading it would not learn the payload expires.
+    const response = paths["/v1/meta/enrollment-years"]?.get?.responses?.["200"] as
+      | { headers?: Record<string, unknown> }
+      | undefined;
+    expect(response?.headers?.["Cache-Control"]).toBeDefined();
   });
 });
