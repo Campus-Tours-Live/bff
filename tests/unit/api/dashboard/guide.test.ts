@@ -34,22 +34,20 @@ function makeMe(over: Partial<Me> = {}): Me {
   } as Me;
 }
 
-const STATS: Json = {
-  avgRating: 4.5,
-  reviewCount: 12,
+const EARNINGS: Json = {
   earningsThisMonthCents: 8400,
   upcomingPayoutCents: 4200,
   currency: "USD",
 };
 
 describe("guideDashboard", () => {
-  it("sends a guide envelope with profile, status, canPublish, offerings, and stats", async () => {
+  it("sends a guide envelope with profile, status, canPublish, offerings, and earnings", async () => {
     const guide: Json = { id: "g1", displayName: "Ana" };
     const offerings: Json[] = [{ id: "o1" }, { id: "o2" }];
     const core = {
       getGuideProfile: jest.fn<() => Promise<unknown>>().mockResolvedValue(guide),
       getOfferings: jest.fn<() => Promise<unknown>>().mockResolvedValue(offerings),
-      getGuideDashboardStats: jest.fn<() => Promise<unknown>>().mockResolvedValue(STATS),
+      getGuideEarnings: jest.fn<() => Promise<unknown>>().mockResolvedValue(EARNINGS),
     } as unknown as CoreClient;
     const me = makeMe({ guideStatus: "APPROVED" });
 
@@ -62,7 +60,7 @@ describe("guideDashboard", () => {
       guideStatus: "APPROVED",
       canPublish: true,
       offerings,
-      stats: STATS,
+      earnings: EARNINGS,
     });
   });
 
@@ -70,7 +68,7 @@ describe("guideDashboard", () => {
     const core = {
       getGuideProfile: jest.fn<() => Promise<unknown>>().mockResolvedValue({ id: "g1" }),
       getOfferings: jest.fn<() => Promise<unknown>>().mockResolvedValue([]),
-      getGuideDashboardStats: jest.fn<() => Promise<unknown>>().mockResolvedValue(null),
+      getGuideEarnings: jest.fn<() => Promise<unknown>>().mockResolvedValue(null),
     } as unknown as CoreClient;
 
     const res = mockRes();
@@ -88,7 +86,7 @@ describe("guideDashboard", () => {
     const core = {
       getGuideProfile: jest.fn<() => Promise<unknown>>().mockResolvedValue(guide),
       getOfferings: jest.fn<() => Promise<unknown>>().mockRejectedValue(new Error("core down")),
-      getGuideDashboardStats: jest.fn<() => Promise<unknown>>().mockResolvedValue(null),
+      getGuideEarnings: jest.fn<() => Promise<unknown>>().mockResolvedValue(null),
     } as unknown as CoreClient;
 
     const res = mockRes();
@@ -97,19 +95,17 @@ describe("guideDashboard", () => {
     expect(sentData(res)).toMatchObject({ guide, offerings: [] });
   });
 
-  it("degrades stats to null when getGuideDashboardStats rejects", async () => {
+  it("degrades earnings to null when getGuideEarnings rejects", async () => {
     const guide: Json = { id: "g1" };
     const core = {
       getGuideProfile: jest.fn<() => Promise<unknown>>().mockResolvedValue(guide),
       getOfferings: jest.fn<() => Promise<unknown>>().mockResolvedValue([]),
-      getGuideDashboardStats: jest
-        .fn<() => Promise<unknown>>()
-        .mockRejectedValue(new Error("core down")),
+      getGuideEarnings: jest.fn<() => Promise<unknown>>().mockRejectedValue(new Error("core down")),
     } as unknown as CoreClient;
 
     const res = mockRes();
     await guideDashboard(res as unknown as Response, core, makeMe());
 
-    expect(sentData(res)).toMatchObject({ stats: null });
+    expect(sentData(res)).toMatchObject({ earnings: null });
   });
 });

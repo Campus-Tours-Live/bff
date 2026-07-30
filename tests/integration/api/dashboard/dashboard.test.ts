@@ -10,15 +10,13 @@ describe("GET /v1/dashboard", () => {
     cookie = mintSessionCookie();
   });
 
-  const STATS = {
-    avgRating: 4.5,
-    reviewCount: 12,
+  const EARNINGS = {
     earningsThisMonthCents: 8400,
     upcomingPayoutCents: 4200,
     currency: "USD",
   };
 
-  it("guide-active session → 200 guide dashboard with offerings, stats, and canPublish", async () => {
+  it("guide-active session → 200 guide dashboard with offerings, earnings, and canPublish", async () => {
     mockCoreByPath({
       "/userinfo": coreOk({
         roles: ["GUIDE"],
@@ -28,7 +26,7 @@ describe("GET /v1/dashboard", () => {
       }),
       "/guide/profile": coreOk({ id: "g1", displayName: "Gina Guide" }),
       "/guide/offerings": coreOk([{ id: "o1", title: "Campus Walk" }]),
-      "/guide/dashboard/stats": coreOk(STATS),
+      "/guide/earnings": coreOk(EARNINGS),
     });
 
     const res = await request(app).get("/v1/dashboard").set("Cookie", cookie);
@@ -39,7 +37,7 @@ describe("GET /v1/dashboard", () => {
     expect(res.body.data.guideStatus).toBe("APPROVED");
     expect(res.body.data.guide).toEqual({ id: "g1", displayName: "Gina Guide" });
     expect(res.body.data.offerings).toEqual([{ id: "o1", title: "Campus Walk" }]);
-    expect(res.body.data.stats).toEqual(STATS);
+    expect(res.body.data.earnings).toEqual(EARNINGS);
     // Response-shape contract: body ↔ documented envelope schema (loose on Core-forwarded
     // fields, strict on the BFF-owned envelope/kind/canPublish/offerings shape).
     expect(EnvelopedDashboardSchema.safeParse(res.body).success).toBe(true);
@@ -55,7 +53,7 @@ describe("GET /v1/dashboard", () => {
       }),
       "/guide/profile": coreOk({ id: "g1" }),
       "/guide/offerings": coreOk([]),
-      "/guide/dashboard/stats": coreOk(STATS),
+      "/guide/earnings": coreOk(EARNINGS),
     });
 
     const res = await request(app).get("/v1/dashboard").set("Cookie", cookie);
@@ -122,7 +120,7 @@ describe("GET /v1/dashboard", () => {
       }),
       "/guide/profile": coreOk({ id: "g1" }),
       "/guide/offerings": coreErr(500),
-      "/guide/dashboard/stats": coreOk(STATS),
+      "/guide/earnings": coreOk(EARNINGS),
     });
 
     const res = await request(app).get("/v1/dashboard").set("Cookie", cookie);
@@ -133,7 +131,7 @@ describe("GET /v1/dashboard", () => {
     expect(res.body.data.canPublish).toBe(true);
   });
 
-  it("stats fetch fails for a guide → degrades to stats:null (still 200)", async () => {
+  it("earnings fetch fails for a guide → degrades to earnings:null (still 200)", async () => {
     mockCoreByPath({
       "/userinfo": coreOk({
         roles: ["GUIDE"],
@@ -143,14 +141,14 @@ describe("GET /v1/dashboard", () => {
       }),
       "/guide/profile": coreOk({ id: "g1" }),
       "/guide/offerings": coreOk([]),
-      "/guide/dashboard/stats": coreErr(500),
+      "/guide/earnings": coreErr(500),
     });
 
     const res = await request(app).get("/v1/dashboard").set("Cookie", cookie);
 
     expect(res.status).toBe(200);
     expect(res.body.data.kind).toBe("guide");
-    expect(res.body.data.stats).toBeNull();
+    expect(res.body.data.earnings).toBeNull();
   });
 
   it("no cookie → 401 with Auth-Required: reauthenticate", async () => {
@@ -186,7 +184,7 @@ describe("GET /v1/dashboard", () => {
       }),
       "/guide/profile": coreErr(503),
       "/guide/offerings": coreOk([]),
-      "/guide/dashboard/stats": coreOk(STATS),
+      "/guide/earnings": coreOk(EARNINGS),
     });
 
     const res = await request(app).get("/v1/dashboard").set("Cookie", cookie);
