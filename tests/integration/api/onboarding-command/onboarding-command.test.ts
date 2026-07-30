@@ -34,6 +34,35 @@ function coreCodedErr(status: number, code: string, title = "Error") {
   return coreErr(status, { title, status, code });
 }
 
+/** A Core problem+json error Response with an explicit `application/problem+json` content-type
+ *  (unlike `coreCodedErr`/`coreErr`, which always stub `application/json`) — mirrors the local
+ *  `problem()` helper in bookings.test.ts. Needed for the entryYear-requiredness test below,
+ *  which pins that Core's problem+json arrives at the browser unaltered. */
+function coreProblemJson(status: number, body: unknown): Response {
+  return {
+    ok: false,
+    status,
+    headers: new Headers({ "content-type": "application/problem+json" }),
+    json: async () => body,
+    text: async () => JSON.stringify(body),
+  } as unknown as Response;
+}
+
+/** A valid guide onboarding request body (Profile Contract v2 `GuideOnboardingRequest`) —
+ *  mirrors `guideOnboardingRequestExample` in src/openapi/schemas.ts. Used by the
+ *  entryYear-requiredness test below to produce a body missing ONLY `entryYear`. */
+function validGuideOnboardingBody(): Record<string, unknown> {
+  return {
+    universityId: "u1a2c3d4-0000-4000-8000-000000000003",
+    major: "Marine Biology",
+    bio: "Third-year student and campus tour lead.",
+    tourTopics: ["Dorm & housing tours"],
+    verificationEmail: "maya.chen@ncu.edu",
+    degree: "Bachelor's Degree",
+    entryYear: 2023,
+  };
+}
+
 /** Mint a PENDING (not-yet-provisioned) session cookie — the ordinary onboarding-command
  *  caller. No id_token claims are needed here (unlike userinfo's PENDING branch): every test
  *  below either mocks the onboarding POST directly, or — for the I11 recovery test — has Core's
@@ -310,6 +339,34 @@ describe("POST /v1/users/me/roles/{role} — Core 4xx relays verbatim, session n
     expect(res.status).toBe(422);
     expect(res.body).toMatchObject({ code: "VALIDATION_FAILED" });
     expect(res.headers["set-cookie"]).toBeUndefined();
+  });
+
+  it("forwards a body missing entryYear and relays Core's 422 verbatim (CTL-97 enrollment years)", async () => {
+    // The bff has no request-body validation (see the schema-level comment in
+    // src/openapi/schemas.ts's GuideOnboardingRequest): making entryYear required there
+    // (this task) is documentation-only. Core is the enforcement point, and its problem+json
+    // must arrive unaltered so the form can show the real message.
+    const cookie = mintPendingCookie();
+    const { entryYear, ...bodyWithoutEntryYear } = validGuideOnboardingBody();
+    void entryYear;
+    const mock = mockCoreByPath({
+      "/users/me/roles/guide": coreProblemJson(422, {
+        type: "about:blank",
+        title: "Validation failed",
+        status: 422,
+      }),
+    });
+
+    const res = await request(app)
+      .post("/v1/users/me/roles/guide")
+      .set("Cookie", cookie)
+      .send(bodyWithoutEntryYear);
+
+    expect(res.status).toBe(422);
+    expect(res.body.title).toBe("Validation failed");
+    // It WAS forwarded — that is the actual behaviour, and pinning it stops a future reader
+    // assuming a bff-side guard exists.
+    expect(mock.mock.calls.some((c) => pathOf(c[0]) === "/users/me/roles/guide")).toBe(true);
   });
 });
 

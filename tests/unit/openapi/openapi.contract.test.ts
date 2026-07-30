@@ -388,6 +388,25 @@ describe("OpenAPI contract — onboarding command ops (CTL-97 Task 7)", () => {
 });
 
 /**
+ * Backend enrollment-years Task 2 — Core now requires `entryYear` at guide onboarding
+ * (@NotNull, 422 on a missing value). This is the bff's published-contract counterpart: a
+ * documentation-only change (the bff forwards `req.body` untouched either way — see the
+ * integration test pinning that forward-and-relay behaviour in onboarding-command.test.ts),
+ * but the generated `GuideOnboardingRequest` schema is where dropping `.optional()` becomes
+ * observable, so this is the one assertion that actually exercises this task's deliverable.
+ */
+describe("OpenAPI contract — entryYear required in guide onboarding (backend enrollment years)", () => {
+  it("documents entryYear as required", () => {
+    const schemas = (
+      openapiSpec as { components?: { schemas?: Record<string, { required?: string[] }> } }
+    ).components?.schemas;
+    const schema = schemas?.GuideOnboardingRequest;
+    expect(schema).toBeDefined();
+    expect(schema?.required).toEqual(expect.arrayContaining(["entryYear"]));
+  });
+});
+
+/**
  * CTL-97 Task 7 — `GET /v1/userinfo` must document `401 SESSION_EXPIRED` too: the central
  * pending-expiry guard (withSession/withMutation) can fire on any protected `/v1` route,
  * this bootstrap read included.

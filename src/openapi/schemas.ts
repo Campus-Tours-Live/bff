@@ -422,16 +422,21 @@ export const GuideOnboardingRequestSchema = registry.register(
           "for the selected university (the College Scorecard credential title).",
         example: "Bachelor's Degree",
       }),
-      entryYear: z.number().int().optional().openapi({
-        description: "Year the guide entered this university.",
-        example: 2023,
-      }),
+      entryYear: z
+        .number()
+        .int()
+        .openapi({
+          description:
+            "Year the guide entered this university. Required; Core range-checks it against " +
+            "GET /v1/meta/enrollment-years, which is also what the form validates against.",
+          example: 2023,
+        }),
     })
     .openapi("GuideOnboardingRequest", {
       description:
         "Guide onboarding command body — creates the GUIDE role + profile in one call. " +
-        "`universityId`, `major`, `bio`, `tourTopics` (≥1), `verificationEmail`, and `degree` " +
-        "are required; a missing one is 422 VALIDATION_FAILED.",
+        "`universityId`, `major`, `bio`, `tourTopics` (≥1), `verificationEmail`, `degree`, and " +
+        "`entryYear` are required; a missing one is 422 VALIDATION_FAILED.",
     }),
 );
 
