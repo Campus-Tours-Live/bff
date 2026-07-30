@@ -150,7 +150,7 @@ describe("coreProxy (/v1/* passthrough)", () => {
     it("an EXPIRED PENDING session on a proxied route (GET /v1/guide/profile) → 401 SESSION_EXPIRED, destroys the cookie, and never calls Core", async () => {
       const now = Date.now();
       const pendingCookie = mintSessionCookie({
-        accountState: "PENDING",
+        provisioningStatus: "PENDING",
         pendingSince: now - 25 * 60 * 60 * 1000,
         pendingExpiresAt: now - 1,
       });

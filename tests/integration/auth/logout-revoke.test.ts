@@ -29,7 +29,7 @@ function sessCookie(session: { idToken?: string; refreshToken?: string }): strin
     },
   };
   writeSession(res as unknown as ExpressResponse, {
-    accountState: "PROVISIONED",
+    provisioningStatus: "PROVISIONED",
     idToken: "id-tok",
     ...session,
   });

@@ -57,7 +57,7 @@ function refreshOnce(refreshToken: string): ReturnType<typeof refreshTokens> {
  * destroys the cookie, and answers 401 SESSION_EXPIRED, uniformly for every protected `/v1`
  * route. The decoded (expired) session must never be used past this point in the request.
  *
- * State is read from the `accountState` discriminator ONLY — never inferred from the presence
+ * State is read from the `provisioningStatus` discriminator ONLY — never inferred from the presence
  * of `pendingExpiresAt` — so a PROVISIONED (or legacy-normalized-provisioned) session ignores
  * pending fields entirely, even if some carried over by accident.
  */
@@ -67,7 +67,7 @@ async function bearerForSession(
 ): Promise<string | null> {
   if (!session) return null;
 
-  if (session.accountState === "PENDING" && clock.now() >= session.pendingExpiresAt) {
+  if (session.provisioningStatus === "PENDING" && clock.now() >= session.pendingExpiresAt) {
     throw new PendingSessionExpiredError();
   }
 
@@ -86,9 +86,9 @@ async function bearerForSession(
       expiresAt: Date.now() + tokens.expires_in * 1000,
     };
 
-    if (session.accountState === "PENDING") {
+    if (session.provisioningStatus === "PENDING") {
       // A silent token refresh must NEVER move a pending session's absolute lifetime: spread
-      // the existing session so accountState/pendingSince/pendingExpiresAt stay EXACTLY as
+      // the existing session so provisioningStatus/pendingSince/pendingExpiresAt stay EXACTLY as
       // they were, overwriting only the token fields. Also cap the cookie's own Max-Age at
       // the remaining pending window (not the default 7d) — a refresh must not extend the
       // pending cookie's logical lifetime either.

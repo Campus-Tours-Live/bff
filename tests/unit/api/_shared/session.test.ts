@@ -3,7 +3,7 @@ import type { Request, Response } from "express";
 
 const readSession = jest.fn<
   (...args: unknown[]) => {
-    accountState?: string;
+    provisioningStatus?: string;
     idToken?: string;
     refreshToken?: string;
     expiresAt?: number;
@@ -199,7 +199,7 @@ describe("resolveBearer / bearerForSession", () => {
 
     function pendingSession(overrides: Record<string, unknown> = {}) {
       return {
-        accountState: "PENDING",
+        provisioningStatus: "PENDING",
         pendingSince: PENDING_EXPIRES_AT - 24 * 60 * 60_000,
         pendingExpiresAt: PENDING_EXPIRES_AT,
         idToken: "id-pending",
@@ -231,11 +231,11 @@ describe("resolveBearer / bearerForSession", () => {
       expect((err as InstanceType<typeof PendingSessionExpiredError>).code).toBe("SESSION_EXPIRED");
     });
 
-    it("a PROVISIONED session ignores pending-shaped fields entirely — state is read from accountState, never inferred from pendingExpiresAt's presence", async () => {
-      // Same "expired" clock value as above, but accountState is PROVISIONED — must NOT throw.
+    it("a PROVISIONED session ignores pending-shaped fields entirely — state is read from provisioningStatus, never inferred from pendingExpiresAt's presence", async () => {
+      // Same "expired" clock value as above, but provisioningStatus is PROVISIONED — must NOT throw.
       clock.now = () => PENDING_EXPIRES_AT + 1;
       readSession.mockReturnValue({
-        accountState: "PROVISIONED",
+        provisioningStatus: "PROVISIONED",
         idToken: "id-provisioned",
         // A stray pending-looking field that must be ignored outright.
         pendingExpiresAt: PENDING_EXPIRES_AT,
@@ -246,12 +246,12 @@ describe("resolveBearer / bearerForSession", () => {
   });
 
   describe("refresh does not extend a PENDING session's absolute lifetime", () => {
-    it("keeps pendingSince/pendingExpiresAt/accountState UNCHANGED across a near-token-expiry refresh", async () => {
+    it("keeps pendingSince/pendingExpiresAt/provisioningStatus UNCHANGED across a near-token-expiry refresh", async () => {
       const pendingExpiresAt = NOW + 1000; // still valid; unrelated to the near-token-expiry check
       const pendingSince = NOW - 1000;
       clock.now = () => NOW;
       readSession.mockReturnValue({
-        accountState: "PENDING",
+        provisioningStatus: "PENDING",
         pendingSince,
         pendingExpiresAt,
         idToken: "id-old",
@@ -270,7 +270,7 @@ describe("resolveBearer / bearerForSession", () => {
       expect(writeSession).toHaveBeenCalledWith(
         res,
         {
-          accountState: "PENDING",
+          provisioningStatus: "PENDING",
           pendingSince,
           pendingExpiresAt,
           idToken: "id-new",

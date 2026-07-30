@@ -6,7 +6,7 @@ import { writeSession, type SessionData } from "@/session.js";
  * `ctl_sess=...` pair for supertest's `.set("Cookie", ...)`. The idToken value is
  * irrelevant in these tests because the Core network is mocked. `overrides` lets a test set
  * session-only fields like `currentRole` (Profile Contract v2) or flip the whole session to
- * PENDING (`accountState`, `pendingSince`, `pendingExpiresAt` — CTL-97 Task 4) — passed
+ * PENDING (`provisioningStatus`, `pendingSince`, `pendingExpiresAt` — CTL-97 Task 4) — passed
  * through as-is (untyped-cast-friendly, hence `Record<string, unknown>` rather than
  * `Partial<SessionData>`) so a test can also mint a deliberately GARBAGE `currentRole` to
  * exercise the `isRole` guard, or a deliberately-malformed pending shape.
@@ -17,7 +17,7 @@ export function mintSessionCookie(overrides: Record<string, unknown> = {}): stri
   writeSession(
     res as never,
     {
-      accountState: "PROVISIONED",
+      provisioningStatus: "PROVISIONED",
       idToken: "fake-id-token",
       accessToken: "a",
       refreshToken: "r",

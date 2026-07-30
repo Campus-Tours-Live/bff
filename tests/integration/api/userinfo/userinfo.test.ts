@@ -64,7 +64,7 @@ const PENDING_ID_TOKEN = makeIdToken({
 function mintPendingCookie(overrides: Record<string, unknown> = {}): string {
   const now = Date.now();
   return mintSessionCookie({
-    accountState: "PENDING",
+    provisioningStatus: "PENDING",
     idToken: PENDING_ID_TOKEN,
     pendingSince: now,
     pendingExpiresAt: now + 24 * 60 * 60 * 1000,
@@ -80,14 +80,14 @@ function ctlSessCookieFrom(res: request.Response): string | undefined {
 }
 
 describe("GET /v1/userinfo — PROVISIONED", () => {
-  it("composes Core identity/roles with the session's currentRole (accountState: PROVISIONED)", async () => {
+  it("composes Core identity/roles with the session's currentRole (provisioningStatus: PROVISIONED)", async () => {
     const cookie = mintSessionCookie({ currentRole: "GUIDE" });
     mockCoreByPath({ "/users/me": usersMeOk(["GUIDE", "PARTICIPANT"]) });
 
     const res = await request(app).get("/v1/userinfo").set("Cookie", cookie);
 
     expect(res.status).toBe(200);
-    expect(res.body.data.accountState).toBe("PROVISIONED");
+    expect(res.body.data.provisioningStatus).toBe("PROVISIONED");
     expect(res.body.data.user).toMatchObject({ id: "u1", displayName: "Gina Guide" });
     expect(res.body.data.roles).toEqual(["GUIDE", "PARTICIPANT"]);
     expect(res.body.data.currentRole).toBe("GUIDE");
@@ -256,7 +256,7 @@ describe("GET /v1/userinfo — staff roles (ADMIN/SUPPORT) surface in roles, nev
       const res = await request(app).get("/v1/userinfo").set("Cookie", cookie);
 
       expect(res.status).toBe(200);
-      expect(res.body.data.accountState).toBe("PROVISIONED");
+      expect(res.body.data.provisioningStatus).toBe("PROVISIONED");
       expect(res.body.data.roles).toEqual([staffRole]);
       expect(res.body.data.currentRole).toBeNull();
       expect(EnvelopedUserinfoSchema.safeParse(res.body).success).toBe(true);
@@ -305,7 +305,7 @@ describe("GET /v1/userinfo — PENDING (CTL-97 defer-provisioning)", () => {
 
     expect(res.status).toBe(200);
     expect(res.body.data).toEqual({
-      accountState: "PENDING",
+      provisioningStatus: "PENDING",
       user: {
         id: null,
         email: "ana@example.com",
@@ -369,7 +369,7 @@ describe("GET /v1/userinfo — PENDING (CTL-97 defer-provisioning)", () => {
     const res = await request(app).get("/v1/userinfo").set("Cookie", cookie);
 
     expect(res.status).toBe(200);
-    expect(res.body.data.accountState).toBe("PROVISIONED");
+    expect(res.body.data.provisioningStatus).toBe("PROVISIONED");
     expect(res.body.data.currentRole).toBe("GUIDE");
     expect(EnvelopedUserinfoSchema.safeParse(res.body).success).toBe(true);
     // convertToProvisioned always writes (drops pendingSince/pendingExpiresAt, restores 7d TTL).
@@ -387,7 +387,7 @@ describe("GET /v1/userinfo — PENDING (CTL-97 defer-provisioning)", () => {
     const res = await request(app).get("/v1/userinfo").set("Cookie", cookie);
 
     expect(res.status).toBe(200);
-    expect(res.body.data.accountState).toBe("PROVISIONED");
+    expect(res.body.data.provisioningStatus).toBe("PROVISIONED");
     expect(res.body.data.currentRole).toBeNull();
     expect(res.headers["set-cookie"]).toBeDefined();
   });
@@ -396,7 +396,7 @@ describe("GET /v1/userinfo — PENDING (CTL-97 defer-provisioning)", () => {
     // pendingIdentityFromSession throws IdentityClaimsInvalidError when the id_token's payload
     // lacks a verified email — the handler deliberately lets this propagate (uncaught) so
     // withSession's generic catch-all maps it to a 500, rather than ever serving a
-    // 200 accountState:"PENDING" body built from unusable identity claims.
+    // 200 provisioningStatus:"PENDING" body built from unusable identity claims.
     const malformedIdToken = makeIdToken({
       email: "ana@example.com",
       email_verified: false,
@@ -417,7 +417,7 @@ describe("GET /v1/userinfo — PENDING (CTL-97 defer-provisioning)", () => {
     expect(res.body).toMatchObject({ status: 500, code: "INTERNAL" });
     // Never a valid-looking pending document, under any status.
     expect(res.body.data).toBeUndefined();
-    expect(res.body.accountState).toBeUndefined();
+    expect(res.body.provisioningStatus).toBeUndefined();
     // The pending branch must not write — a broken identity must not even rotate the cookie.
     expect(res.headers["set-cookie"]).toBeUndefined();
   });

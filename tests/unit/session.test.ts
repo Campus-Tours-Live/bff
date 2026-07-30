@@ -45,7 +45,7 @@ describe("session cookie", () => {
     it("round-trips a SessionData", () => {
       const res = mockRes();
       const data: SessionData = {
-        accountState: "PROVISIONED",
+        provisioningStatus: "PROVISIONED",
         idToken: "id-tok",
         accessToken: "acc-tok",
         refreshToken: "ref-tok",
@@ -67,7 +67,10 @@ describe("session cookie", () => {
 
     it("returns null when the cookie is tampered after a valid write", () => {
       const res = mockRes();
-      writeSession(res as unknown as Response, { accountState: "PROVISIONED", idToken: "id-tok" });
+      writeSession(res as unknown as Response, {
+        provisioningStatus: "PROVISIONED",
+        idToken: "id-tok",
+      });
       const setCookie = res.cookies[0];
       const value = setCookie.split(";")[0].slice("ctl_sess=".length);
       // Flip a character so the GCM auth tag no longer verifies.
@@ -84,7 +87,11 @@ describe("session cookie", () => {
 
     it("sets a cookie with httpOnly, sameSite=lax, path=/, maxAge and no secure in test", () => {
       const res = mockRes();
-      writeSession(res as unknown as Response, { accountState: "PROVISIONED", idToken: "x" }, 100);
+      writeSession(
+        res as unknown as Response,
+        { provisioningStatus: "PROVISIONED", idToken: "x" },
+        100,
+      );
       const setCookie = res.cookies[0];
       expect(setCookie).toContain("HttpOnly");
       expect(setCookie).toMatch(/SameSite=Lax/i);
@@ -96,14 +103,14 @@ describe("session cookie", () => {
 
     it("uses the default maxAge (7 days) when none is given", () => {
       const res = mockRes();
-      writeSession(res as unknown as Response, { accountState: "PROVISIONED", idToken: "x" });
+      writeSession(res as unknown as Response, { provisioningStatus: "PROVISIONED", idToken: "x" });
       expect(res.cookies[0]).toMatch(new RegExp(`Max-Age=${60 * 60 * 24 * 7}`, "i"));
     });
 
     it("round-trips currentRole (Profile Contract v2 session field)", () => {
       const res = mockRes();
       const data: SessionData = {
-        accountState: "PROVISIONED",
+        provisioningStatus: "PROVISIONED",
         idToken: "id-tok",
         currentRole: "GUIDE",
       };
@@ -114,13 +121,16 @@ describe("session cookie", () => {
 
     it("currentRole is absent (not undefined-serialized) on an old-shape session", () => {
       const res = mockRes();
-      writeSession(res as unknown as Response, { accountState: "PROVISIONED", idToken: "id-tok" });
+      writeSession(res as unknown as Response, {
+        provisioningStatus: "PROVISIONED",
+        idToken: "id-tok",
+      });
       const req = reqFromSetCookie(res.cookies[0]);
       const session = readSession(req);
       expect(session).not.toBeNull();
-      expect(session?.accountState).toBe("PROVISIONED");
+      expect(session?.provisioningStatus).toBe("PROVISIONED");
       expect(
-        session?.accountState === "PROVISIONED" ? session.currentRole : "wrong-branch",
+        session?.provisioningStatus === "PROVISIONED" ? session.currentRole : "wrong-branch",
       ).toBeUndefined();
     });
   });
@@ -158,15 +168,15 @@ describe("session cookie", () => {
 
   /**
    * CTL-97 Task 4 — CRITICAL cutover requirement: a cookie written by code that pre-dates the
-   * `accountState` discriminator (`{ idToken, refreshToken, expiresAt, currentRole? }`, no
-   * `accountState` at all) must normalize to PROVISIONED on read, and must NOT be logged out —
+   * `provisioningStatus` discriminator (`{ idToken, refreshToken, expiresAt, currentRole? }`, no
+   * `provisioningStatus` at all) must normalize to PROVISIONED on read, and must NOT be logged out —
    * every session in the wild today IS an established, provisioned account.
    */
-  describe("legacy sessions (pre-Task-4 cookies with no accountState)", () => {
-    it("a legacy cookie (no accountState) normalizes to PROVISIONED on read and still returns its bearer", () => {
+  describe("legacy sessions (pre-Task-4 cookies with no provisioningStatus)", () => {
+    it("a legacy cookie (no provisioningStatus) normalizes to PROVISIONED on read and still returns its bearer", () => {
       const res = mockRes();
       // Deliberately bypass the SessionData type to simulate a cookie written by code that
-      // predates the `accountState` field entirely — the real legacy shape.
+      // predates the `provisioningStatus` field entirely — the real legacy shape.
       const legacyPayload = {
         idToken: "legacy-id-tok",
         refreshToken: "legacy-refresh-tok",
@@ -178,7 +188,7 @@ describe("session cookie", () => {
       const session = readSession(req);
 
       expect(session).toEqual({
-        accountState: "PROVISIONED",
+        provisioningStatus: "PROVISIONED",
         idToken: "legacy-id-tok",
         refreshToken: "legacy-refresh-tok",
         expiresAt: 1234567890,
@@ -187,7 +197,7 @@ describe("session cookie", () => {
       expect(session?.idToken).toBe("legacy-id-tok");
     });
 
-    it("a legacy cookie that already carried currentRole keeps it, now under accountState: PROVISIONED", () => {
+    it("a legacy cookie that already carried currentRole keeps it, now under provisioningStatus: PROVISIONED", () => {
       const res = mockRes();
       const legacyPayload = {
         idToken: "legacy-id-tok",
@@ -198,7 +208,7 @@ describe("session cookie", () => {
       const req = reqFromSetCookie(res.cookies[0]);
       const session = readSession(req);
       expect(session).toEqual({
-        accountState: "PROVISIONED",
+        provisioningStatus: "PROVISIONED",
         idToken: "legacy-id-tok",
         currentRole: "GUIDE",
       });
@@ -212,7 +222,7 @@ describe("session cookie", () => {
       clock.now = REAL_NOW;
     });
 
-    it("writes accountState PENDING with pendingSince/pendingExpiresAt from the SERVER clock (not token iat), 24h apart", () => {
+    it("writes provisioningStatus PENDING with pendingSince/pendingExpiresAt from the SERVER clock (not token iat), 24h apart", () => {
       const FIXED_NOW = 1_700_000_000_000;
       clock.now = () => FIXED_NOW;
 
@@ -226,7 +236,7 @@ describe("session cookie", () => {
       const req = reqFromSetCookie(res.cookies[0]);
       const session = readSession(req);
 
-      expect(session?.accountState).toBe("PENDING");
+      expect(session?.provisioningStatus).toBe("PENDING");
       const pending = session as PendingSessionData;
       expect(pending.pendingSince).toBe(FIXED_NOW);
       expect(pending.pendingExpiresAt).toBe(FIXED_NOW + 24 * 60 * 60 * 1000);
@@ -250,7 +260,7 @@ describe("session cookie", () => {
     it("drops the pending fields, sets currentRole, and restores the normal 7d TTL", () => {
       const res = mockRes();
       const pending: PendingSessionData = {
-        accountState: "PENDING",
+        provisioningStatus: "PENDING",
         pendingSince: 1_700_000_000_000,
         pendingExpiresAt: 1_700_086_400_000,
         idToken: "id-tok",
@@ -266,7 +276,7 @@ describe("session cookie", () => {
       const req = reqFromSetCookie(setCookie);
       const session = readSession(req);
       expect(session).toEqual({
-        accountState: "PROVISIONED",
+        provisioningStatus: "PROVISIONED",
         currentRole: "GUIDE",
         idToken: "id-tok",
         refreshToken: "refresh-tok",
@@ -283,9 +293,9 @@ describe("session cookie", () => {
 
       const req = reqFromSetCookie(res.cookies[0]);
       const session = readSession(req);
-      expect(session?.accountState).toBe("PROVISIONED");
+      expect(session?.provisioningStatus).toBe("PROVISIONED");
       expect(
-        session?.accountState === "PROVISIONED" ? session.currentRole : "wrong-branch",
+        session?.provisioningStatus === "PROVISIONED" ? session.currentRole : "wrong-branch",
       ).toBeUndefined();
     });
   });

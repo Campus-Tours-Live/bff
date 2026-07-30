@@ -13,7 +13,7 @@ describe("central pending-expiry guard (GET /v1/userinfo as the exercised route)
   it("an EXPIRED PENDING session → 401 SESSION_EXPIRED, destroys the cookie, and never calls Core", async () => {
     const now = Date.now();
     const cookie = mintSessionCookie({
-      accountState: "PENDING",
+      provisioningStatus: "PENDING",
       pendingSince: now - 25 * 60 * 60 * 1000,
       pendingExpiresAt: now - 1, // already past — the `now > pendingExpiresAt` boundary
     });
@@ -37,7 +37,7 @@ describe("central pending-expiry guard (GET /v1/userinfo as the exercised route)
   it("a PENDING session exactly AT pendingExpiresAt (now === pendingExpiresAt) → also EXPIRED", async () => {
     const now = Date.now();
     const cookie = mintSessionCookie({
-      accountState: "PENDING",
+      provisioningStatus: "PENDING",
       pendingSince: now - 24 * 60 * 60 * 1000,
       pendingExpiresAt: now,
     });

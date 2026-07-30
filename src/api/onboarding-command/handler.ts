@@ -27,9 +27,9 @@ const ROUTE_ROLE: Record<"guide" | "participant", Role> = {
  * `currentRole` — Core never owns it (bff session state, see src/session.ts).
  */
 interface CoreOnboardingResponse {
-  // Core's OnboardingResponse has NO accountState and NO currentRole — both are bff session
+  // Core's OnboardingResponse has NO provisioningStatus and NO currentRole — both are bff session
   // state. Core's account-lifecycle status lives on user.accountStatus. The bff synthesizes the
-  // frontend-facing accountState: "PROVISIONED" discriminator + currentRole after conversion.
+  // frontend-facing provisioningStatus: "PROVISIONED" discriminator + currentRole after conversion.
   user: { id: string; [key: string]: unknown };
   roles: string[];
   acquiredRole: string;
@@ -82,9 +82,9 @@ function convertSessionWithOneRetry(res: Response, session: SessionData, role: R
  * this command (Core already granted the role; a resend would now 409 `ROLE_ALREADY_GRANTED`).
  *
  * **The bff response is NOT Core's response verbatim:** Core's `OnboardingResponse` has NO
- * `accountState` and NO `currentRole` — both are bff session state (Core's account-lifecycle
+ * `provisioningStatus` and NO `currentRole` — both are bff session state (Core's account-lifecycle
  * status lives on `user.accountStatus`). On success this constructs the frontend-facing
- * `OnboardingCommandResponse` — `accountState: "PROVISIONED"` (the bff session discriminator)
+ * `OnboardingCommandResponse` — `provisioningStatus: "PROVISIONED"` (the bff session discriminator)
  * plus the bff-added `currentRole` — only AFTER the session conversion above actually succeeded.
  */
 export function onboardingCommand(
@@ -128,7 +128,7 @@ export function onboardingCommand(
     // just keeps the type checker happy without an extra (unreachable) branch to test — mirrors
     // the same pattern in src/api/userinfo/userinfo.handler.ts.
     /* istanbul ignore next */
-    const session: SessionData = readSession(req) ?? { accountState: "PROVISIONED" as const };
+    const session: SessionData = readSession(req) ?? { provisioningStatus: "PROVISIONED" as const };
     if (!convertSessionWithOneRetry(res, session, expectedRole)) {
       sendProblem(res, 500, "Session conversion failed", {
         code: "SESSION_CONVERSION_FAILED",
@@ -140,7 +140,7 @@ export function onboardingCommand(
     sendData(
       res,
       {
-        accountState: "PROVISIONED" as const,
+        provisioningStatus: "PROVISIONED" as const,
         user: core201.user,
         roles: heldRoles,
         currentRole: expectedRole,

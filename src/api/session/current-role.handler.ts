@@ -33,10 +33,10 @@ export const setCurrentRole = withSession(async (req, res, core) => {
   // request's session, so readSession(req) is guaranteed non-null here — and Core just
   // confirmed (via getCurrentUser above) that this account IS provisioned, so
   // convertToProvisioned is the right transition regardless of the session's prior
-  // accountState; the fallback literal just keeps the type checker happy without an extra
+  // provisioningStatus; the fallback literal just keeps the type checker happy without an extra
   // (unreachable) branch to test.
   /* istanbul ignore next */
-  const session = readSession(req) ?? { accountState: "PROVISIONED" as const };
+  const session = readSession(req) ?? { provisioningStatus: "PROVISIONED" as const };
   convertToProvisioned(res, session, role);
 
   sendData(res, { currentRole: role }, CurrentRoleDataSchema);

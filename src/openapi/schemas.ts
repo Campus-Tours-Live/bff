@@ -237,7 +237,7 @@ export const PendingUserSummarySchema = z.object({
  */
 const PendingUserinfo = z
   .object({
-    accountState: z.literal("PENDING").openapi({
+    provisioningStatus: z.literal("PENDING").openapi({
       description: "Discriminator — authenticated with Google, awaiting Core provisioning.",
       example: "PENDING",
     }),
@@ -267,7 +267,7 @@ const PendingUserinfo = z
  */
 const ProvisionedUserinfo = z
   .object({
-    accountState: z.literal("PROVISIONED").openapi({
+    provisioningStatus: z.literal("PROVISIONED").openapi({
       description: "Discriminator — Core has provisioned this account.",
       example: "PROVISIONED",
     }),
@@ -290,14 +290,14 @@ const ProvisionedUserinfo = z
 
 /**
  * `GET /v1/userinfo` response `data` (src/api/userinfo/userinfo.handler.ts) — the bootstrap
- * read the frontend calls on every page load, discriminated by `accountState` (CTL-97
+ * read the frontend calls on every page load, discriminated by `provisioningStatus` (CTL-97
  * defer-provisioning): `PENDING` (authenticated with Google, no Core account yet) vs
  * `PROVISIONED` (Core has an account — see {@link ProvisionedUserinfo}).
  */
 export const Userinfo = registry.register(
   "Userinfo",
   z
-    .discriminatedUnion("accountState", [PendingUserinfo, ProvisionedUserinfo])
+    .discriminatedUnion("provisioningStatus", [PendingUserinfo, ProvisionedUserinfo])
     .openapi({ description: "Signed-in identity, discriminated PENDING vs PROVISIONED." }),
 );
 
@@ -543,7 +543,7 @@ export const participantOnboardingRequestExample = {
 /**
  * `POST /v1/users/me/roles/{guide|participant}` response `data` (CTL-97 defer-provisioning
  * onboarding command, src/api/onboarding-command) — NOT Core's response verbatim. Core's
- * `OnboardingResponse` carries no `accountState` and no `currentRole` — both are bff session
+ * `OnboardingResponse` carries no `provisioningStatus` and no `currentRole` — both are bff session
  * state (Core's account-lifecycle status lives on `user.accountStatus`). This is the
  * frontend-facing shape the bff constructs AFTER
  * successfully converting the caller's session (PENDING -> PROVISIONED, or re-stamping an
@@ -554,7 +554,7 @@ export const OnboardingCommandResponseSchema = registry.register(
   "OnboardingCommandResponse",
   z
     .object({
-      accountState: z.literal("PROVISIONED").openapi({
+      provisioningStatus: z.literal("PROVISIONED").openapi({
         description:
           "Always PROVISIONED — a successful command always yields a provisioned account.",
         example: "PROVISIONED",
@@ -592,7 +592,7 @@ export const OnboardingCommandResponseSchema = registry.register(
 );
 
 export const onboardingCommandExample = envelope({
-  accountState: "PROVISIONED",
+  provisioningStatus: "PROVISIONED",
   user: {
     id: "u1",
     firstName: "Gina",
@@ -939,7 +939,7 @@ export const SessionStatus = registry.register(
 // --- Example bodies ---
 
 export const userinfoExample = envelope({
-  accountState: "PROVISIONED",
+  provisioningStatus: "PROVISIONED",
   user: {
     id: "u1",
     firstName: "Gina",
@@ -956,7 +956,7 @@ export const userinfoExample = envelope({
 
 /** `GET /v1/userinfo` PENDING example (CTL-97 defer-provisioning) — no Core account yet. */
 export const pendingUserinfoExample = envelope({
-  accountState: "PENDING",
+  provisioningStatus: "PENDING",
   user: {
     id: null,
     email: "ana@example.com",
@@ -1656,7 +1656,7 @@ export function envelopeOf<T extends z.ZodTypeAny>(
  *  passthrough (strict throughout). `id` is always null; `roles` is always empty; `currentRole`
  *  is always null. */
 const PendingUserinfoDataSchema = z.object({
-  accountState: z.literal("PENDING"),
+  provisioningStatus: z.literal("PENDING"),
   user: z.object({
     id: z.null(),
     email: z.string(),
@@ -1675,14 +1675,14 @@ const PendingUserinfoDataSchema = z.object({
  *  staff-only ADMIN/SUPPORT"); `currentRole` is BFF-derived (session ∩ the GUIDE/PARTICIPANT
  *  subset of `roles` — ADMIN/SUPPORT are never a `currentRole`). */
 const ProvisionedUserinfoDataSchema = z.object({
-  accountState: z.literal("PROVISIONED"),
+  provisioningStatus: z.literal("PROVISIONED"),
   user: z.object({ id: z.string().min(1) }).catchall(z.unknown()), // forwarded from Core — id strict, rest opaque
   roles: z.array(HeldRoleEnum).min(1), // BFF-validated (see UPSTREAM_CONTRACT_VIOLATION)
   currentRole: z.enum(["GUIDE", "PARTICIPANT"]).nullable(), // BFF-derived (session ∩ switchable roles)
 });
 
-/** GET /v1/userinfo `data`, discriminated by `accountState` (CTL-97 defer-provisioning). */
-export const UserinfoDataSchema = z.discriminatedUnion("accountState", [
+/** GET /v1/userinfo `data`, discriminated by `provisioningStatus` (CTL-97 defer-provisioning). */
+export const UserinfoDataSchema = z.discriminatedUnion("provisioningStatus", [
   PendingUserinfoDataSchema,
   ProvisionedUserinfoDataSchema,
 ]);
@@ -1704,7 +1704,7 @@ export const EnvelopedCurrentRoleSchema = envelopeOf(CurrentRoleDataSchema);
  *  BFF-validated/derived (never Core-verbatim: Core has no `currentRole` at all); `profile` is
  *  Core's opaque role-profile union passthrough, never re-validated here. */
 export const OnboardingCommandDataSchema = z.object({
-  accountState: z.literal("PROVISIONED"),
+  provisioningStatus: z.literal("PROVISIONED"),
   user: z.object({ id: z.string().min(1) }).catchall(z.unknown()),
   roles: z.array(HeldRoleEnum).min(1),
   currentRole: z.enum(["GUIDE", "PARTICIPANT"]),

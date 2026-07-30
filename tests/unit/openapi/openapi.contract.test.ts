@@ -403,7 +403,7 @@ describe("OpenAPI contract — 401 SESSION_EXPIRED on /v1/userinfo", () => {
 });
 
 /**
- * CTL-97 Task 7 — `Userinfo` must be a real OpenAPI discriminated union on `accountState`,
+ * CTL-97 Task 7 — `Userinfo` must be a real OpenAPI discriminated union on `provisioningStatus`,
  * with both variants shaped per the defer-provisioning contract: `PendingUserinfo` (empty
  * roles, null user id) and `ProvisionedUserinfo` (roles min 1, string user id).
  */
@@ -424,10 +424,10 @@ describe("OpenAPI contract — Userinfo discriminated union", () => {
     );
   }
 
-  it("declares an OpenAPI discriminator on accountState with both variants mapped", () => {
+  it("declares an OpenAPI discriminator on provisioningStatus with both variants mapped", () => {
     const userinfo = schemas().Userinfo;
     expect(userinfo).toBeDefined();
-    expect(userinfo.discriminator?.propertyName).toBe("accountState");
+    expect(userinfo.discriminator?.propertyName).toBe("provisioningStatus");
     expect(userinfo.discriminator?.mapping).toEqual({
       PENDING: "#/components/schemas/PendingUserinfo",
       PROVISIONED: "#/components/schemas/ProvisionedUserinfo",

@@ -20,7 +20,7 @@ type HeldRole = z.infer<typeof HeldRoleEnum>;
 /**
  * GET /v1/userinfo — bff-OWNED aggregation (Profile Contract v2 + CTL-97 defer-provisioning).
  * The web app calls this on every page load, so the response is a discriminated union on
- * `accountState`:
+ * `provisioningStatus`:
  *   - `PENDING`  — Google sign-in succeeded but Core has no `users` row yet (Core `GET
  *     /users/me` → 404 `ACCOUNT_NOT_PROVISIONED`, exactly — I7). `user` is derived straight
  *     from the session's Google id_token (never a Core call succeeds here), `roles` is always
@@ -77,12 +77,12 @@ export const getUserinfo = withSession(async (req, res, core) => {
       // (uncaught) so `withSession`'s generic mapping turns it into a 500: a pending session
       // with unusable identity claims is a system error, never a normal pending response.
       /* istanbul ignore next */
-      const session = readSession(req) ?? { accountState: "PROVISIONED" as const };
+      const session = readSession(req) ?? { provisioningStatus: "PROVISIONED" as const };
       const pendingUser = pendingIdentityFromSession(session);
       // NO session write here — see the read-only contract in the header comment above.
       return sendData(
         res,
-        { accountState: "PENDING" as const, user: pendingUser, roles: [], currentRole: null },
+        { provisioningStatus: "PENDING" as const, user: pendingUser, roles: [], currentRole: null },
         UserinfoDataSchema,
       );
     }
@@ -111,8 +111,8 @@ export const getUserinfo = withSession(async (req, res, core) => {
   const switchable = held.filter(isRole);
 
   /* istanbul ignore next -- see the fallback-literal note above; same unreachable-null case. */
-  const session = readSession(req) ?? { accountState: "PROVISIONED" as const };
-  const priorRole = session.accountState === "PROVISIONED" ? session.currentRole : undefined;
+  const session = readSession(req) ?? { provisioningStatus: "PROVISIONED" as const };
+  const priorRole = session.provisioningStatus === "PROVISIONED" ? session.currentRole : undefined;
   const repairedRole: Role | null =
     isRole(priorRole) && switchable.includes(priorRole)
       ? priorRole
@@ -121,7 +121,7 @@ export const getUserinfo = withSession(async (req, res, core) => {
         : null;
 
   try {
-    if (session.accountState === "PENDING") {
+    if (session.provisioningStatus === "PENDING") {
       // Core just confirmed (via getCurrentUser above) that this account IS provisioned — this
       // is the "/userinfo finds Core provisioned" repair path (a PENDING session whose account
       // got provisioned by some other means, e.g. the onboarding flow completing elsewhere).
@@ -146,7 +146,12 @@ export const getUserinfo = withSession(async (req, res, core) => {
 
   sendData(
     res,
-    { accountState: "PROVISIONED" as const, user: cu.user, roles: held, currentRole: repairedRole },
+    {
+      provisioningStatus: "PROVISIONED" as const,
+      user: cu.user,
+      roles: held,
+      currentRole: repairedRole,
+    },
     UserinfoDataSchema,
   );
 });

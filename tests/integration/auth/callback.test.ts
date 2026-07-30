@@ -39,7 +39,7 @@ function txCookie(overrides: Partial<AuthTx> = {}): string {
 }
 
 /** Decrypt a `ctl_sess=...` Set-Cookie pair via the REAL readSession, so a test can assert on
- *  session-internal fields (currentRole, accountState, pendingSince/pendingExpiresAt) that
+ *  session-internal fields (currentRole, provisioningStatus, pendingSince/pendingExpiresAt) that
  *  never round-trip through the response body. */
 function sessionFrom(pair: string | undefined): ReturnType<typeof readSession> {
   if (!pair) return null;
@@ -48,12 +48,12 @@ function sessionFrom(pair: string | undefined): ReturnType<typeof readSession> {
 
 /** `currentRole` only exists on a PROVISIONED session — narrows for the 200-branch assertions. */
 function currentRoleOf(session: ReturnType<typeof sessionFrom>): string | undefined {
-  return session?.accountState === "PROVISIONED" ? session.currentRole : undefined;
+  return session?.provisioningStatus === "PROVISIONED" ? session.currentRole : undefined;
 }
 
 /** Narrows to the PENDING session shape for the 404-signup-pending assertions below. */
 function pendingOf(session: ReturnType<typeof sessionFrom>): PendingSessionData | undefined {
-  return session?.accountState === "PENDING" ? session : undefined;
+  return session?.provisioningStatus === "PENDING" ? session : undefined;
 }
 
 const fetchMock = jest.fn<typeof fetch>();
@@ -275,7 +275,7 @@ describe("GET /auth/callback — Core GET /users/me resolution (CTL-97 Task 5 tr
       expect(isCleared(sessCookie)).toBe(false);
       const pending = pendingOf(sessionFrom(sessCookie));
       expect(pending).toBeDefined();
-      expect(pending!.accountState).toBe("PENDING");
+      expect(pending!.provisioningStatus).toBe("PENDING");
       expect(pending!.idToken).toBe(FAKE_TOKENS.id_token);
       expect(typeof pending!.pendingSince).toBe("number");
       // ~24h absolute lifetime.
@@ -607,7 +607,7 @@ describe("GET /auth/callback — success landing + session (row: 200 provisioned
     expect(sess).toMatch(/^ctl_sess=.+/);
     expect(sess).toMatch(/HttpOnly/i);
     expect(isCleared(sess)).toBe(false);
-    expect(sessionFrom(sess)?.accountState).toBe("PROVISIONED");
+    expect(sessionFrom(sess)?.provisioningStatus).toBe("PROVISIONED");
     expect(isCleared(cookieNamed(res, "ctl_auth_tx"))).toBe(true);
   });
 

@@ -53,7 +53,7 @@ interface SessionTokenFields {
  * there is no Core account yet, so there is no role to have chosen.
  */
 export interface PendingSessionData extends SessionTokenFields {
-  accountState: "PENDING";
+  provisioningStatus: "PENDING";
   /** epoch ms this session first became PENDING (server clock, NOT the id_token's `iat`). */
   pendingSince: number;
   /** epoch ms this session's PENDING state absolutely expires — the central guard in
@@ -64,7 +64,7 @@ export interface PendingSessionData extends SessionTokenFields {
 
 /** An established, provisioned account — Core has a `users` row for this principal. */
 export interface ProvisionedSessionData extends SessionTokenFields {
-  accountState: "PROVISIONED";
+  provisioningStatus: "PROVISIONED";
   /**
    * The role this session is currently using — must be a role the account HOLDS (∈ Core
    * `/users/me` roles); controls the app shell of an established role and is surfaced by the
@@ -75,10 +75,10 @@ export interface ProvisionedSessionData extends SessionTokenFields {
 }
 
 /**
- * Explicit discriminated union on `accountState` (CTL-97 Task 4) — so every consumer reads
+ * Explicit discriminated union on `provisioningStatus` (CTL-97 Task 4) — so every consumer reads
  * account state from the discriminator, never infers it from the presence of `pendingSince` /
  * `currentRole`. See `readSession`'s legacy-normalization comment: a decrypted cookie written
- * BEFORE this field existed has no `accountState` at all and must still resolve as
+ * BEFORE this field existed has no `provisioningStatus` at all and must still resolve as
  * `PROVISIONED` (every session in the wild today IS an established, provisioned one).
  */
 export type SessionData = PendingSessionData | ProvisionedSessionData;
@@ -97,7 +97,7 @@ function encrypt(payload: object): string {
 }
 
 /** Decrypts to whatever JSON payload was encrypted — `SessionData` (possibly a pre-Task-4
- *  legacy shape with no `accountState`) or an `AuthTx`, depending on which cookie the caller
+ *  legacy shape with no `provisioningStatus`) or an `AuthTx`, depending on which cookie the caller
  *  is reading. Returns `null` on any failure (tampered/garbage token) or missing input. */
 function decrypt(token: string): unknown {
   try {
@@ -120,19 +120,19 @@ function decrypt(token: string): unknown {
  * (readSession's callers) sees a well-formed union member.
  *
  * CRITICAL — legacy sessions: cookies written before CTL-97 Task 4 carry
- * `{ idToken, refreshToken, expiresAt, currentRole? }` with NO `accountState` at all. Treating
- * an absent (or any unrecognised) `accountState` as PROVISIONED is deliberate: every session
+ * `{ idToken, refreshToken, expiresAt, currentRole? }` with NO `provisioningStatus` at all. Treating
+ * an absent (or any unrecognised) `provisioningStatus` as PROVISIONED is deliberate: every session
  * that exists today, sight-unseen, IS an established, provisioned account — there was no
  * PENDING concept before this change — so no existing logged-in user is logged out on cutover.
  */
 function normalizeSession(raw: unknown): SessionData {
   const obj = raw as Record<string, unknown>;
-  if (obj.accountState === "PENDING") {
+  if (obj.provisioningStatus === "PENDING") {
     // Trust boundary: this cookie is our own encrypted payload; the same blind-trust cast
     // decrypt() always used (`JSON.parse(out) as SessionData`) now lives here instead.
     return obj as unknown as PendingSessionData;
   }
-  return { ...obj, accountState: "PROVISIONED" } as ProvisionedSessionData;
+  return { ...obj, provisioningStatus: "PROVISIONED" } as ProvisionedSessionData;
 }
 
 export function readSession(req: Request): SessionData | null {
@@ -184,7 +184,7 @@ export function clearSession(res: Response): void {
 export function writePendingSession(res: Response, data: SessionTokenFields): void {
   const now = clock.now();
   const session: PendingSessionData = {
-    accountState: "PENDING",
+    provisioningStatus: "PENDING",
     pendingSince: now,
     pendingExpiresAt: now + PENDING_TTL_SEC * 1000,
     idToken: data.idToken,
@@ -210,7 +210,7 @@ export function convertToProvisioned(
   currentRole?: Role,
 ): void {
   const session: ProvisionedSessionData = {
-    accountState: "PROVISIONED",
+    provisioningStatus: "PROVISIONED",
     currentRole,
     idToken: data.idToken,
     accessToken: data.accessToken,

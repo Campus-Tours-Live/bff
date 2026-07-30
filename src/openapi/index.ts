@@ -262,7 +262,7 @@ apiRoute({
   description:
     "Bootstrap/session read the frontend calls on every page load. BFF-OWNED aggregation " +
     "(Profile Contract v2 + CTL-97 defer-provisioning) — no longer a transparent Core proxy: " +
-    "the response is discriminated by `accountState`. `PENDING` means Google sign-in " +
+    "the response is discriminated by `provisioningStatus`. `PENDING` means Google sign-in " +
     "succeeded but Core has no account yet (identity is read straight from the session's " +
     "id_token; `roles: []`, `currentRole: null`). `PROVISIONED` composes Core account " +
     "identity + held roles (`GET /users/me`) with THIS bff session's `currentRole`, which " +

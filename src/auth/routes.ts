@@ -268,7 +268,7 @@ authRouter.get("/callback", async (req, res) => {
   // (see the persistence-order note above writeSession further down). Reaching this point means
   // `GET /users/me` returned 200 — Core confirmed the account exists (`cu` above).
   const session: ProvisionedSessionData = {
-    accountState: "PROVISIONED",
+    provisioningStatus: "PROVISIONED",
     idToken: tokens.id_token,
     accessToken: tokens.access_token,
     refreshToken: tokens.refresh_token,

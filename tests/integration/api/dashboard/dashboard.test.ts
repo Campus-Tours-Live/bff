@@ -145,7 +145,7 @@ describe("GET /v1/dashboard", () => {
     // all (there's no Core account yet to have chosen one), so it must fall into the SAME
     // participant default as a PROVISIONED session with no role set — never throw.
     cookie = mintSessionCookie({
-      accountState: "PENDING",
+      provisioningStatus: "PENDING",
       pendingSince: Date.now(),
       pendingExpiresAt: Date.now() + 24 * 60 * 60 * 1000,
     });

@@ -87,7 +87,7 @@ describe("bff booking module", () => {
   it("an EXPIRED PENDING session on a mutation route (POST /v1/bookings) → 401 SESSION_EXPIRED, destroys the cookie, and never calls Core", async () => {
     const now = Date.now();
     const pendingCookie = mintSessionCookie({
-      accountState: "PENDING",
+      provisioningStatus: "PENDING",
       pendingSince: now - 25 * 60 * 60 * 1000,
       pendingExpiresAt: now - 1,
     });

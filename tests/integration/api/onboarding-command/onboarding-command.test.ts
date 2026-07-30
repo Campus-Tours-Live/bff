@@ -6,9 +6,9 @@ import { coreErr, coreOk, mintSessionCookie, mockCoreByPath, pathOf } from "../.
 import { EnvelopedOnboardingCommandSchema } from "@/openapi/schemas.js";
 
 /** A successful Core `POST /users/me/roles/{guide|participant}` 201 body — the enveloped
- *  `OnboardingResponse` (Profile Contract v2 onboarding command). Core sends NO `accountState`
+ *  `OnboardingResponse` (Profile Contract v2 onboarding command). Core sends NO `provisioningStatus`
  *  and NO `currentRole` — both are bff session state (Core's account-lifecycle status is on
- *  `user.accountStatus`). The bff SYNTHESIZES its own `accountState: "PROVISIONED"` discriminator
+ *  `user.accountStatus`). The bff SYNTHESIZES its own `provisioningStatus: "PROVISIONED"` discriminator
  *  + `currentRole`; the two must never be confused (see the not-verbatim assertions below). */
 function coreOnboardingOk(overrides: Record<string, unknown> = {}) {
   return coreOk({
@@ -41,7 +41,7 @@ function coreCodedErr(status: number, code: string, title = "Error") {
 function mintPendingCookie(overrides: Record<string, unknown> = {}): string {
   const now = Date.now();
   return mintSessionCookie({
-    accountState: "PENDING",
+    provisioningStatus: "PENDING",
     idToken: "fake-id-token",
     pendingSince: now,
     pendingExpiresAt: now + 24 * 60 * 60 * 1000,
@@ -132,11 +132,11 @@ describe("POST /v1/users/me/roles/{role} — Core 201 success, session conversio
     const res = await request(app).post("/v1/users/me/roles/guide").set("Cookie", cookie).send({});
 
     expect(res.status).toBe(201);
-    // NOT Core's body verbatim: Core's 201 has NO accountState and NO currentRole at all (its
+    // NOT Core's body verbatim: Core's 201 has NO provisioningStatus and NO currentRole at all (its
     // lifecycle status is on user.accountStatus); the bff SYNTHESIZES its own session
-    // discriminator accountState "PROVISIONED" AND a currentRole it itself added — proving the
+    // discriminator provisioningStatus "PROVISIONED" AND a currentRole it itself added — proving the
     // response is constructed by the bff, never passed through.
-    expect(res.body.data.accountState).toBe("PROVISIONED");
+    expect(res.body.data.provisioningStatus).toBe("PROVISIONED");
     expect(res.body.data.currentRole).toBe("GUIDE");
     expect(res.body.data.acquiredRole).toBe("GUIDE");
     expect(res.body.data.roles).toEqual(["GUIDE"]);
@@ -147,7 +147,7 @@ describe("POST /v1/users/me/roles/{role} — Core 201 success, session conversio
     const rotated = ctlSessCookieFrom(res);
     expect(rotated).toBeDefined();
     const session = sessionFrom(rotated);
-    expect(session).toMatchObject({ accountState: "PROVISIONED", currentRole: "GUIDE" });
+    expect(session).toMatchObject({ provisioningStatus: "PROVISIONED", currentRole: "GUIDE" });
     expect(session).not.toHaveProperty("pendingSince");
     expect(session).not.toHaveProperty("pendingExpiresAt");
     const rawSetCookie = res.headers["set-cookie"] as unknown as string[];
@@ -260,10 +260,10 @@ describe("POST /v1/users/me/roles/{role} — session conversion failure (500) + 
     const userinfoRes = await request(app).get("/v1/userinfo").set("Cookie", cookie);
 
     expect(userinfoRes.status).toBe(200);
-    expect(userinfoRes.body.data.accountState).toBe("PROVISIONED");
+    expect(userinfoRes.body.data.provisioningStatus).toBe("PROVISIONED");
     expect(userinfoRes.body.data.currentRole).toBe("GUIDE");
     const repaired = sessionFrom(ctlSessCookieFrom(userinfoRes));
-    expect(repaired).toMatchObject({ accountState: "PROVISIONED", currentRole: "GUIDE" });
+    expect(repaired).toMatchObject({ provisioningStatus: "PROVISIONED", currentRole: "GUIDE" });
   });
 });
 
@@ -280,7 +280,7 @@ describe("POST /v1/users/me/roles/{role} — Core 4xx relays verbatim, session n
     expect(res.body).toMatchObject({ code: "ROLE_ALREADY_GRANTED" });
     expect(res.headers["set-cookie"]).toBeUndefined();
     // The original cookie still decodes as PENDING — never converted.
-    expect(sessionFrom(cookie)).toMatchObject({ accountState: "PENDING" });
+    expect(sessionFrom(cookie)).toMatchObject({ provisioningStatus: "PENDING" });
   });
 
   it("Core 409 ROLE_NOT_ELIGIBLE -> relayed verbatim (status + code)", async () => {
