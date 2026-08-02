@@ -55,7 +55,7 @@ describe("API docs", () => {
     expect(res.status).toBe(200);
     expect(res.body.openapi).toBe("3.1.0");
     expect(Object.keys(res.body.paths)).toEqual(
-      expect.arrayContaining(["/v1/dashboard", "/v1/onboarding", "/auth/login", "/auth/session"]),
+      expect.arrayContaining(["/v1/dashboard", "/auth/login", "/auth/session"]),
     );
     // Proxied /v1/* paths are pointed at the Core spec, not re-documented here.
     expect(res.body.externalDocs.url).toContain("/v3/api-docs");

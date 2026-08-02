@@ -1,6 +1,14 @@
 import request from "supertest";
 import { app } from "@/app.js";
+import { readAuthTx } from "@/session.js";
 import { cookieNamed } from "./_helpers.js";
+
+/** Decrypt a `ctl_auth_tx=...` Set-Cookie pair via the REAL readAuthTx, so a test can assert on
+ *  tx-internal fields (requestedRole) that never round-trip anywhere else observable. */
+function txFrom(pair: string | undefined): ReturnType<typeof readAuthTx> {
+  if (!pair) return null;
+  return readAuthTx({ headers: { cookie: pair } } as unknown as Parameters<typeof readAuthTx>[0]);
+}
 
 /**
  * GET /auth/login drives the REAL Google PKCE helpers (createPkce / randomState /
@@ -54,6 +62,22 @@ describe("GET /auth/login", () => {
     expect(res.status).toBe(302);
     expect(res.headers.location).toContain("accounts.google.com");
     expect(cookieNamed(res, "ctl_auth_tx")).toBeDefined();
+  });
+
+  it("writes ?role= into the auth transaction as requestedRole (CTL-97)", async () => {
+    const res = await request(app).get("/auth/login").query({ role: "GUIDE" });
+
+    expect(res.status).toBe(302);
+    const txCookie = cookieNamed(res, "ctl_auth_tx");
+    expect(txFrom(txCookie)).toMatchObject({ requestedRole: "GUIDE" });
+  });
+
+  it("leaves requestedRole unset when ?role= is absent or not a recognised role", async () => {
+    const noRole = await request(app).get("/auth/login");
+    expect(txFrom(cookieNamed(noRole, "ctl_auth_tx"))?.requestedRole).toBeUndefined();
+
+    const badRole = await request(app).get("/auth/login").query({ role: "ADMIN" });
+    expect(txFrom(cookieNamed(badRole, "ctl_auth_tx"))?.requestedRole).toBeUndefined();
   });
 
   it("redirects regardless of an unsafe returnTo (sanitized into the tx, not the URL)", async () => {

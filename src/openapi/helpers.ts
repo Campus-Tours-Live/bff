@@ -48,6 +48,28 @@ export function problemResponse(
 }
 
 /**
+ * Build a `problem+json` response entry carrying MULTIPLE named examples under the SAME
+ * status code — for the (rare) case where one HTTP status covers more than one stable
+ * `code` (e.g. a 409 that can be `ROLE_ALREADY_GRANTED` OR `ROLE_NOT_ELIGIBLE`). OpenAPI has
+ * only one response object per status, so the per-code distinction lives in `examples`
+ * rather than a second response entry.
+ */
+export function problemResponseMulti(
+  description: string,
+  examples: Record<string, { summary: string; value: z.infer<typeof Problem> }>,
+): ResponseConfig {
+  return {
+    description,
+    content: {
+      "application/problem+json": {
+        schema: Problem,
+        examples,
+      },
+    },
+  };
+}
+
+/**
  * A `200` response whose body is the standard `{ data, meta }` envelope around
  * `dataSchema`, carrying either a single `example` or named `examples`. The envelope is
  * baked in here so contributors never hand-roll (and so never forget) it.
@@ -110,6 +132,11 @@ export function problem422(code: string, title: string, description: string): Re
 /** Standard `400 Bad Request` with a stable `code` (e.g. AUTH_TX_MISSING). */
 export function problem400(code: string, title: string, description: string): ResponseConfig {
   return problemResponse(description, problem(400, title, code));
+}
+
+/** Standard `403 Forbidden` with a stable `code` (e.g. ROLE_NOT_HELD). */
+export function problem403(code: string, title: string, description: string): ResponseConfig {
+  return problemResponse(description, problem(403, title, code));
 }
 
 /** Standard `404 Not Found` with a stable `code` (e.g. BOOKING_NOT_FOUND). */

@@ -1,7 +1,8 @@
 import type { Request, Response } from "express";
 import { readSession, writeSession, type SessionData } from "../../session.js";
 import { refreshTokens, GoogleTokenError } from "../../auth/google.js";
-import { TransientAuthError } from "./errors.js";
+import { clock } from "../../lib/clock.js";
+import { TransientAuthError, PendingSessionExpiredError } from "./errors.js";
 
 /**
  * Refresh this long before expiry. The old 60s was too tight: a token endpoint that takes
@@ -46,12 +47,31 @@ function refreshOnce(refreshToken: string): ReturnType<typeof refreshTokens> {
   return flight;
 }
 
-/** Resolve the Google id_token to forward to Core, silently refreshed near expiry. */
+/**
+ * Resolve the Google id_token to forward to Core, silently refreshed near expiry.
+ *
+ * CENTRAL PENDING-EXPIRY GUARD (CTL-97 Task 4): a PENDING session (authenticated with Google,
+ * not yet provisioned in Core) carries a 24h ABSOLUTE lifetime. Once `clock.now() >=
+ * pendingExpiresAt`, this throws `PendingSessionExpiredError` BEFORE returning any bearer and
+ * BEFORE any Core call — `withSession` (the shared caller of `resolveBearer`) catches it,
+ * destroys the cookie, and answers 401 SESSION_EXPIRED, uniformly for every protected `/v1`
+ * route. The decoded (expired) session must never be used past this point in the request.
+ *
+ * State is read from the `provisioningStatus` discriminator ONLY — never inferred from the presence
+ * of `pendingExpiresAt` — so a PROVISIONED (or legacy-normalized-provisioned) session ignores
+ * pending fields entirely, even if some carried over by accident.
+ */
 async function bearerForSession(
   session: SessionData | null,
   res: Response,
 ): Promise<string | null> {
-  if (!session || !session.idToken) return null;
+  if (!session) return null;
+
+  if (session.provisioningStatus === "PENDING" && clock.now() >= session.pendingExpiresAt) {
+    throw new PendingSessionExpiredError();
+  }
+
+  if (!session.idToken) return null;
 
   const nearExpiry =
     session.expiresAt !== undefined && session.expiresAt - Date.now() < REFRESH_WINDOW_MS;
@@ -59,12 +79,29 @@ async function bearerForSession(
 
   try {
     const tokens = await refreshOnce(session.refreshToken);
-    const updated: SessionData = {
+    const refreshedTokenFields = {
       idToken: tokens.id_token ?? session.idToken,
       accessToken: tokens.access_token,
       refreshToken: tokens.refresh_token ?? session.refreshToken,
       expiresAt: Date.now() + tokens.expires_in * 1000,
     };
+
+    if (session.provisioningStatus === "PENDING") {
+      // A silent token refresh must NEVER move a pending session's absolute lifetime: spread
+      // the existing session so provisioningStatus/pendingSince/pendingExpiresAt stay EXACTLY as
+      // they were, overwriting only the token fields. Also cap the cookie's own Max-Age at
+      // the remaining pending window (not the default 7d) — a refresh must not extend the
+      // pending cookie's logical lifetime either.
+      const updated = { ...session, ...refreshedTokenFields };
+      const maxAgeSec = Math.max(0, Math.ceil((session.pendingExpiresAt - clock.now()) / 1000));
+      writeSession(res, updated, maxAgeSec); // rotate session cookie
+      return updated.idToken;
+    }
+
+    // Spread the existing session FIRST so non-token fields (currentRole) survive a silent
+    // refresh — this fires on every near-expiry request, so without the spread a session's
+    // current role would be silently forgotten roughly every REFRESH_WINDOW_MS.
+    const updated = { ...session, ...refreshedTokenFields };
     writeSession(res, updated); // rotate session cookie
     // Unreachable: the early guard returns null when the session has no idToken, so updated.idToken is truthy here.
     /* istanbul ignore next */

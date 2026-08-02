@@ -14,7 +14,7 @@ function sessCookie(idToken = "id-tok"): string {
       return res;
     },
   };
-  writeSession(res as unknown as Response, { idToken });
+  writeSession(res as unknown as Response, { provisioningStatus: "PROVISIONED", idToken });
   const setCookie = cookies[0];
   if (!setCookie) throw new Error("writeSession did not append a cookie");
   return setCookie.split(";")[0] as string;
@@ -83,7 +83,10 @@ describe("GET /auth/session", () => {
         return res;
       },
     };
-    writeSession(res as unknown as Response, { accessToken: "only-access" });
+    writeSession(res as unknown as Response, {
+      provisioningStatus: "PROVISIONED",
+      accessToken: "only-access",
+    });
     const pair = (cookies[0] as string).split(";")[0] as string;
 
     const out = await request(app).get("/auth/session").set("Cookie", pair);

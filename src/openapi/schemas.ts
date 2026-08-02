@@ -1,6 +1,6 @@
 /**
  * Zod schemas for Contract A — the single source of truth behind BOTH the OpenAPI
- * document (see ./index.ts) and runtime validation (the onboarding `role` guard and the
+ * document (see ./index.ts) and runtime validation (the
  * dev-only response-shape assertions in src/api/_shared/envelope.ts + the contract test).
  *
  * Two families live here:
@@ -10,8 +10,8 @@
  *      at the bottom) — deliberately LOOSE on the opaque objects the BFF forwards verbatim
  *      from Core (Core may add fields) and STRICT on the parts the BFF actually owns: the
  *      `{ data, meta }` envelope, the `kind`/`role` discriminators, and derived fields
- *      (`canPublish`, the `offerings`/`upcomingBookings` array shapes, the `Progress`
- *      structure, `authenticated`). This split lets CI catch "a handler changed shape but
+ *      (`canPublish`, the `offerings`/`upcomingBookings` array shapes,
+ *      `authenticated`). This split lets CI catch "a handler changed shape but
  *      the schema/spec didn't" without false-failing on legitimate Core passthrough drift.
  */
 import { z } from "zod";
@@ -49,17 +49,27 @@ registry.registerComponent("securitySchemes", "sessionCookie", {
 // --- Enumerations (exact values sourced from backend + frontend Contract A) ---
 
 /**
- * `role` request/response discriminator (dashboard `kind`, onboarding `role`). Exported so
- * the onboarding handler validates its `role` query param against the SAME enum the spec
- * documents — one source of truth for the accepted values.
+ * The two role values Core itself uses (`user_roles`, `GET /users/me` `roles`, and this
+ * session's `currentRole`) — UPPERCASE. Used by the `Userinfo` schema below.
  */
-export const RoleEnum = z.enum(["guide", "participant"]);
+export const CoreRoleEnum = z.enum(["GUIDE", "PARTICIPANT"]);
 
 /**
- * Guide application status (a.k.a. `guideStatus`, Core `application_status`). `DRAFT`
- * = profile started but not yet submitted; only `APPROVED` unlocks publishing.
+ * Every role value an account can hold (Core `user_roles`), including the staff-only roles
+ * (`ADMIN`, `SUPPORT`) that only ever appear in `Userinfo.roles` — never a switchable/onboardable
+ * `currentRole` or switch/onboarding request `role` (those stay restricted to
+ * {@link CoreRoleEnum}: you can't switch to or onboard into a staff role).
  */
-export const ApplicationStatusEnum = z.enum(["DRAFT", "PENDING_REVIEW", "APPROVED", "REJECTED"]);
+export const HeldRoleEnum = z.enum(["GUIDE", "PARTICIPANT", "ADMIN", "SUPPORT"]);
+
+/**
+ * Guide application status (`GuideProfile.guideStatus`, forwarded from Core). Profile
+ * Contract v2 Phase 4 (verification-driven lifecycle): `PENDING` = submitted, awaiting
+ * verification; only `VERIFIED` unlocks publishing. There is no longer a `DRAFT` value —
+ * a guide profile either doesn't exist yet (null) or has been submitted (`PENDING` at
+ * minimum).
+ */
+export const GuideStatusEnum = z.enum(["PENDING", "VERIFIED", "REJECTED"]);
 
 /** Guide identity/verification status (deferred in onboarding — often null for now). */
 export const VerificationStatusEnum = z.enum(["PENDING", "VERIFIED", "REJECTED"]);
@@ -165,33 +175,465 @@ export function envelope<T>(data: T): { data: T; meta: { requestId: string } } {
   return { data, meta: { requestId: REQUEST_ID_EXAMPLE } };
 }
 
-// --- Domain sub-schemas (forwarded from Core; field names per Contract A) ---
+// --- GET /v1/userinfo (bff-owned aggregation) ---
 
-/** A guide's public/profile record (Core, forwarded verbatim by the BFF). */
-export const GuideProfile = registry.register(
-  "GuideProfile",
+/** The `user` block of Core `GET /users/me`, forwarded verbatim (Profile Contract v2). */
+export const UserSummarySchema = z.object({
+  id: z.string().openapi({ description: "Account id.", example: "u1" }),
+  firstName: z.string().nullable().openapi({ description: "First name.", example: "Gina" }),
+  lastName: z.string().nullable().openapi({ description: "Last name.", example: "Guide" }),
+  displayName: z
+    .string()
+    .nullable()
+    .openapi({ description: "Display name.", example: "Gina Guide" }),
+  email: z
+    .string()
+    .nullable()
+    .openapi({ description: "Account email.", example: "gina@example.com" }),
+  accountStatus: z
+    .string()
+    .nullable()
+    .openapi({ description: "Account lifecycle status.", example: "ACTIVE" }),
+  ageBand: z.string().nullable().openapi({ description: "Age band.", example: "ADULT" }),
+  createdAt: z.string().openapi({
+    description: "Account creation timestamp, ISO-8601 UTC.",
+    example: "2025-03-15T00:00:00.000Z",
+  }),
+});
+
+/**
+ * The pending identity summary (`PendingUserInfo`, src/api/userinfo/pendingIdentity.ts) —
+ * surfaced instead of {@link UserSummarySchema} when Core has no `users` row for this
+ * principal yet (CTL-97 defer-provisioning). `id` is always `null`; every other field is
+ * extracted from the session's Google id_token, never from Core.
+ */
+export const PendingUserSummarySchema = z.object({
+  id: z.null().openapi({
+    description: "Always null — no Core account exists yet.",
+    example: null,
+  }),
+  email: z.string().openapi({
+    description: "Verified email extracted from the Google id_token.",
+    example: "ana@example.com",
+  }),
+  firstName: z
+    .string()
+    .nullable()
+    .openapi({ description: "First name (id_token `given_name`).", example: "Ana" }),
+  lastName: z
+    .string()
+    .nullable()
+    .openapi({ description: "Last name (id_token `family_name`).", example: "Silva" }),
+  displayName: z
+    .string()
+    .nullable()
+    .openapi({ description: "Display name (id_token `name`).", example: "Ana Silva" }),
+});
+
+/**
+ * `GET /v1/userinfo` PENDING variant (CTL-97 defer-provisioning) — Google sign-in succeeded but
+ * Core has no `users` row for this principal yet. `roles` is always empty and `currentRole`
+ * always null: there is no Core account to hold a role or have one active.
+ */
+const PendingUserinfo = z
+  .object({
+    provisioningStatus: z.literal("PENDING").openapi({
+      description: "Discriminator — authenticated with Google, awaiting Core provisioning.",
+      example: "PENDING",
+    }),
+    user: PendingUserSummarySchema.openapi({ description: "Pending identity (`id` is null)." }),
+    // `.max(0)` (not `.length(0)`) deliberately: zod-to-openapi@8's array mapper only reads
+    // `min_length`/`max_length` checks to derive `minItems`/`maxItems` — the exact-length
+    // check `.length()` produces isn't recognised, so it would silently vanish from the
+    // published schema. `.max(0)` is runtime-equivalent (arrays have an implicit min of 0)
+    // and DOES surface as `maxItems: 0` in the generated OpenAPI document.
+    roles: z.array(CoreRoleEnum).max(0).openapi({
+      description: "Always empty — no Core account exists yet to hold any role.",
+      example: [],
+    }),
+    currentRole: z.null().openapi({
+      description: "Always null — there is no Core account yet to have chosen a role.",
+      example: null,
+    }),
+  })
+  .openapi("PendingUserinfo", {
+    description: "Signed in with Google; awaiting Core provisioning.",
+  });
+
+/**
+ * `GET /v1/userinfo` PROVISIONED variant — Core has a `users` row for this principal. Composes
+ * Core `GET /users/me` (`user`, `roles`) with THIS session's `currentRole` (Profile Contract v2:
+ * session state, never a Core value).
+ */
+const ProvisionedUserinfo = z
+  .object({
+    provisioningStatus: z.literal("PROVISIONED").openapi({
+      description: "Discriminator — Core has provisioned this account.",
+      example: "PROVISIONED",
+    }),
+    user: UserSummarySchema.openapi({ description: "Signed-in account identity." }),
+    roles: z.array(HeldRoleEnum).min(1).openapi({
+      description:
+        "Roles the account holds — includes staff-only ADMIN/SUPPORT alongside GUIDE/PARTICIPANT.",
+    }),
+    currentRole: CoreRoleEnum.nullable().openapi({
+      description:
+        "The role this bff session currently has active; null when none is chosen yet, or " +
+        "the previously-current role is no longer held (re-validated against `roles` on " +
+        "every call).",
+      example: "GUIDE",
+    }),
+  })
+  .openapi("ProvisionedUserinfo", {
+    description: "Signed-in, provisioned account.",
+  });
+
+/**
+ * `GET /v1/userinfo` response `data` (src/api/userinfo/userinfo.handler.ts) — the bootstrap
+ * read the frontend calls on every page load, discriminated by `provisioningStatus` (CTL-97
+ * defer-provisioning): `PENDING` (authenticated with Google, no Core account yet) vs
+ * `PROVISIONED` (Core has an account — see {@link ProvisionedUserinfo}).
+ */
+export const Userinfo = registry.register(
+  "Userinfo",
+  z
+    .discriminatedUnion("provisioningStatus", [PendingUserinfo, ProvisionedUserinfo])
+    .openapi({ description: "Signed-in identity, discriminated PENDING vs PROVISIONED." }),
+);
+
+// --- POST /v1/session/current-role (bff-owned) ---
+
+/** Request body for `POST /v1/session/current-role`. */
+export const SetCurrentRoleRequestSchema = z.object({
+  role: CoreRoleEnum.openapi({
+    description: "The role to make active for this session — must be a role the account holds.",
+    example: "GUIDE",
+  }),
+});
+
+/**
+ * `POST /v1/session/current-role` response `data` (src/api/session/current-role.handler.ts) —
+ * the manual role-switch counterpart to `Userinfo.currentRole`. Deliberately lean: just the
+ * now-current role, echoed back on success.
+ */
+export const CurrentRoleSchema = registry.register(
+  "CurrentRole",
   z
     .object({
-      userId: z
+      currentRole: CoreRoleEnum.openapi({
+        description: "The role this session is now active as (echo of the request `role`).",
+        example: "GUIDE",
+      }),
+    })
+    .openapi("CurrentRole", { description: "This session's newly-switched current role." }),
+);
+
+// --- POST /v1/users/me/roles/{guide|participant} (bff-owned onboarding command) ---
+
+/**
+ * Participant onboarding command's `participantType` — the controlled vocabulary Core
+ * validates at first-time onboarding (`ParticipantOnboardingRequest.participantType`,
+ * backend `web/dto/ParticipantOnboardingRequest.java`). Distinct from {@link
+ * ParticipantTypeEnum} (`STUDENT`/`PARENT`), which describes the profile's booking-guardian
+ * role, not this onboarding-time category.
+ */
+export const ParticipantOnboardingTypeEnum = z.enum([
+  "HIGH_SCHOOL",
+  "PROSPECTIVE",
+  "TRANSFER",
+  "INTERNATIONAL",
+  "PARENT",
+  "OTHER",
+]);
+
+/**
+ * Controlled-vocabulary tour topic a participant can express interest in AT ONBOARDING
+ * (`ParticipantOnboardingRequest.topicsOfInterest`). Core enforces this fixed set at the
+ * onboarding command via the `@TourTopicCodes` bean-validation constraint (derived from the
+ * `TourTopic` enum) — an out-of-vocabulary value there is `422 VALIDATION_FAILED` (CTL-97). This
+ * is DELIBERATELY distinct from {@link ParticipantProfile}'s `topicsOfInterest`, which is FREE-FORM
+ * on the PATCH-side profile edit (any string; no fixed vocabulary — Core's PATCH DTO carries no
+ * `allowableValues`). Do not "unify" the two: onboarding is controlled, profile is free-form.
+ */
+export const OnboardingTopicOfInterestEnum = z.enum([
+  "GENERAL_CAMPUS",
+  "DORM_HOUSING",
+  "DINING_STUDENT_LIFE",
+  "MAJOR_SPECIFIC",
+  "INTERNATIONAL_STUDENT",
+  "PARENT_FOCUSED",
+  "FRESHMAN",
+  "TRANSFER",
+]);
+
+/**
+ * `POST /v1/users/me/roles/guide` request body — Core's `GuideOnboardingRequest`
+ * (backend `web/dto/GuideOnboardingRequest.java`), forwarded verbatim. Full onboarding-time
+ * create: unlike the partial-PATCH `GuideProfile` update (which uses a `submit` flag), this
+ * command implies submission just by being called, so Core enforces `universityId`, `major`,
+ * `bio`, at least one `tourTopics` entry, `verificationEmail`, and `degree` as REQUIRED —
+ * a missing one is 422 `VALIDATION_FAILED`.
+ */
+export const GuideOnboardingRequestSchema = registry.register(
+  "GuideOnboardingRequest",
+  z
+    .object({
+      firstName: z.string().optional().openapi({ description: "First name.", example: "Maya" }),
+      lastName: z.string().optional().openapi({ description: "Last name.", example: "Chen" }),
+      universityId: z.string().openapi({
+        description: "Id of the university the guide is affiliated with.",
+        example: "u1a2c3d4-0000-4000-8000-000000000003",
+      }),
+      major: z.string().openapi({ description: "Field of study.", example: "Marine Biology" }),
+      classYear: z
+        .string()
+        .regex(/^\d{4}$/)
+        .optional()
+        .openapi({
+          description: "Class year, as a 4-digit year (e.g. graduating class).",
+          example: "2027",
+        }),
+      bio: z.string().openapi({
+        description: "Guide biography.",
+        example: "Third-year student and campus tour lead.",
+      }),
+      spokenLanguages: z
+        .array(z.string())
+        .optional()
+        .openapi({
+          description: "BCP-47 language tags the guide speaks.",
+          example: ["en-US"],
+        }),
+      tourTopics: z
+        .array(z.string())
+        .min(1)
+        .openapi({
+          description:
+            "Free-text tour topics the guide focuses on — at least one entry is required.",
+          example: ["Dorm & housing tours"],
+        }),
+      verificationEmail: z.string().email().openapi({
+        description: "University email used for verification (method UNIVERSITY_EMAIL).",
+        example: "maya.chen@ncu.edu",
+      }),
+      degree: z.string().openapi({
+        description:
+          "Degree level the guide is pursuing/holds, as returned by GET /v1/meta/degrees " +
+          "for the selected university (the College Scorecard credential title).",
+        example: "Bachelor's Degree",
+      }),
+      entryYear: z
+        .number()
+        .int()
+        .openapi({
+          description:
+            "Year the guide entered this university. Required; Core range-checks it against " +
+            "GET /v1/meta/enrollment-years, which is also what the form validates against.",
+          example: 2023,
+        }),
+    })
+    .openapi("GuideOnboardingRequest", {
+      description:
+        "Guide onboarding command body — creates the GUIDE role + profile in one call. " +
+        "`universityId`, `major`, `bio`, `tourTopics` (≥1), `verificationEmail`, `degree`, and " +
+        "`entryYear` are required; a missing one is 422 VALIDATION_FAILED.",
+    }),
+);
+
+/** Worked example for {@link GuideOnboardingRequestSchema} (mirrors the Java DTO's examples). */
+export const guideOnboardingRequestExample = {
+  firstName: "Maya",
+  lastName: "Chen",
+  universityId: "u1a2c3d4-0000-4000-8000-000000000003",
+  major: "Marine Biology",
+  classYear: "2027",
+  bio: "Third-year student and campus tour lead.",
+  spokenLanguages: ["en-US"],
+  tourTopics: ["Dorm & housing tours"],
+  verificationEmail: "maya.chen@ncu.edu",
+  degree: "Bachelor's Degree",
+  entryYear: 2023,
+};
+
+/**
+ * `POST /v1/users/me/roles/participant` request body — Core's `ParticipantOnboardingRequest`
+ * (backend `web/dto/ParticipantOnboardingRequest.java`), forwarded verbatim. Lighter than
+ * guide onboarding: `ParticipantService.updateProfile` defaults `participantType` to
+ * `PROSPECTIVE` server-side for the PATCH path, but THIS command requires the caller to pick
+ * one explicitly — the minimal sensible first-time-required field. A missing/invalid value is
+ * 422 `VALIDATION_FAILED`.
+ */
+export const ParticipantOnboardingRequestSchema = registry.register(
+  "ParticipantOnboardingRequest",
+  z
+    .object({
+      firstName: z.string().optional().openapi({ description: "First name.", example: "Sam" }),
+      lastName: z.string().optional().openapi({ description: "Last name.", example: "Rivera" }),
+      displayName: z.string().optional().openapi({
+        description: "Public display name.",
+        example: "Sam Rivera",
+      }),
+      participantType: ParticipantOnboardingTypeEnum.openapi({
+        description: "Participant type (controlled vocabulary).",
+        example: "PROSPECTIVE",
+      }),
+      gradeLevel: z
         .string()
         .optional()
-        .openapi({ description: "Guide's user id.", example: "u_guide_123" }),
-      firstName: z.string().optional().openapi({ description: "Given name.", example: "Ada" }),
-      lastName: z.string().optional().openapi({ description: "Family name.", example: "Lovelace" }),
-      displayName: z
-        .string()
+        .openapi({
+          description:
+            "Grade / education level. Free-text (no controlled vocabulary); typical values " +
+            'include "High school senior", "College freshman", or "Graduate".',
+          example: "High school senior",
+        }),
+      intendedMajor: z.string().optional().openapi({
+        description: "Intended field of study.",
+        example: "Computer Science",
+      }),
+      universitiesOfInterest: z
+        .array(z.string())
         .optional()
-        .openapi({ description: "Name shown to participants.", example: "Ada L." }),
-      email: z
-        .string()
+        .openapi({
+          description:
+            "College Scorecard school ids the participant is interested in, as returned by " +
+            "GET /v1/meta/universities.",
+          example: ["166683"],
+        }),
+      topicsOfInterest: z
+        .array(OnboardingTopicOfInterestEnum)
         .optional()
-        .openapi({ description: "Contact email.", example: "ada@example.edu" }),
-      accountStatus: z
-        .string()
-        .optional()
-        .openapi({ description: "Overall account status from Core.", example: "ACTIVE" }),
+        .openapi({
+          description: "Tour topic codes the participant is interested in (controlled vocabulary).",
+          example: ["DORM_HOUSING"],
+        }),
+      preferredLanguage: z.string().optional().openapi({
+        description: "Preferred BCP-47 language tag.",
+        example: "en-US",
+      }),
+      timezone: z.string().optional().openapi({
+        description: "IANA timezone.",
+        example: "America/New_York",
+      }),
+      accessibilityPreferences: z.string().optional().openapi({
+        description: "Free-form accessibility preferences (stored as JSON).",
+        example: "wheelchair-access",
+      }),
+    })
+    .openapi("ParticipantOnboardingRequest", {
+      description:
+        "Participant onboarding command body — creates the PARTICIPANT role + profile in " +
+        "one call. Only `participantType` is required; a missing/invalid value is 422 " +
+        "VALIDATION_FAILED.",
+    }),
+);
+
+/**
+ * Worked example for {@link ParticipantOnboardingRequestSchema} (mirrors the Java DTO's
+ * examples).
+ */
+export const participantOnboardingRequestExample = {
+  firstName: "Sam",
+  lastName: "Rivera",
+  displayName: "Sam Rivera",
+  participantType: "PROSPECTIVE",
+  gradeLevel: "High school senior",
+  intendedMajor: "Computer Science",
+  universitiesOfInterest: ["166683"],
+  topicsOfInterest: ["DORM_HOUSING"],
+  preferredLanguage: "en-US",
+  timezone: "America/New_York",
+  accessibilityPreferences: "wheelchair-access",
+};
+
+/**
+ * `POST /v1/users/me/roles/{guide|participant}` response `data` (CTL-97 defer-provisioning
+ * onboarding command, src/api/onboarding-command) — NOT Core's response verbatim. Core's
+ * `OnboardingResponse` carries no `provisioningStatus` and no `currentRole` — both are bff session
+ * state (Core's account-lifecycle status lives on `user.accountStatus`). This is the
+ * frontend-facing shape the bff constructs AFTER
+ * successfully converting the caller's session (PENDING -> PROVISIONED, or re-stamping an
+ * already-PROVISIONED one acquiring a second role) — `currentRole` is added here, set to the
+ * just-acquired role.
+ */
+export const OnboardingCommandResponseSchema = registry.register(
+  "OnboardingCommandResponse",
+  z
+    .object({
+      provisioningStatus: z.literal("PROVISIONED").openapi({
+        description:
+          "Always PROVISIONED — a successful command always yields a provisioned account.",
+        example: "PROVISIONED",
+      }),
+      user: UserSummarySchema.openapi({ description: "The now-provisioned account identity." }),
+      roles: z
+        .array(HeldRoleEnum)
+        .min(1)
+        .openapi({
+          description: "Every role the account now holds, including this newly-acquired one.",
+          example: ["GUIDE"],
+        }),
+      currentRole: CoreRoleEnum.openapi({
+        description:
+          "This session's now-current role (bff-added; Core never sends this) — always the " +
+          "just-acquired role on a successful command.",
+        example: "GUIDE",
+      }),
+      acquiredRole: CoreRoleEnum.openapi({
+        description: "The role this command just provisioned (echo of the route).",
+        example: "GUIDE",
+      }),
+      profile: JsonObject.openapi({
+        description:
+          "The new role-scoped profile Core created (GuideProfile/ParticipantProfile union), " +
+          "forwarded opaque — see the role-specific profile endpoints for its real shape.",
+        example: { guideStatus: "PENDING" },
+      }),
+    })
+    .openapi("OnboardingCommandResponse", {
+      description:
+        "Result of provisioning a role in Core, with the bff-added `currentRole` — NOT Core's " +
+        "response verbatim.",
+    }),
+);
+
+export const onboardingCommandExample = envelope({
+  provisioningStatus: "PROVISIONED",
+  user: {
+    id: "u1",
+    firstName: "Gina",
+    lastName: "Guide",
+    displayName: "Gina Guide",
+    email: "gina@example.com",
+    accountStatus: "ACTIVE",
+    ageBand: "ADULT",
+    createdAt: "2025-03-15T00:00:00.000Z",
+  },
+  roles: ["GUIDE"],
+  currentRole: "GUIDE",
+  acquiredRole: "GUIDE",
+  profile: { guideStatus: "PENDING" },
+});
+
+export const onboardingCommandParticipantExample = envelope({
+  ...onboardingCommandExample.data,
+  roles: ["PARTICIPANT"],
+  currentRole: "PARTICIPANT",
+  acquiredRole: "PARTICIPANT",
+  profile: { participantStatus: null, type: "STUDENT" },
+});
+
+// --- Domain sub-schemas (forwarded from Core; field names per Contract A) ---
+
+/**
+ * A single school entry within {@link GuideProfile}.universities — a guide may be affiliated
+ * with more than one university, each verified independently (Core Task 2.3).
+ */
+export const GuideUniversitySchema = registry.register(
+  "GuideUniversity",
+  z
+    .object({
       universityId: z.string().nullable().optional().openapi({
-        description: "Id of the guide's university (null until set).",
+        description: "Id of this university (null until set).",
         example: "uni_mit",
       }),
       universityName: z.string().nullable().optional().openapi({
@@ -207,38 +649,60 @@ export const GuideProfile = registry.register(
         .string()
         .optional()
         .openapi({ description: "Field of study.", example: "Computer Science" }),
+      degree: z
+        .string()
+        .optional()
+        .openapi({ description: "Degree pursued at this school.", example: "Bachelor's" }),
       classYear: z
         .string()
         .optional()
         .openapi({ description: "Graduation year.", example: "2026" }),
+      entryYear: z
+        .number()
+        .int()
+        .openapi({
+          description:
+            "Year this guide entered/started at this university. Always present — Core stores it " +
+            "NOT NULL and requires it at onboarding.",
+          example: 2023,
+        }),
+      verificationStatus: VerificationStatusEnum.nullable().optional().openapi({
+        description: "This school's identity verification status (often null — deferred).",
+        example: "VERIFIED",
+      }),
+    })
+    .openapi("GuideUniversity", { description: "One of a guide's university affiliations." }),
+);
+
+/** A guide's public/profile record (Core, forwarded verbatim by the BFF). */
+export const GuideProfile = registry.register(
+  "GuideProfile",
+  z
+    .object({
+      guideStatus: GuideStatusEnum.nullable().optional().openapi({
+        description: "Guide application/review status (null if no guide profile yet).",
+        example: "VERIFIED",
+      }),
+      universities: z
+        .array(GuideUniversitySchema)
+        .optional()
+        .openapi({
+          description:
+            "Per-school affiliations (Core Task 2.3) — a guide may list more than one " +
+            "university, each with its own major/degree/classYear/verificationStatus.",
+        }),
       bio: z.string().nullable().optional().openapi({
         description: "Free-text guide bio.",
         example: "Sophomore who loves showing off the maker space.",
       }),
-      languages: z
+      spokenLanguages: z
         .array(z.string())
         .optional()
         .openapi({ description: "Languages the guide can tour in.", example: ["en", "es"] }),
-      specialties: z
+      tourTopics: z
         .array(z.string())
         .optional()
         .openapi({ description: "Tour focus areas.", example: ["engineering", "campus-life"] }),
-      basePriceCents: z.number().int().nullable().optional().openapi({
-        description: "Default price per tour, in cents (null until set).",
-        example: 2500,
-      }),
-      currency: z
-        .string()
-        .optional()
-        .openapi({ description: "ISO-4217 currency code.", example: "USD" }),
-      applicationStatus: ApplicationStatusEnum.nullable().optional().openapi({
-        description: "Guide application/review status (null if no guide profile yet).",
-        example: "APPROVED",
-      }),
-      verificationStatus: VerificationStatusEnum.nullable().optional().openapi({
-        description: "Guide identity verification status (often null — deferred).",
-        example: "VERIFIED",
-      }),
     })
     .openapi("GuideProfile", { description: "Guide profile record forwarded from Core." }),
 );
@@ -248,19 +712,18 @@ export const ParticipantProfile = registry.register(
   "ParticipantProfile",
   z
     .object({
-      firstName: z.string().optional().openapi({ description: "Given name.", example: "Grace" }),
-      lastName: z.string().optional().openapi({ description: "Family name.", example: "Hopper" }),
-      displayName: z
-        .string()
-        .optional()
-        .openapi({ description: "Name shown in the app.", example: "Grace H." }),
-      email: z
-        .string()
-        .optional()
-        .openapi({ description: "Contact email.", example: "grace@example.com" }),
-      participantType: ParticipantTypeEnum.optional().openapi({
+      type: ParticipantTypeEnum.optional().openapi({
         description: "Whether the participant is the student or a booking guardian.",
         example: "STUDENT",
+      }),
+      // Loose (not GuideStatusEnum), kept that way even though Profile Contract v2
+      // Phase 4 made the participant participantStatus values the SAME set as the guide
+      // GuideStatusEnum ({PENDING,VERIFIED,REJECTED}): this embed still forwards
+      // Core's value as-is rather than sharing the enum reference, so a future divergence
+      // between the two status vocabularies doesn't require touching this schema.
+      participantStatus: z.string().nullable().optional().openapi({
+        description: "Participant application/review status (null if not yet set).",
+        example: "VERIFIED",
       }),
       gradeLevel: z
         .string()
@@ -370,12 +833,12 @@ const GuideDashboard = z
       .literal("guide")
       .openapi({ description: "Discriminator — always `guide` here.", example: "guide" }),
     guide: GuideProfile,
-    guideStatus: ApplicationStatusEnum.nullable().openapi({
-      description: "The guide's application status (echo of `guide.applicationStatus`).",
-      example: "APPROVED",
+    guideStatus: GuideStatusEnum.nullable().openapi({
+      description: "The guide's application status (echo of `guide.guideStatus`).",
+      example: "VERIFIED",
     }),
     canPublish: z.boolean().openapi({
-      description: 'Computed convenience gate — true only when `guideStatus === "APPROVED"`.',
+      description: 'Computed convenience gate — true only when `guideStatus === "VERIFIED"`.',
       example: true,
     }),
     offerings: z.array(Offering).openapi({
@@ -470,52 +933,6 @@ export const Dashboard = registry.register(
     .openapi({ description: "Role-shaped dashboard payload, discriminated by `kind`." }),
 );
 
-/** Uniform onboarding-progress shape returned for either role (src/api/onboarding/types.ts). */
-export const Progress = registry.register(
-  "Progress",
-  z
-    .object({
-      role: RoleEnum.openapi({
-        description: "The target role this progress describes.",
-        example: "guide",
-      }),
-      started: z
-        .boolean()
-        .openapi({ description: "Whether onboarding for this role has begun.", example: true }),
-      complete: z
-        .boolean()
-        .openapi({ description: "Whether onboarding for this role is finished.", example: false }),
-      canSubmit: z.boolean().openapi({
-        description:
-          "Whether the user may submit/advance now (coarse for guides — field gating deferred).",
-        example: true,
-      }),
-      applicationStatus: ApplicationStatusEnum.nullable().openapi({
-        description: "Guide application status; always null for participants.",
-        example: "PENDING_REVIEW",
-      }),
-      verificationStatus: VerificationStatusEnum.nullable().openapi({
-        description: "Guide verification status; deferred, so currently always null.",
-        example: null,
-      }),
-      steps: z
-        .array(
-          z.object({
-            key: z.string().openapi({ description: "Stable step key.", example: "submitted" }),
-            label: z.string().openapi({
-              description: "Human-readable step label.",
-              example: "Application submitted",
-            }),
-            done: z
-              .boolean()
-              .openapi({ description: "Whether this step is complete.", example: true }),
-          }),
-        )
-        .openapi({ description: "Ordered checklist of onboarding steps for this role." }),
-    })
-    .openapi("Progress", { description: "Derived onboarding progress for one role." }),
-);
-
 /** GET /auth/session — lightweight, un-enveloped auth check (src/auth/routes.ts). */
 export const SessionStatus = registry.register(
   "SessionStatus",
@@ -531,29 +948,59 @@ export const SessionStatus = registry.register(
 
 // --- Example bodies ---
 
+export const userinfoExample = envelope({
+  provisioningStatus: "PROVISIONED",
+  user: {
+    id: "u1",
+    firstName: "Gina",
+    lastName: "Guide",
+    displayName: "Gina Guide",
+    email: "gina@example.com",
+    accountStatus: "ACTIVE",
+    ageBand: "ADULT",
+    createdAt: "2025-03-15T00:00:00.000Z",
+  },
+  roles: ["GUIDE"],
+  currentRole: "GUIDE",
+});
+
+/** `GET /v1/userinfo` PENDING example (CTL-97 defer-provisioning) — no Core account yet. */
+export const pendingUserinfoExample = envelope({
+  provisioningStatus: "PENDING",
+  user: {
+    id: null,
+    email: "ana@example.com",
+    firstName: "Ana",
+    lastName: "Silva",
+    displayName: "Ana Silva",
+  },
+  roles: [],
+  currentRole: null,
+});
+
+export const currentRoleExample = envelope({ currentRole: "GUIDE" });
+
 export const guideDashboardExample = envelope({
   kind: "guide",
   guide: {
-    userId: "u_guide_123",
-    firstName: "Ada",
-    lastName: "Lovelace",
-    displayName: "Ada L.",
-    email: "ada@example.edu",
-    accountStatus: "ACTIVE",
-    universityId: "uni_mit",
-    universityName: "Massachusetts Institute of Technology",
-    universityShortName: "MIT",
-    major: "Computer Science",
-    classYear: "2026",
+    guideStatus: "VERIFIED",
+    universities: [
+      {
+        universityId: "uni_mit",
+        universityName: "Massachusetts Institute of Technology",
+        universityShortName: "MIT",
+        major: "Computer Science",
+        degree: "Bachelor's",
+        classYear: "2026",
+        entryYear: 2023,
+        verificationStatus: "VERIFIED",
+      },
+    ],
     bio: "Sophomore who loves showing off the maker space.",
-    languages: ["en", "es"],
-    specialties: ["engineering", "campus-life"],
-    basePriceCents: 2500,
-    currency: "USD",
-    applicationStatus: "APPROVED",
-    verificationStatus: "VERIFIED",
+    spokenLanguages: ["en", "es"],
+    tourTopics: ["engineering", "campus-life"],
   },
-  guideStatus: "APPROVED",
+  guideStatus: "VERIFIED",
   canPublish: true,
   offerings: [
     {
@@ -575,11 +1022,8 @@ export const guideDashboardExample = envelope({
 export const participantDashboardExample = envelope({
   kind: "participant",
   participant: {
-    firstName: "Grace",
-    lastName: "Hopper",
-    displayName: "Grace H.",
-    email: "grace@example.com",
-    participantType: "STUDENT",
+    type: "STUDENT",
+    participantStatus: null,
     gradeLevel: "12",
     intendedMajor: "Biology",
     topicsOfInterest: ["dorm-life", "research"],
@@ -590,26 +1034,6 @@ export const participantDashboardExample = envelope({
   upcomingBookings: [PARTICIPANT_UPCOMING_EXAMPLE],
   pendingActions: { unreadMessages: 2, awaitingReview: 1 },
   createdAt: "2026-01-15T09:30:00.000Z",
-});
-
-export const guideProgressExample = envelope({
-  role: "guide",
-  started: true,
-  complete: false,
-  canSubmit: true,
-  applicationStatus: "PENDING_REVIEW",
-  verificationStatus: null,
-  steps: [{ key: "submitted", label: "Application submitted", done: false }],
-});
-
-export const participantProgressExample = envelope({
-  role: "participant",
-  started: true,
-  complete: true,
-  canSubmit: false,
-  applicationStatus: null,
-  verificationStatus: null,
-  steps: [{ key: "profile", label: "Your details", done: true }],
 });
 
 // Reused Problem examples.
@@ -1221,6 +1645,63 @@ export function writeEnvelope<T>(
   return { data, affectedBookings, meta: { requestId: REQUEST_ID_EXAMPLE } };
 }
 
+// --- GET /v1/meta/enrollment-years (transparent Core proxy — see src/proxy/coreProxy.ts) ---
+
+/**
+ * `GET /v1/meta/enrollment-years` response `data` — proxied from Core verbatim (this is a
+ * pass-through path, not an aggregation). Rule DATA rather than a lookup table: degree titles are
+ * free-text College Scorecard credentials, so the client applies the same ordered, first-hit
+ * substring match the server does. Array order is part of the contract.
+ */
+// NO `example` values anywhere below. Every candidate here is either a rule number owned by Core
+// (bachelor 6, default 8) or a year window Core computes from its clock (2016/2027, correct only
+// during 2026). Both would be a SECOND copy of data this whole feature exists to keep in one
+// place, and nothing in this repo can pin them — the backend plan deleted its equivalents for the
+// same reason. Descriptions carry the meaning; live values come from Core.
+export const EnrollmentYearRulesSchema = registry.register(
+  "EnrollmentYearRules",
+  z
+    .object({
+      entryYear: z
+        .object({
+          min: z.number().int(),
+          max: z.number().int(),
+        })
+        .openapi({
+          description:
+            "Inclusive window of acceptable enrolment years, computed from Core's UTC clock — " +
+            "it shifts every 1 January, so do not hardcode or cache it indefinitely.",
+        }),
+      maxYearsToGraduate: z
+        .array(
+          z.object({
+            matches: z
+              .array(z.string())
+              .openapi({ description: "Lower-case substrings; ANY hit selects this rule." }),
+            years: z
+              .number()
+              .int()
+              .openapi({ description: "Longest years to graduate, counted from enrolment." }),
+          }),
+        )
+        .openapi({
+          description:
+            "Ordered degree rules. Lower-case and trim the degree, then take the FIRST rule any " +
+            "of whose `matches` it contains. Order is significant — do not sort or re-key.",
+        }),
+      defaultMaxYearsToGraduate: z
+        .number()
+        .int()
+        .openapi({ description: "Used when a degree matches no rule." }),
+    })
+    .openapi("EnrollmentYearRules", {
+      description:
+        "Validation rules for a guide's enrolment year and expected graduation year. Cacheable, " +
+        "but the max-age contracts to expire when the server's year turns over — do not cache " +
+        "the body indefinitely.",
+    }),
+);
+
 // --- Runtime response-shape contracts (loose on Core passthrough, strict on BFF-owned) ---
 //
 // These are used by the dev-only assertion in src/api/_shared/envelope.ts and by the
@@ -1236,6 +1717,70 @@ export function envelopeOf<T extends z.ZodTypeAny>(
 ): z.ZodObject<{ data: T; meta: z.ZodObject<{ requestId: z.ZodString }> }> {
   return z.object({ data, meta: z.object({ requestId: z.string() }) });
 }
+
+/** GET /v1/userinfo `data`, PENDING variant (CTL-97 defer-provisioning) — entirely BFF-derived
+ *  from the session's Google id_token; no Core call succeeded, so nothing here is Core
+ *  passthrough (strict throughout). `id` is always null; `roles` is always empty; `currentRole`
+ *  is always null. */
+const PendingUserinfoDataSchema = z.object({
+  provisioningStatus: z.literal("PENDING"),
+  user: z.object({
+    id: z.null(),
+    email: z.string(),
+    firstName: z.string().nullable(),
+    lastName: z.string().nullable(),
+    displayName: z.string().nullable(),
+  }),
+  roles: z.array(z.string()).length(0),
+  currentRole: z.null(),
+});
+
+/** GET /v1/userinfo `data`, PROVISIONED variant — `user` forwarded from Core (loose, EXCEPT
+ *  `id`, which the bff's PENDING/PROVISIONED discrimination depends on being a real non-empty
+ *  string — see userinfo.handler.ts's runtime Core-contract validation); `roles` is BFF-owned
+ *  ("non-empty, every entry one of the four known {@link HeldRoleEnum} values — including the
+ *  staff-only ADMIN/SUPPORT"); `currentRole` is BFF-derived (session ∩ the GUIDE/PARTICIPANT
+ *  subset of `roles` — ADMIN/SUPPORT are never a `currentRole`). */
+const ProvisionedUserinfoDataSchema = z.object({
+  provisioningStatus: z.literal("PROVISIONED"),
+  user: z.object({ id: z.string().min(1) }).catchall(z.unknown()), // forwarded from Core — id strict, rest opaque
+  roles: z.array(HeldRoleEnum).min(1), // BFF-validated (see UPSTREAM_CONTRACT_VIOLATION)
+  currentRole: z.enum(["GUIDE", "PARTICIPANT"]).nullable(), // BFF-derived (session ∩ switchable roles)
+});
+
+/** GET /v1/userinfo `data`, discriminated by `provisioningStatus` (CTL-97 defer-provisioning). */
+export const UserinfoDataSchema = z.discriminatedUnion("provisioningStatus", [
+  PendingUserinfoDataSchema,
+  ProvisionedUserinfoDataSchema,
+]);
+
+/** Full enveloped GET /v1/userinfo response contract. */
+export const EnvelopedUserinfoSchema = envelopeOf(UserinfoDataSchema);
+
+/** POST /v1/session/current-role `data` — entirely BFF-owned (strict). */
+export const CurrentRoleDataSchema = z.object({
+  currentRole: z.enum(["GUIDE", "PARTICIPANT"]),
+});
+
+/** Full enveloped POST /v1/session/current-role response contract. */
+export const EnvelopedCurrentRoleSchema = envelopeOf(CurrentRoleDataSchema);
+
+/** POST /v1/users/me/roles/{guide|participant} `data` (onboarding command,
+ *  src/api/onboarding-command/handler.ts) — `user` forwarded from Core (loose, EXCEPT `id`,
+ *  same rationale as `ProvisionedUserinfoDataSchema`); `roles`/`currentRole`/`acquiredRole` are
+ *  BFF-validated/derived (never Core-verbatim: Core has no `currentRole` at all); `profile` is
+ *  Core's opaque role-profile union passthrough, never re-validated here. */
+export const OnboardingCommandDataSchema = z.object({
+  provisioningStatus: z.literal("PROVISIONED"),
+  user: z.object({ id: z.string().min(1) }).catchall(z.unknown()),
+  roles: z.array(HeldRoleEnum).min(1),
+  currentRole: z.enum(["GUIDE", "PARTICIPANT"]),
+  acquiredRole: z.enum(["GUIDE", "PARTICIPANT"]),
+  profile: z.unknown(),
+});
+
+/** Full enveloped POST /v1/users/me/roles/{guide|participant} response contract. */
+export const EnvelopedOnboardingCommandSchema = envelopeOf(OnboardingCommandDataSchema);
 
 /** GET /v1/dashboard guide `data` — strict on `kind`/`canPublish`/`offerings` (BFF-owned). */
 export const GuideDashboardDataSchema = z.object({
@@ -1265,20 +1810,6 @@ export const DashboardDataSchema = z.discriminatedUnion("kind", [
 
 /** Full enveloped GET /v1/dashboard response contract. */
 export const EnvelopedDashboardSchema = envelopeOf(DashboardDataSchema);
-
-/** GET /v1/onboarding `data` — the `Progress` structure is entirely BFF-owned (strict). */
-export const ProgressDataSchema = z.object({
-  role: RoleEnum,
-  started: z.boolean(),
-  complete: z.boolean(),
-  canSubmit: z.boolean(),
-  applicationStatus: z.string().nullable(), // forwarded from Core — value not constrained here
-  verificationStatus: z.string().nullable(), // deferred (currently always null)
-  steps: z.array(z.object({ key: z.string(), label: z.string(), done: z.boolean() })),
-});
-
-/** Full enveloped GET /v1/onboarding response contract. */
-export const EnvelopedProgressSchema = envelopeOf(ProgressDataSchema);
 
 /** GET /auth/session — the bare, un-enveloped `{ authenticated }` boolean (BFF-owned). */
 export const SessionStatusSchema = z.object({ authenticated: z.boolean() });

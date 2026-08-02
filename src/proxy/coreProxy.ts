@@ -1,11 +1,13 @@
 import crypto from "node:crypto";
 import type { Request, Response } from "express";
 import { config } from "../config.js";
+import { clearSession } from "../session.js";
 import { sendProblem } from "../util/problem.js";
 import {
   requireReauth,
   authUpstreamUnavailable,
   resolveBearer,
+  PendingSessionExpiredError,
   TransientAuthError,
 } from "../api/_shared/index.js";
 import { isCrossSiteMutation } from "../util/csrf.js";
@@ -54,6 +56,22 @@ function isCacheableStaticMeta(req: Request): boolean {
 }
 
 /**
+ * Paths whose upstream `Cache-Control` is relayed UNCHANGED, because Core computes it from
+ * information only Core has. `/meta/enrollment-years` carries a max-age that contracts to expire
+ * exactly when the server's year rolls over — flattening it to a constant here (or dropping it, as
+ * the default path does) would leave clients validating against last year's window.
+ *
+ * Distinct from CACHEABLE_STATIC_META on purpose: that set is one the PROXY owns a policy for;
+ * this one is a set the proxy must not have an opinion about.
+ */
+const UPSTREAM_CACHE_CONTROL_PATHS = new Set(["/meta/enrollment-years"]);
+
+function relaysUpstreamCacheControl(req: Request): boolean {
+  if (req.method !== "GET") return false;
+  return UPSTREAM_CACHE_CONTROL_PATHS.has(canonicalPath(req));
+}
+
+/**
  * Proxy /v1/* to the Core API. The BFF strips the /v1 prefix (Core owns the bare
  * resource paths), attaches a correlation id, and normalises transport errors to
  * problem+json. A Bearer token is attached to everything EXCEPT the public reads
@@ -89,6 +107,15 @@ export async function coreProxy(req: Request, res: Response): Promise<void> {
       // Google blip can't log the user out irrecoverably (the refresh token survives).
       if (err instanceof TransientAuthError) {
         authUpstreamUnavailable(res);
+        return;
+      }
+      // The pending session's 24h absolute lifetime is up: destroy the cookie (expiring
+      // Set-Cookie) and answer 401 SESSION_EXPIRED WITHOUT ever calling Core (CTL-97 Task 4
+      // review fix — this proxy is a third `resolveBearer` call site and must enforce the
+      // same guard `withSession` does).
+      if (err instanceof PendingSessionExpiredError) {
+        clearSession(res);
+        sendProblem(res, 401, "Session expired", { code: err.code });
         return;
       }
       throw err;
@@ -147,6 +174,9 @@ export async function coreProxy(req: Request, res: Response): Promise<void> {
     // s-maxage/CDN + a BFF in-memory cache are deferred until a shared cache actually exists.
     if (upstream.status === 200 && isCacheableStaticMeta(req)) {
       res.setHeader("Cache-Control", "public, max-age=300");
+    } else if (upstream.status === 200 && relaysUpstreamCacheControl(req)) {
+      const upstreamCacheControl = upstream.headers.get("cache-control");
+      if (upstreamCacheControl) res.setHeader("Cache-Control", upstreamCacheControl);
     }
     res.send(text);
   } catch {

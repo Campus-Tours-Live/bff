@@ -20,7 +20,19 @@ function mockRes() {
   return res;
 }
 
-const ME: Me = { createdAt: "2025-03-15T00:00:00Z" } as unknown as Me;
+const ME: Me = {
+  user: {
+    id: "u1",
+    firstName: null,
+    lastName: null,
+    displayName: null,
+    email: null,
+    accountStatus: null,
+    ageBand: null,
+    createdAt: "2025-03-15T00:00:00Z",
+  },
+  roles: ["PARTICIPANT"],
+} as Me;
 
 /** Full happy-path mock — all four Core calls succeed. */
 function mockCore(overrides: Partial<Record<keyof CoreClient, jest.Mock>> = {}): CoreClient {

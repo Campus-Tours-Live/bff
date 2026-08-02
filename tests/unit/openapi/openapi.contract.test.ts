@@ -106,8 +106,11 @@ describe("OpenAPI contract — drift guard (Express routes ↔ spec)", () => {
         "get /auth/callback",
         "get /auth/login",
         "get /auth/session",
+        "get /v1/userinfo",
+        "post /v1/session/current-role",
+        "post /v1/users/me/roles/guide",
+        "post /v1/users/me/roles/participant",
         "get /v1/dashboard",
-        "get /v1/onboarding",
         "get /v1/tours",
         "get /v1/tours/{tourId}",
         "post /auth/logout",
@@ -217,7 +220,7 @@ describe("OpenAPI contract — every operation is self-describing", () => {
 });
 
 describe("OpenAPI contract — protected /v1 operations", () => {
-  const publicV1Paths = new Set(["/v1/tours", "/v1/tours/{tourId}"]);
+  const publicV1Paths = new Set(["/v1/tours", "/v1/tours/{tourId}", "/v1/meta/enrollment-years"]);
   const protectedOps = () =>
     operations().filter((o) => o.path.startsWith("/v1/") && !publicV1Paths.has(o.path));
 
@@ -234,9 +237,18 @@ describe("OpenAPI contract — protected /v1 operations", () => {
     }
   });
 
-  it("return a { data, meta } envelope with at least one example on 200", () => {
+  it("return a { data, meta } envelope with at least one example on its success response", () => {
+    // Generalised over the success status rather than hardcoding "200": every existing
+    // protected route succeeds with 200, but the onboarding-command routes (CTL-97 Task 6)
+    // succeed with 201 (a role was just created) — both must still carry the same `{ data,
+    // meta }` envelope + example.
     for (const { path, op } of protectedOps()) {
-      const json = op.responses["200"]?.content?.["application/json"];
+      const successStatus = Object.keys(op.responses).find((code) => /^2\d\d$/.test(code));
+      expect({ path, hasSuccessStatus: Boolean(successStatus) }).toEqual({
+        path,
+        hasSuccessStatus: true,
+      });
+      const json = op.responses[successStatus!]?.content?.["application/json"];
       expect({ path, hasJson: Boolean(json) }).toEqual({ path, hasJson: true });
       const schema = json?.schema as { properties?: Record<string, unknown> } | undefined;
       expect(Object.keys(schema?.properties ?? {})).toEqual(
@@ -291,4 +303,267 @@ describe("OpenAPI contract — published nullability matches runtime validation"
       expect(admitsNull(prop)).toBe(true);
     },
   );
+});
+
+/**
+ * CTL-97 Task 7 — the two onboarding command ops must be fully documented: a properly
+ * modeled (non-loose) request body per role, and per-status/per-code examples for every
+ * outcome (201 success, 409 `ROLE_ALREADY_GRANTED` / `ROLE_NOT_ELIGIBLE`, 422
+ * `VALIDATION_FAILED`, 500 `SESSION_CONVERSION_FAILED`, plus the shared 401/502).
+ */
+describe("OpenAPI contract — onboarding command ops (CTL-97 Task 7)", () => {
+  type Schema = { $ref?: string; properties?: Record<string, Schema> };
+  type ProblemExample = { code?: string };
+  type ProblemResponse = {
+    content?: {
+      "application/problem+json"?: {
+        example?: ProblemExample;
+        examples?: Record<string, { value?: ProblemExample }>;
+      };
+    };
+  };
+
+  const commandOps = [
+    { path: "/v1/users/me/roles/guide", requestSchemaName: "GuideOnboardingRequest" },
+    {
+      path: "/v1/users/me/roles/participant",
+      requestSchemaName: "ParticipantOnboardingRequest",
+    },
+  ] as const;
+
+  /** All `code`s carried by a problem response, whether a single `example` or an `examples` map. */
+  function codesOf(problemResponse: ProblemResponse | undefined): string[] {
+    const body = problemResponse?.content?.["application/problem+json"];
+    if (!body) return [];
+    if (body.example) return [body.example.code ?? ""];
+    return Object.values(body.examples ?? {}).map((e) => e.value?.code ?? "");
+  }
+
+  it.each(commandOps)(
+    "$path declares a properly modeled (non-loose) request body",
+    ({ path, requestSchemaName }) => {
+      const op = (paths[path] as Record<string, Operation>).post as unknown as {
+        requestBody?: { content?: Record<string, { schema?: Schema }> };
+      };
+      const schema = op.requestBody?.content?.["application/json"]?.schema;
+      expect(schema?.$ref).toBe(`#/components/schemas/${requestSchemaName}`);
+
+      const schemas = (openapiSpec as { components?: { schemas?: Record<string, Schema> } })
+        .components?.schemas;
+      const requestSchema = schemas?.[requestSchemaName];
+      expect(requestSchema).toBeDefined();
+      // A real per-field model, not the loose `JsonObject` (an untyped `z.record`) T6 shipped —
+      // it must declare actual named properties.
+      expect(Object.keys(requestSchema?.properties ?? {}).length).toBeGreaterThan(0);
+    },
+  );
+
+  it.each(commandOps)("$path documents 201/409/422/500/502 with real machine codes", ({ path }) => {
+    const op = (paths[path] as Record<string, Operation>).post;
+    for (const status of ["201", "409", "422", "500", "502"]) {
+      expect({ path, status, has: Boolean(op.responses[status]) }).toEqual({
+        path,
+        status,
+        has: true,
+      });
+    }
+
+    // 409 must carry BOTH machine codes (same status, two named examples — OpenAPI has only
+    // one response object per status).
+    const codes409 = codesOf(op.responses["409"] as unknown as ProblemResponse);
+    expect(codes409.sort()).toEqual(["ROLE_ALREADY_GRANTED", "ROLE_NOT_ELIGIBLE"]);
+
+    expect(codesOf(op.responses["422"] as unknown as ProblemResponse)).toEqual([
+      "VALIDATION_FAILED",
+    ]);
+    expect(codesOf(op.responses["500"] as unknown as ProblemResponse)).toEqual([
+      "SESSION_CONVERSION_FAILED",
+    ]);
+  });
+
+  it.each(commandOps)("$path documents 401 SESSION_EXPIRED", ({ path }) => {
+    const op = (paths[path] as Record<string, Operation>).post;
+    expect(codesOf(op.responses["401"] as unknown as ProblemResponse)).toEqual(["SESSION_EXPIRED"]);
+  });
+});
+
+/**
+ * Backend enrollment-years Task 2 — Core now requires `entryYear` at guide onboarding
+ * (@NotNull, 422 on a missing value). This is the bff's published-contract counterpart: a
+ * documentation-only change (the bff forwards `req.body` untouched either way — see the
+ * integration test pinning that forward-and-relay behaviour in onboarding-command.test.ts),
+ * but the generated `GuideOnboardingRequest` schema is where dropping `.optional()` becomes
+ * observable, so this is the one assertion that actually exercises this task's deliverable.
+ */
+describe("OpenAPI contract — entryYear required in guide onboarding (backend enrollment years)", () => {
+  it("documents entryYear as required", () => {
+    const schemas = (
+      openapiSpec as { components?: { schemas?: Record<string, { required?: string[] }> } }
+    ).components?.schemas;
+    const schema = schemas?.GuideOnboardingRequest;
+    expect(schema).toBeDefined();
+    expect(schema?.required).toEqual(expect.arrayContaining(["entryYear"]));
+  });
+});
+
+/**
+ * CTL-97 Task 7 — `GET /v1/userinfo` must document `401 SESSION_EXPIRED` too: the central
+ * pending-expiry guard (withSession/withMutation) can fire on any protected `/v1` route,
+ * this bootstrap read included.
+ */
+describe("OpenAPI contract — 401 SESSION_EXPIRED on /v1/userinfo", () => {
+  it("documents SESSION_EXPIRED as the 401 code", () => {
+    const op = (paths["/v1/userinfo"] as Record<string, Operation>).get;
+    const example = op.responses["401"]?.content?.["application/problem+json"] as unknown as {
+      example?: { code?: string };
+    };
+    expect(example?.example?.code).toBe("SESSION_EXPIRED");
+  });
+});
+
+/**
+ * CTL-97 Task 7 — `Userinfo` must be a real OpenAPI discriminated union on `provisioningStatus`,
+ * with both variants shaped per the defer-provisioning contract: `PendingUserinfo` (empty
+ * roles, null user id) and `ProvisionedUserinfo` (roles min 1, string user id).
+ */
+describe("OpenAPI contract — Userinfo discriminated union", () => {
+  type SchemaComponent = {
+    oneOf?: { $ref: string }[];
+    discriminator?: { propertyName: string; mapping?: Record<string, string> };
+    properties?: {
+      roles?: { minItems?: number; maxItems?: number };
+      user?: { properties?: { id?: { type?: unknown; enum?: unknown[] } } };
+    };
+  };
+
+  function schemas(): Record<string, SchemaComponent> {
+    return (
+      (openapiSpec as { components?: { schemas?: Record<string, SchemaComponent> } }).components
+        ?.schemas ?? {}
+    );
+  }
+
+  it("declares an OpenAPI discriminator on provisioningStatus with both variants mapped", () => {
+    const userinfo = schemas().Userinfo;
+    expect(userinfo).toBeDefined();
+    expect(userinfo.discriminator?.propertyName).toBe("provisioningStatus");
+    expect(userinfo.discriminator?.mapping).toEqual({
+      PENDING: "#/components/schemas/PendingUserinfo",
+      PROVISIONED: "#/components/schemas/ProvisionedUserinfo",
+    });
+    expect((userinfo.oneOf ?? []).map((r) => r.$ref).sort()).toEqual(
+      ["#/components/schemas/PendingUserinfo", "#/components/schemas/ProvisionedUserinfo"].sort(),
+    );
+  });
+
+  it("PendingUserinfo has empty roles and a null user id", () => {
+    const pending = schemas().PendingUserinfo;
+    expect(pending).toBeDefined();
+    expect(pending.properties?.roles?.maxItems).toBe(0);
+    expect(pending.properties?.user?.properties?.id?.type).toBe("null");
+  });
+
+  it("ProvisionedUserinfo requires at least one role and a string user id", () => {
+    const provisioned = schemas().ProvisionedUserinfo;
+    expect(provisioned).toBeDefined();
+    expect(provisioned.properties?.roles?.minItems).toBe(1);
+    expect(provisioned.properties?.user?.properties?.id?.type).toBe("string");
+  });
+});
+
+/**
+ * CTL-97 Task 7 — the bff never documented its own `POST /session` (the removed Core
+ * endpoint was Core's, not the bff's own path); confirm no stale doc exists and the two
+ * legitimate session-shaped routes are untouched.
+ */
+describe("OpenAPI contract — no bff POST /session", () => {
+  it("has no bare /session path", () => {
+    expect(paths["/session"]).toBeUndefined();
+  });
+
+  it("keeps GET /auth/session and POST /v1/session/current-role", () => {
+    expect(paths["/auth/session"]?.get).toBeDefined();
+    expect(paths["/v1/session/current-role"]?.post).toBeDefined();
+  });
+});
+
+/**
+ * Enrollment-years bff plan, Task 3 — `GET /v1/meta/enrollment-years` needs no route/handler
+ * change (it already falls through `coreProxy`'s `/v1/meta/*` passthrough, `isPublicGet`, and
+ * `UPSTREAM_CACHE_CONTROL_PATHS` — see src/proxy/coreProxy.ts), but it was previously
+ * undocumented: a frontend consumer had to read Core's source to learn its shape. This pins
+ * that the PUBLISHED contract actually mirrors Core's response field-for-field (a `data` object
+ * with the right top-level keys and wrong innards would pass a shallower check) and that the
+ * relayed `Cache-Control` header — the one thing Task 1 of this plan changed — is documented on
+ * the 200, not just the body.
+ */
+describe("OpenAPI contract — GET /v1/meta/enrollment-years (enrollment-years bff Task 3)", () => {
+  // Local `$ref`/`allOf` resolver, in the same idiom as this file's other `Schema` types above
+  // (e.g. the onboarding-command block) rather than an imported/generic JSON-schema resolver.
+  // `allOf` shows up here (and not in those earlier blocks) because `Envelope()` re-annotates a
+  // NAMED/registered schema with a call-site `.openapi({ description })` (see Envelope() in
+  // src/openapi/schemas.ts), which zod-to-openapi renders as `allOf: [{ $ref }, { description }]`
+  // rather than a bare `$ref`.
+  type Schema = {
+    $ref?: string;
+    allOf?: Schema[];
+    type?: string;
+    required?: string[];
+    properties?: Record<string, Schema>;
+    items?: Schema;
+  };
+
+  function componentSchemas(): Record<string, Schema> {
+    return (
+      (openapiSpec as { components?: { schemas?: Record<string, Schema> } }).components?.schemas ??
+      {}
+    );
+  }
+
+  function resolveSchema(schema: Schema | undefined): Schema {
+    if (!schema) throw new Error("resolveSchema: schema is undefined");
+    if (schema.$ref) {
+      const name = schema.$ref.replace("#/components/schemas/", "");
+      const resolved = componentSchemas()[name];
+      if (!resolved) throw new Error(`resolveSchema: no component named "${name}"`);
+      return resolveSchema(resolved);
+    }
+    if (schema.allOf) {
+      return schema.allOf.map(resolveSchema).reduce((acc, part) => ({ ...acc, ...part }), {});
+    }
+    return schema;
+  }
+
+  it("documents GET /v1/meta/enrollment-years with the shape Core actually returns", () => {
+    const operation = paths["/v1/meta/enrollment-years"]?.get as Operation | undefined;
+    expect(operation).toBeDefined();
+
+    const responseSchema = operation!.responses["200"]?.content?.["application/json"]
+      ?.schema as Schema;
+    const data = resolveSchema(responseSchema.properties?.data);
+
+    // The three top-level fields, by name — this is the claim "mirrors Core field-for-field".
+    expect(data.required).toEqual(
+      expect.arrayContaining(["entryYear", "maxYearsToGraduate", "defaultMaxYearsToGraduate"]),
+    );
+
+    // ...and the nested shape, because a `data` object with the right three keys and wrong
+    // innards is exactly the drift this test exists to catch.
+    const entryYear = resolveSchema(data.properties?.entryYear);
+    expect(entryYear.required).toEqual(expect.arrayContaining(["min", "max"]));
+
+    const rule = resolveSchema(resolveSchema(data.properties?.maxYearsToGraduate).items);
+    expect(rule.required).toEqual(expect.arrayContaining(["matches", "years"]));
+    expect(resolveSchema(rule.properties?.matches).type).toBe("array");
+    expect(rule.properties?.years?.type).toBe("integer");
+  });
+
+  it("documents the Cache-Control header on the enrollment-years 200", () => {
+    // The header IS the feature (Task 1). A contract describing only the body would omit the
+    // one thing this PR changes, and a consumer reading it would not learn the payload expires.
+    const response = paths["/v1/meta/enrollment-years"]?.get?.responses?.["200"] as
+      | { headers?: Record<string, unknown> }
+      | undefined;
+    expect(response?.headers?.["Cache-Control"]).toBeDefined();
+  });
 });

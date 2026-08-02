@@ -2,8 +2,8 @@
  * OpenAPI 3.1 spec for Contract A — the frontend-facing surface the BFF owns.
  *
  * Single source of truth: every request/response shape is a Zod schema (see ./schemas.ts),
- * so the SAME schemas drive the docs AND runtime validation (the onboarding `role` guard
- * and the dev-only response-shape assertions in src/api/_shared/envelope.ts). We build the
+ * so the SAME schemas drive the docs AND runtime validation (the
+ * dev-only response-shape assertions in src/api/_shared/envelope.ts). We build the
  * document in code with @asteasolutions/zod-to-openapi, so it works identically from src/
  * (tsx/jest) and the compiled dist/ (no filesystem/source scanning like swagger-jsdoc).
  *
@@ -21,15 +21,25 @@ import { OpenApiGeneratorV31 } from "@asteasolutions/zod-to-openapi";
 import {
   registry,
   coreApiBaseUrl,
-  RoleEnum,
+  CoreRoleEnum,
   Dashboard,
-  Progress,
   SessionStatus,
+  Userinfo,
+  CurrentRoleSchema,
+  SetCurrentRoleRequestSchema,
+  OnboardingCommandResponseSchema,
+  onboardingCommandExample,
+  onboardingCommandParticipantExample,
+  GuideOnboardingRequestSchema,
+  guideOnboardingRequestExample,
+  ParticipantOnboardingRequestSchema,
+  participantOnboardingRequestExample,
   problem,
   guideDashboardExample,
   participantDashboardExample,
-  guideProgressExample,
-  participantProgressExample,
+  userinfoExample,
+  pendingUserinfoExample,
+  currentRoleExample,
   envelope,
   writeEnvelope,
   BookingResponseSchema,
@@ -51,6 +61,7 @@ import {
   OverrideMultiPreviewRequestSchema,
   OverrideReplaceRequestSchema,
   RulesReplaceRequestSchema,
+  EnrollmentYearRulesSchema,
 } from "./schemas.js";
 import {
   apiRoute,
@@ -58,11 +69,13 @@ import {
   envelopedWrite,
   problem400,
   problem401,
+  problem403,
   problem404,
   problem409,
   problem422,
   problem502,
   problemResponse,
+  problemResponseMulti,
 } from "./helpers.js";
 
 // Re-export the schema surface so consumers (handlers, tests) have one import site.
@@ -174,7 +187,7 @@ apiRoute({
   tags: ["Tours"],
   summary: "Search public marketplace tours",
   description:
-    "Anonymous marketplace discovery. Relays Core's ACTIVE offerings from APPROVED guides " +
+    "Anonymous marketplace discovery. Relays Core's ACTIVE offerings from VERIFIED guides " +
     "without reading or forwarding a BFF session. Query filters are passed through verbatim; " +
     "see the Core API specification for the field-level response contract.",
   request: {
@@ -241,6 +254,98 @@ apiRoute({
   },
 });
 
+// --- Public reference data (transparent Core proxy — CTL-97 enrollment-years bff plan) ---
+
+// DELIBERATELY SYNTHETIC — not a plausible stand-in for Core's real rule values (bachelor 6,
+// default 8, a 2016/2027 window, per CTL-97 backend Task 6), and not meant to be. An
+// out-of-range year window, a non-vocabulary `matches` string, and uniform placeholder years
+// are all chosen so nothing here could be mistaken for "roughly" the live rules — a reader
+// must not be able to derive a real window length, a real degree keyword, or a real years
+// value from this example. Live values come from Core; the field descriptions on
+// EnrollmentYearRulesSchema carry the real meaning. Spectral (`bff-response-has-example`)
+// requires SOME worked example on every response body — this is that, not a pinned fact.
+const enrollmentYearRulesExample = {
+  entryYear: { min: 1900, max: 2100 },
+  maxYearsToGraduate: [{ matches: ["example-degree-keyword"], years: 1 }],
+  defaultMaxYearsToGraduate: 1,
+};
+
+// GET /v1/meta/enrollment-years
+apiRoute({
+  method: "get",
+  path: "/v1/meta/enrollment-years",
+  protected: false,
+  tags: ["Meta"],
+  summary: "Get the guide enrolment/graduation-year validation rules",
+  description:
+    "Transparent Core proxy — `coreProxy`'s generic `/v1/meta/*` passthrough already serves " +
+    "this path anonymously (`isPublicGet`) and relays Core's `Cache-Control` unchanged " +
+    "(`UPSTREAM_CACHE_CONTROL_PATHS`, see src/proxy/coreProxy.ts); there is no bff-owned route " +
+    "or handler for it. Documented here so a consumer does not have to read Core's source to " +
+    "learn the shape it validates a guide's `entryYear` against at onboarding — see " +
+    "`GuideOnboardingRequest.entryYear` above, which references this same endpoint.",
+  responses: {
+    200: {
+      ...enveloped(EnrollmentYearRulesSchema, {
+        description: "The current enrolment/graduation-year validation rules.",
+        example: envelope(enrollmentYearRulesExample),
+      }),
+      headers: {
+        "Cache-Control": {
+          description:
+            "Cache policy computed by Core, not by this bff. `max-age` is capped at 24 hours " +
+            "and contracts to expire at the next 1 January 00:00 UTC, because the `entryYear` " +
+            "window in the body stops being true at that instant. Do not cache the body beyond " +
+            "it.",
+          schema: { type: "string" },
+        },
+      },
+    },
+    502: problem502("The Core API was unreachable."),
+  },
+});
+
+// GET /v1/userinfo
+apiRoute({
+  method: "get",
+  path: "/v1/userinfo",
+  tags: ["Session"],
+  summary: "Signed-in identity, held roles, and the current role",
+  description:
+    "Bootstrap/session read the frontend calls on every page load. BFF-OWNED aggregation " +
+    "(Profile Contract v2 + CTL-97 defer-provisioning) — no longer a transparent Core proxy: " +
+    "the response is discriminated by `provisioningStatus`. `PENDING` means Google sign-in " +
+    "succeeded but Core has no account yet (identity is read straight from the session's " +
+    "id_token; `roles: []`, `currentRole: null`). `PROVISIONED` composes Core account " +
+    "identity + held roles (`GET /users/me`) with THIS bff session's `currentRole`, which " +
+    "Core does not know (it's per-session state, never a DB value; the Google id_token " +
+    "carries no app role either). `currentRole` is re-validated against the roles Core just " +
+    "returned on every call — a role the account no longer holds (revoked/suspended), or any " +
+    "stale/invalid stored value, is reported as `null`, and only THAT case clears it from the " +
+    "session and persists the change; an ordinary call does not write the session (it must " +
+    "not extend the cookie's TTL on every page load).",
+  responses: {
+    200: enveloped(Userinfo, {
+      description: "Identity + roles + current role, wrapped in the standard success envelope.",
+      examples: {
+        currentRole: { summary: "Session with a current role", value: userinfoExample },
+        noCurrentRole: {
+          summary: "Signed in, no current role chosen yet",
+          value: envelope({ ...userinfoExample.data, currentRole: null }),
+        },
+        pending: {
+          summary: "Signed in with Google, awaiting Core provisioning",
+          value: pendingUserinfoExample,
+        },
+      },
+    }),
+    401: problem401(
+      "No/expired session or a Core 401 (also sets `Auth-Required: reauthenticate`).",
+    ),
+    502: problem502("The Core API was unreachable or returned a 5xx."),
+  },
+});
+
 // GET /v1/dashboard
 apiRoute({
   method: "get",
@@ -249,10 +354,11 @@ apiRoute({
   summary: "Role-shaped signed-in home",
   description:
     "The signed-in home, aggregated from several Core reads and discriminated by `kind` " +
-    "(`guide` | `participant`). The active role is read authoritatively from Core `/userinfo` " +
-    "(the id_token carries no app role); guide and participant share this one endpoint. The " +
+    "(`guide` | `participant`). The current role is read from THIS bff session (Profile " +
+    "Contract v2 — `currentRole` is per-session state, never a Core value or an id_token " +
+    "claim); guide and participant share this one endpoint. The " +
     "guide variant fans out profile + offerings and adds a computed `canPublish` gate " +
-    "(true only when APPROVED); the participant variant fans out profile + next tour + " +
+    "(true only when VERIFIED); the participant variant fans out profile + next tour + " +
     "upcoming bookings + pending actions (each best-effort). The frontend calls this to render " +
     "`/dashboard`.\n\n" +
     "**Auth:** requires the `ctl_sess` session cookie. Swagger UI can only exercise it if the " +
@@ -272,47 +378,153 @@ apiRoute({
   },
 });
 
-// GET /v1/onboarding
+// POST /v1/session/current-role
 apiRoute({
-  method: "get",
-  path: "/v1/onboarding",
-  tags: ["Onboarding"],
-  summary: "Onboarding progress for a target role",
+  method: "post",
+  path: "/v1/session/current-role",
+  tags: ["Session"],
+  summary: "Switch this session's current role",
   description:
-    "Progress for the TARGET role (the `role` query param), derived from Core `/userinfo` alone " +
-    "(no `/guide/profile` read). Keyed by the target role, NOT the active role — a participant " +
-    "applying to be a guide still has `activeRole = PARTICIPANT`. Guide progress is coarse for " +
-    "now (the field-level verification checklist is deferred). The frontend calls this to render " +
-    "the onboarding checklist for the role being set up.\n\n" +
-    "**Auth:** requires the `ctl_sess` session cookie (sign in via `GET /auth/login` first).",
+    "Manually switches THIS bff session's `currentRole` to a role the account holds. `roles` are " +
+    "re-validated against Core `GET /users/me` on EVERY call — never cached in the session (a " +
+    "second staleable copy). Core has no current-role endpoint and never learns which role a " +
+    "session has chosen.\n\n" +
+    "A role the account does not hold → 403 with the session left UNCHANGED. A " +
+    "disabled/suspended account surfaces as a Core 403 (`ACCOUNT_NOT_ACTIVE`, carried in " +
+    "`Problem.title`) via the same generic 4xx passthrough.\n\n" +
+    "**CSRF-guarded** (state-changing mutation) — a cross-site POST is rejected.",
   request: {
-    query: z.object({
-      role: RoleEnum.openapi({
-        description: "Target role whose onboarding progress to report.",
-        example: "guide",
-      }),
-    }),
+    body: {
+      content: {
+        "application/json": { schema: SetCurrentRoleRequestSchema, example: { role: "GUIDE" } },
+      },
+    },
   },
   responses: {
-    200: enveloped(Progress, {
-      description: "Onboarding progress, wrapped in the standard success envelope.",
-      examples: {
-        guide: { summary: "Guide onboarding progress", value: guideProgressExample },
-        participant: {
-          summary: "Participant onboarding progress",
-          value: participantProgressExample,
-        },
-      },
+    200: enveloped(CurrentRoleSchema, {
+      description: "The now-current role, wrapped in the standard success envelope.",
+      example: currentRoleExample,
     }),
-    401: problem401("No/expired session or a Core 401."),
-    422: problem422(
+    400: problem400(
       "INVALID_ROLE",
-      "role must be 'guide' or 'participant'",
-      "`role` was missing or not 'guide'|'participant'.",
+      "role must be 'GUIDE' or 'PARTICIPANT'",
+      "`role` was missing or not a recognised role value.",
     ),
-    502: problem502("The Core API was unreachable or returned a 5xx."),
+    403: problem403(
+      "ROLE_NOT_HELD",
+      "Role not held by this account",
+      "The account does not currently hold the requested role (session left unchanged), or the " +
+        "account is disabled (Core `ACCOUNT_NOT_ACTIVE`).",
+    ),
   },
 });
+
+// POST /v1/users/me/roles/guide, /v1/users/me/roles/participant
+//
+// CTL-97 defer-provisioning onboarding commands: TWO CONCRETE operations (not one generic
+// `{role}` path param) — mirrors src/api/onboarding-command/routes.ts, which registers two
+// concrete Express routes for the same reason (matching Core's type-safe two-endpoint
+// contract). CTL-97 Task 7: full per-field request body (Core's GuideOnboardingRequest /
+// ParticipantOnboardingRequest) + per-status/per-code examples.
+for (const { role, responseExample, requestSchema, requestExample } of [
+  {
+    role: "guide",
+    responseExample: onboardingCommandExample,
+    requestSchema: GuideOnboardingRequestSchema,
+    requestExample: guideOnboardingRequestExample,
+  },
+  {
+    role: "participant",
+    responseExample: onboardingCommandParticipantExample,
+    requestSchema: ParticipantOnboardingRequestSchema,
+    requestExample: participantOnboardingRequestExample,
+  },
+] as const) {
+  apiRoute({
+    method: "post",
+    path: `/v1/users/me/roles/${role}`,
+    tags: ["Onboarding"],
+    summary: `Provision the ${role.toUpperCase()} role (onboarding command)`,
+    description:
+      "CTL-97 defer-provisioning onboarding command — provisions this role in Core for the " +
+      "caller (a PENDING, not-yet-provisioned session is the ordinary case, but an already-" +
+      "PROVISIONED session acquiring a SECOND role also uses this endpoint), then converts " +
+      "THIS bff session to PROVISIONED with `currentRole` set to the newly-acquired role. The " +
+      "response is NOT Core's response verbatim — the bff adds `currentRole` (Core never owns " +
+      "it) only after the session conversion succeeds. The request body is forwarded to Core " +
+      "verbatim and modeled here from Core's own DTO " +
+      `(\`${role === "guide" ? "GuideOnboardingRequest" : "ParticipantOnboardingRequest"}\`).` +
+      "\n\n" +
+      "A Core 409 (`ROLE_ALREADY_GRANTED` — already held; or `ROLE_NOT_ELIGIBLE` — e.g. a " +
+      "PARENT participant can never become a GUIDE) or 422 `VALIDATION_FAILED` relays " +
+      "VERBATIM and never touches the session. A Core 201 whose body fails this bff's " +
+      "contract validation (bad `user.id`, `acquiredRole` not a switchable role / not matching " +
+      "this route / not itself in `roles`, or any `roles` entry outside the four known values) " +
+      "is 502 `UPSTREAM_CONTRACT_VIOLATION`, session untouched. A session-store write failure " +
+      "AFTER a genuine Core 201 (Core does NOT roll back) is 500 `SESSION_CONVERSION_FAILED` — " +
+      "reconcile via `GET /v1/userinfo` (it repairs a still-pending session once Core reports " +
+      "provisioned) rather than resending this command.\n\n" +
+      "**CSRF-guarded** (state-changing mutation) — a cross-site POST is rejected.",
+    request: {
+      body: {
+        content: {
+          "application/json": {
+            schema: requestSchema,
+            example: requestExample,
+          },
+        },
+      },
+    },
+    responses: {
+      201: enveloped(OnboardingCommandResponseSchema, {
+        description:
+          "The role was provisioned in Core and this session is now PROVISIONED, with " +
+          "`currentRole` set to the acquired role.",
+        example: responseExample,
+      }),
+      409: problemResponseMulti(
+        "Relayed verbatim from Core — the session is left unchanged either way.",
+        {
+          roleAlreadyGranted: {
+            summary: "Role already held",
+            value: problem(
+              409,
+              "Role already granted",
+              "ROLE_ALREADY_GRANTED",
+              "This account already holds this role.",
+            ),
+          },
+          roleNotEligible: {
+            summary: "Role not eligible",
+            value: problem(
+              409,
+              "Role not eligible",
+              "ROLE_NOT_ELIGIBLE",
+              "This account is not eligible for this role (e.g. a PARENT participant cannot " +
+                "become a GUIDE).",
+            ),
+          },
+        },
+      ),
+      422: problem422(
+        "VALIDATION_FAILED",
+        "Validation failed",
+        "The request body failed Core's validation — relayed verbatim. The session is left " +
+          "unchanged.",
+      ),
+      500: problemResponse(
+        "The role WAS provisioned in Core (not rolled back), but converting this bff session " +
+          "failed after a retry. Reconcile via `GET /v1/userinfo` rather than resending this " +
+          "command.",
+        problem(500, "Session conversion failed", "SESSION_CONVERSION_FAILED"),
+      ),
+      502: problem502(
+        "The Core API was unreachable/returned a 5xx, or returned a 201 whose body failed " +
+          "this bff's contract validation (`UPSTREAM_CONTRACT_VIOLATION`).",
+      ),
+    },
+  });
+}
 
 // --- Booking / cart (participant) ---
 
@@ -1119,8 +1331,9 @@ apiRoute({
   description:
     "Begins the OAuth 2.0 / OIDC Authorization Code + PKCE flow and 302-redirects the browser to " +
     "Google's authorization endpoint. Sets a short-lived `ctl_auth_tx` transaction cookie holding " +
-    "the PKCE verifier, state, sanitized `returnTo`, and `intent`. This is the entry point you use " +
-    "to obtain a session cookie so protected endpoints become exercisable from `/docs`.",
+    "the PKCE verifier, state, sanitized `returnTo`, `intent`, and `requestedRole` (CTL-97). This " +
+    "is the entry point you use to obtain a session cookie so protected endpoints become " +
+    "exercisable from `/docs`.",
   request: {
     query: z.object({
       returnTo: z
@@ -1137,6 +1350,13 @@ apiRoute({
         description:
           "`signup` provisions a new account against Core; `signin` requires an existing one.",
         example: "signin",
+      }),
+      role: CoreRoleEnum.optional().openapi({
+        description:
+          "The role this entry is for (CTL-97) — written into the auth transaction and read " +
+          "back by the callback to decide currentRole initialisation. Preferred over inferring " +
+          "a role from `returnTo` (a legacy, marked-for-removal fallback).",
+        example: "GUIDE",
       }),
       login_hint: z.string().optional().openapi({
         description: "Optional email hint forwarded to Google to pre-fill the account chooser.",
@@ -1161,11 +1381,23 @@ apiRoute({
   summary: "Google OAuth redirect target",
   description:
     "Handles Google's redirect: validates PKCE state against `ctl_auth_tx`, exchanges the code for " +
-    "tokens, resolves the account against Core `/session?intent=` (enforcing signup vs signin), then " +
-    "302-redirects into the web app. On success it establishes the `ctl_sess` session cookie and " +
-    "lands the user by role (their role's home, that role's onboarding, or role selection). Provider " +
-    "errors and role-blocked cases (e.g. PARENT→guide) redirect back into the UI WITHOUT a session. " +
-    "You don't call this directly — Google does.",
+    "tokens, then resolves account state against Core `GET /users/me` (Profile Contract v2, CTL-97) " +
+    "BEFORE any session is established, branching on its status+code: 200 → an existing, " +
+    "provisioned account (see the role-landing logic below); 404 `ACCOUNT_NOT_PROVISIONED` on a " +
+    "signup → a brand-new signup, so a **PENDING** session (24h absolute TTL) is committed and the " +
+    "user is sent to `/onboarding/{role}` (or `/signup/role` to pick one first); the same 404 on a " +
+    "signin → `/signin?error=not_registered` with NO session; 403 `ACCOUNT_SUSPENDED`/" +
+    "`ACCOUNT_DELETED` or 409 `ACCOUNT_STATE_INVALID` → a coded `/signin?error=` destination with NO " +
+    "session; anything else (a 404 with a different/no code, 401, 5xx, a transport failure) is a " +
+    "system error — 502 `RESOLVE_FAILED`, NO session. On the 200 path it 302-redirects into the web " +
+    "app and initialises this session's role state from `requestedRole` (written by `GET /auth/login`" +
+    ", CTL-97, re-validated against the Role enum here): holding it → `currentRole` (role home); " +
+    "lacking it on signup (and eligible — see Core role-eligibility) → redirects to that role's " +
+    "onboarding, without a session marker (the frontend page guard re-derives access statelessly); " +
+    "lacking it on signin → `/signup/role`; no `requestedRole` with exactly one held role → " +
+    "`currentRole` initialised to it; otherwise role selection. Provider errors and role-blocked " +
+    "cases (e.g. PARENT→guide) redirect back into the UI WITHOUT a session. You don't call this " +
+    "directly — Google does.",
   request: {
     query: z.object({
       code: z
@@ -1189,21 +1421,28 @@ apiRoute({
   responses: {
     302: {
       description:
-        "Redirect into the web app. `Location` depends on the outcome: on success the role-aware " +
-        "landing (e.g. /dashboard, /onboarding/guide) with `ctl_sess` set; on a cancelled/failed " +
-        "provider error or an unregistered signin, a UI page (e.g. /signin?error=not_registered) " +
-        "with NO session.",
+        "Redirect into the web app. `Location` depends on the outcome: on success (Core 200) the " +
+        "role-aware landing (e.g. /dashboard, /onboarding/guide) with `ctl_sess` set to a " +
+        "PROVISIONED session; on a brand-new signup (Core 404 `ACCOUNT_NOT_PROVISIONED`) " +
+        "`/onboarding/{role}` (or `/signup/role`) with `ctl_sess` set to a **PENDING** session; on " +
+        "a cancelled/failed provider error, an unregistered signin, a suspended/deleted account, " +
+        "or an account-state integrity error, a UI page (e.g. /signin?error=not_registered, " +
+        "?error=account_suspended, ?error=account_deleted, ?error=account_error) with NO session.",
     },
     400: problem400(
       "AUTH_TX_MISSING",
       "Login session expired — please start again.",
-      "Missing/expired `ctl_auth_tx` transaction cookie (`AUTH_TX_MISSING`), or missing code / " +
-        "invalid state (`AUTH_STATE_INVALID`).",
+      "Missing/expired `ctl_auth_tx` transaction cookie (`AUTH_TX_MISSING`), missing code / " +
+        "invalid state (`AUTH_STATE_INVALID`), or a missing/invalid `intent` on the transaction " +
+        "(`AUTH_INTENT_INVALID`) — never defaulted to signup.",
     ),
     502: problem502(
       "Token exchange (`AUTH_EXCHANGE_FAILED`) or account resolution against Core " +
-        "(`CORE_UNAVAILABLE` / `RESOLVE_FAILED`) failed.",
-      problem(502, "Account resolution failed", "CORE_UNAVAILABLE"),
+        "(`RESOLVE_FAILED`) failed — the latter covers any `GET /users/me` outcome that isn't a " +
+        "clean 200/404-`ACCOUNT_NOT_PROVISIONED`/403-suspended-or-deleted/409-invalid (a " +
+        "differently-coded or uncoded 404, a 401, a 5xx, or a transport failure), and also a " +
+        "failed role-eligibility check on a signup that lacks `requestedRole`.",
+      problem(502, "Account resolution failed", "RESOLVE_FAILED"),
     ),
   },
 });
@@ -1273,7 +1512,7 @@ export const openapiSpec = generator.generateDocument({
     },
     description:
       "The frontend-facing API the BFF owns: the Google sign-in lifecycle (`/auth/*`) and the " +
-      "`/v1` aggregation composites (`/v1/dashboard`, `/v1/onboarding`).\n\n" +
+      "`/v1` aggregation composites (`/v1/dashboard`).\n\n" +
       "### Response shapes\n" +
       '- **Success** aggregation responses use the envelope `{ "data": <payload>, "meta": ' +
       '{ "requestId": "<uuid>" } }`. `meta.requestId` echoes the `X-Request-Id` header for tracing.\n' +
@@ -1294,9 +1533,25 @@ export const openapiSpec = generator.generateDocument({
   servers: [{ url: "/" }],
   tags: [
     { name: "Auth", description: "Google sign-in session lifecycle (`/auth/*`)." },
+    {
+      name: "Session",
+      description:
+        "Bootstrap identity/roles/current-role read the frontend calls on every page load.",
+    },
     { name: "Dashboard", description: "Role-shaped signed-in home aggregate." },
-    { name: "Onboarding", description: "Per-role onboarding progress aggregate." },
+    {
+      name: "Onboarding",
+      description:
+        "CTL-97 defer-provisioning role-onboarding commands — provision a role in Core, then " +
+        "convert this bff session to PROVISIONED.",
+    },
     { name: "Tours", description: "Anonymous marketplace tour discovery." },
+    {
+      name: "Meta",
+      description:
+        "Public reference/config data proxied transparently from Core (e.g. enrolment-year " +
+        "validation rules).",
+    },
     { name: "Booking", description: "Participant booking and cart operations." },
     {
       name: "Availability",
