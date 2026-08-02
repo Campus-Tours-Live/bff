@@ -273,8 +273,14 @@ src/
 │   ├── onboarding/           #   GET /v1/onboarding (fan-out aggregation)
 │   ├── bookings/             #   POST /v1/bookings (+ /:id/cancel) — reshape of Core /bookings
 │   ├── cart/                 #   GET/POST/DELETE /v1/cart* — reshape of Core /cart (DRAFT bookings)
+│   ├── availability/         #   guide availability CRUD + resolved read + participant slots
+│   ├── public-tours/         #   anonymous marketplace discovery (tour catalog + single tour)
 │   └── _shared/              #   withSession + withMutation, CoreClient, reshapeBooking, writeOpts,
 │                             #   envelope, reauth, errors, types
+├── openapi/                  # OpenAPI 3.1 spec built in-code — the zod DSL + schemas
+│   ├── helpers.ts            #   the apiRoute / enveloped / problemXXX DSL
+│   ├── index.ts              #   registers every BFF-owned path; generates openapiSpec
+│   └── schemas.ts            #   zod schemas — single source of truth (docs + runtime guards)
 ├── proxy/
 │   └── coreProxy.ts          # catch-all /v1/* passthrough to the Core (bearer, idempotency)
 └── util/
@@ -362,30 +368,32 @@ How a failed refresh is classified matters, because the two outcomes are opposit
 
 **Front-facing (called by the web app):**
 
-| Route                                                                                                                 | Purpose                                                               |
-| --------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------- |
-| `GET /health`                                                                                                         | Liveness — `{ "status": "ok", "auth": "google" }`                     |
-| `GET /docs`                                                                                                           | Swagger UI — interactive Contract A reference                         |
-| `GET /openapi.json`                                                                                                   | OpenAPI 3.1 spec (Contract A), generated in-code from the zod schemas |
-| `GET /auth/login`                                                                                                     | Start Google sign-in. Query: `returnTo`, `intent`, `login_hint`       |
-| `GET /auth/callback`                                                                                                  | Google redirect target (code → session, then redirect to the web app) |
-| `POST /auth/logout`                                                                                                   | Clear the session cookie, return to the web app (CSRF-guarded)        |
-| `GET /auth/session`                                                                                                   | `{ authenticated: boolean }` (no Core call)                           |
-| `GET /v1/dashboard`                                                                                                   | **Aggregation** — role-aware home (discriminated by `kind`)           |
-| `GET /v1/onboarding`                                                                                                  | **Aggregation** — onboarding bootstrap data                           |
-| `POST /v1/bookings`                                                                                                   | **Reshape** — create a booking; Core reply mapped to Contract A       |
-| `POST /v1/bookings/:id/cancel`                                                                                        | **Reshape** — cancel own booking; reshaped reply                      |
-| `GET /v1/cart`                                                                                                        | **Reshape** — the booking cart (list of reshaped DRAFT bookings)      |
-| `POST /v1/cart/items`                                                                                                 | **Reshape** — validate + add a cart item; reshaped reply              |
-| `DELETE /v1/cart/items/:id`                                                                                           | **Reshape** — remove a cart item; reshaped cart list                  |
-| `POST /v1/cart/checkout`                                                                                              | **Reshape** — check out the whole cart atomically; reshaped list      |
-| `GET /v1/availability`                                                                                                | **Reshape** — the guide's resolved availability                       |
-| `GET\|POST /v1/availability/preview`                                                                                  | **Reshape** — dry-run a rule/override change before saving            |
-| `GET\|POST /v1/availability/rules`, `PATCH\|DELETE /v1/availability/rules/:id`, `POST /v1/availability/rules/replace` | **Reshape** — weekly recurring hours                                  |
-| `GET\|POST /v1/availability/exceptions`, `PATCH\|DELETE /v1/availability/exceptions/:id`                              | **Reshape** — date-specific overrides                                 |
-| `GET\|PATCH /v1/availability/settings`                                                                                | **Reshape** — booking settings (timezone, notice, buffers)            |
-| `GET /v1/offerings/:id/slots`                                                                                         | **Reshape** — bookable slots for one offering                         |
-| `ALL /v1/*` (other)                                                                                                   | **Proxy** to the Core API — bearer attached, except public reads      |
+| Route                                                                                                                               | Purpose                                                                 |
+| ----------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------- |
+| `GET /health`                                                                                                                       | Liveness — `{ "status": "ok", "auth": "google" }`                       |
+| `GET /docs`                                                                                                                         | Swagger UI — interactive Contract A reference                           |
+| `GET /openapi.json`                                                                                                                 | OpenAPI 3.1 spec (Contract A), generated in-code from the zod schemas   |
+| `GET /auth/login`                                                                                                                   | Start Google sign-in. Query: `returnTo`, `intent`, `login_hint`         |
+| `GET /auth/callback`                                                                                                                | Google redirect target (code → session, then redirect to the web app)   |
+| `POST /auth/logout`                                                                                                                 | Clear the session cookie, return to the web app (CSRF-guarded)          |
+| `GET /auth/session`                                                                                                                 | `{ authenticated: boolean }` (no Core call)                             |
+| `GET /v1/tours`                                                                                                                     | **Public** — anonymous marketplace tour catalog (reshape-relay to Core) |
+| `GET /v1/tours/:tourId`                                                                                                             | **Public** — anonymous single tour detail (reshape-relay to Core)       |
+| `GET /v1/dashboard`                                                                                                                 | **Aggregation** — role-aware home (discriminated by `kind`)             |
+| `GET /v1/onboarding`                                                                                                                | **Aggregation** — onboarding bootstrap data                             |
+| `POST /v1/bookings`                                                                                                                 | **Reshape** — create a booking; Core reply mapped to Contract A         |
+| `POST /v1/bookings/:id/cancel`                                                                                                      | **Reshape** — cancel own booking; reshaped reply                        |
+| `GET /v1/cart`                                                                                                                      | **Reshape** — the booking cart (list of reshaped DRAFT bookings)        |
+| `POST /v1/cart/items`                                                                                                               | **Reshape** — validate + add a cart item; reshaped reply                |
+| `DELETE /v1/cart/items/:id`                                                                                                         | **Reshape** — remove a cart item; reshaped cart list                    |
+| `POST /v1/cart/checkout`                                                                                                            | **Reshape** — check out the whole cart atomically; reshaped list        |
+| `GET /v1/availability`                                                                                                              | **Reshape** — the guide's resolved availability                         |
+| `GET\|POST /v1/availability/preview`                                                                                                | **Reshape** — dry-run a rule/override change before saving              |
+| `GET\|POST /v1/availability/rules`, `PATCH\|DELETE /v1/availability/rules/:id`, `POST /v1/availability/rules/replace`               | **Reshape** — weekly recurring hours                                    |
+| `GET\|POST /v1/availability/exceptions`, `PATCH\|DELETE /v1/availability/exceptions/:id`, `POST /v1/availability/overrides/replace` | **Reshape** — date-specific overrides (incl. atomic single-day replace) |
+| `GET\|PATCH /v1/availability/settings`                                                                                              | **Reshape** — booking settings (timezone, notice, buffers)              |
+| `GET /v1/offerings/:id/slots`                                                                                                       | **Reshape** — bookable slots for one offering                           |
+| `ALL /v1/*` (other)                                                                                                                 | **Proxy** to the Core API — bearer attached, except public reads        |
 
 The composite/reshape routes are mounted under `/v1` **before** the catch-all proxy, so they win
 over the passthrough. Their paths are **generic** (`/v1/bookings*`, `/v1/cart*`, `/v1/availability*`) — they mirror the
@@ -404,8 +412,11 @@ The BFF talks to exactly one downstream — the Core — and exposes three patte
   The BFF never mints one: a fresh key per request is unique every time, so the Core would record a
   row per mutation and never dedupe. Transport failures become `502`.
 
-  Not every proxied request carries a `Bearer`. `GET`/`HEAD` on `/tours`, `/tours/*` and `/meta/*`
-  are **public reads**, forwarded anonymously with no session; everything else requires one.
+  Not every proxied request carries a `Bearer`. The tours catalog (`/v1/tours`) and a single tour
+  (`/v1/tours/:tourId`) are now **BFF-owned** endpoints — a public-tours handler intercepts them
+  ahead of the proxy, so they no longer reach `coreProxy`. The proxy's own anonymous **public read**
+  (`GET`/`HEAD`, no session) covers the rest — the deeper `/tours/*` and `/meta/*` paths; everything
+  else requires a session.
 
   The path is **canonicalised before** that public/private decision is made, so a traversal cannot
   dress a private path up as a public one — and the same canonical path is what gets forwarded, so
@@ -480,9 +491,10 @@ Contract A is documented as an **OpenAPI 3.1** spec, served by the BFF itself:
 
 Both come up **with the BFF** (they're routes in `app.ts`, same `:4000` port — no separate process),
 and the spec is **generated in-code from the zod schemas** in `src/openapi/`, so it is a single source
-of truth that can't drift from the running app. Scope is the **BFF-owned** surface (`/auth/*` + the
-`/v1` aggregation composites); every other `/v1/*` path proxies the Core and is documented by the
-Core's own spec (linked via `externalDocs` → `/v3/api-docs`).
+of truth that can't drift from the running app. Scope is the **BFF-owned** surface — `/auth/*` plus
+every `/v1` route the BFF serves itself (the aggregation composites, the reshaped bookings / cart /
+availability resources, and the public tours endpoints); every other `/v1/*` path proxies the Core
+and is documented by the Core's own spec (linked via `externalDocs` → `/v3/api-docs`).
 
 > **Trying protected endpoints in Swagger UI:** auth is the httpOnly `ctl_sess` cookie, which _cannot_
 > be pasted into the _Authorize_ box. Sign in first via `GET /auth/login` in the same browser — the
@@ -552,8 +564,9 @@ npm run test:coverage     # explicit coverage alias (same coverage as `npm test`
 - **Coverage is 100%** (a few genuinely-unreachable defensive branches are marked
   `/* istanbul ignore */`); Jest enforces a **90%** gate (statements / branches / functions / lines)
   to leave headroom.
-- Tests run under `NODE_OPTIONS=--experimental-vm-modules` (ESM + ts-jest), wired into the npm
-  scripts already.
+- Tests run Jest with `--experimental-vm-modules` (ESM + ts-jest); the npm scripts pass the flag
+  **directly to `node`** (`node --experimental-vm-modules ./node_modules/jest/bin/jest.js`), not via
+  a `NODE_OPTIONS` environment variable.
 
 ---
 
