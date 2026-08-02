@@ -73,8 +73,15 @@ describe("session cookie", () => {
       });
       const setCookie = res.cookies[0];
       const value = setCookie.split(";")[0].slice("ctl_sess=".length);
-      // Flip a character so the GCM auth tag no longer verifies.
-      const tampered = value.slice(0, -1) + (value.endsWith("A") ? "B" : "A");
+      // Corrupt a BYTE, not the last base64 character. The cookie is 83 bytes (12 IV + 16 tag +
+      // 55 ciphertext) and 83 % 3 == 2, so the final base64url character carries only its top 4
+      // bits — the low 2 are padding that decoding discards. Swapping that character between "A"
+      // and "B" changes only the lowest bit, so ~1 run in 16 (whenever it ends in A/B/C/D) decoded
+      // to the IDENTICAL bytes, the cookie still verified, and this test failed for a reason that
+      // looked like flakiness. Flipping a byte of the IV always changes the plaintext.
+      const raw = Buffer.from(value, "base64url");
+      raw[0] ^= 0xff;
+      const tampered = raw.toString("base64url");
       const req = reqWithCookie(`ctl_sess=${tampered}`);
       expect(readSession(req)).toBeNull();
     });
