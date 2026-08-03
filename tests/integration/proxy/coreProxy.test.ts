@@ -561,4 +561,83 @@ describe("coreProxy (/v1/* passthrough)", () => {
       expect(res.headers["cache-control"]).toBeUndefined();
     });
   });
+
+  describe("GET /v1/universities — the browsable directory", () => {
+    const SUMMARY = { byState: { CA: 148, NY: 167 }, total: 1903 };
+
+    /**
+     * The directory is what an anonymous visitor came to look at, like the tour catalog. If a later
+     * tightening of `isPublicGet` dropped it, the browse page would 401 — and this proxy turns a
+     * Core 401 into clearSession, so browsing would log a signed-in user out.
+     */
+    it("serves the state summary anonymously — no session cookie required", async () => {
+      const mock = mockCoreByPath({
+        "/universities/state-summary": coreOk(SUMMARY, {
+          "cache-control": "public, max-age=86400",
+        }),
+      });
+
+      // Deliberately NO .set("Cookie", ...).
+      const res = await request(app).get("/v1/universities/state-summary");
+
+      expect(res.status).toBe(200);
+      expect(
+        mock.mock.calls.some(([url]) => String(url).includes("/universities/state-summary")),
+      ).toBe(true);
+    });
+
+    it("serves one state's list anonymously, query string intact", async () => {
+      const mock = mockCoreByPath({
+        "/universities": coreOk({ state: "CA", universities: [], total: 148 }),
+      });
+
+      const res = await request(app).get("/v1/universities?state=CA");
+
+      expect(res.status).toBe(200);
+      expect(String(mock.mock.calls[0]![0])).toBe("http://core.test/universities?state=CA");
+    });
+
+    /**
+     * HEAD is public for the same reason GET is: a HEAD that fell through to the bearer path would
+     * 401, and a Core 401 here means clearSession — so a prefetcher's metadata request would end
+     * the user's session.
+     */
+    it("treats HEAD as public too, so a prefetch cannot log anyone out", async () => {
+      mockCoreByPath({ "/universities/state-summary": coreOk(SUMMARY) });
+
+      const res = await request(app).head("/v1/universities/state-summary");
+
+      expect(res.status).toBe(200);
+      expect(res.headers["auth-required"]).toBeUndefined();
+    });
+
+    it("relays Core's Cache-Control unchanged rather than imposing its own", async () => {
+      mockCoreByPath({
+        "/universities/state-summary": coreOk(SUMMARY, {
+          "cache-control": "public, max-age=86400",
+        }),
+      });
+
+      const res = await request(app).get("/v1/universities/state-summary");
+
+      expect(res.headers["cache-control"]).toBe("public, max-age=86400");
+      // 300 is the flat policy the proxy owns for tour-topics/tour-features; applying it here
+      // would move a decision Core makes from how often IPEDS publishes into this file.
+      expect(res.headers["cache-control"]).not.toContain("max-age=300");
+    });
+
+    /**
+     * The one that matters. Core answers 503 with no Cache-Control when the directory is
+     * unreadable; caching that would leave the browse page dead long after Core recovered. The
+     * relay is 200-only, and this is the guard on that.
+     */
+    it("caches nothing when Core reports the directory unavailable", async () => {
+      mockCoreByPath({ "/universities/state-summary": coreErr(503, { title: "unavailable" }) });
+
+      const res = await request(app).get("/v1/universities/state-summary");
+
+      expect(res.status).toBe(503);
+      expect(res.headers["cache-control"]).toBeUndefined();
+    });
+  });
 });
