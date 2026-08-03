@@ -38,7 +38,17 @@ function splitRaw(req: Request): { rawPath: string; rawQuery: string } {
 function isPublicGet(req: Request): boolean {
   if (req.method !== "GET" && req.method !== "HEAD") return false;
   const path = canonicalPath(req);
-  return path === "/tours" || path.startsWith("/tours/") || path.startsWith("/meta/");
+  return (
+    path === "/tours" ||
+    path.startsWith("/tours/") ||
+    path.startsWith("/meta/") ||
+    // The browsable university directory — what an anonymous visitor came to look at, like the
+    // tour catalog. HEAD counts for the same reason it does above: a HEAD that fell through to
+    // the bearer path would 401, and this proxy turns a Core 401 into clearSession, so a
+    // prefetcher's metadata request would log the user out.
+    path === "/universities" ||
+    path.startsWith("/universities/")
+  );
 }
 
 /**
@@ -64,7 +74,16 @@ function isCacheableStaticMeta(req: Request): boolean {
  * Distinct from CACHEABLE_STATIC_META on purpose: that set is one the PROXY owns a policy for;
  * this one is a set the proxy must not have an opinion about.
  */
-const UPSTREAM_CACHE_CONTROL_PATHS = new Set(["/meta/enrollment-years"]);
+const UPSTREAM_CACHE_CONTROL_PATHS = new Set([
+  "/meta/enrollment-years",
+  // The university directory. Relayed rather than given a policy here for two reasons: Core
+  // already ties its max-age to how often the underlying IPEDS data is published, and — the part
+  // that matters — Core answers 503 with NO Cache-Control when the directory is unreadable. The
+  // relay is `status === 200` only, so that 503 stays uncached; a policy the proxy owned would
+  // have to remember to make the same exception.
+  "/universities",
+  "/universities/state-summary",
+]);
 
 function relaysUpstreamCacheControl(req: Request): boolean {
   if (req.method !== "GET") return false;
