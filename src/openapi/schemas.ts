@@ -703,6 +703,14 @@ export const GuideProfile = registry.register(
         .array(z.string())
         .optional()
         .openapi({ description: "Tour focus areas.", example: ["engineering", "campus-life"] }),
+      avgRating: z.number().nullable().optional().openapi({
+        description: "Average rating across all published reviews. Null when no reviews yet.",
+        example: 4.5,
+      }),
+      reviewCount: z.number().int().optional().openapi({
+        description: "Total published review count.",
+        example: 12,
+      }),
     })
     .openapi("GuideProfile", { description: "Guide profile record forwarded from Core." }),
 );
@@ -826,6 +834,31 @@ export const BookingListSchema = z.array(BookingResponseSchema);
 
 // --- Dashboard payloads (GET /v1/dashboard, discriminated by `kind`) ---
 
+/** Earnings snapshot forwarded from Core `GET /guide/earnings`. */
+export const GuideEarnings = registry.register(
+  "GuideEarnings",
+  z
+    .object({
+      earningsThisMonthCents: z.number().int().openapi({
+        description:
+          "Sum of guide_amount_cents for tours completed in the current UTC calendar month.",
+        example: 8400,
+      }),
+      upcomingPayoutCents: z.number().int().openapi({
+        description:
+          "Sum of guide_amount_cents for confirmed/in-progress tours — earnings on completion.",
+        example: 4200,
+      }),
+      currency: z.string().openapi({
+        description: "ISO-4217 currency for all cent values.",
+        example: "USD",
+      }),
+    })
+    .openapi("GuideEarnings", {
+      description: "Guide earnings snapshot: this-month earnings and upcoming payout.",
+    }),
+);
+
 /** GET /v1/dashboard, guide variant (src/api/dashboard/guide.ts). */
 const GuideDashboard = z
   .object({
@@ -843,6 +876,10 @@ const GuideDashboard = z
     }),
     offerings: z.array(Offering).openapi({
       description: "The guide's offerings (best-effort — empty list if the Core read fails).",
+    }),
+    earnings: GuideEarnings.nullable().openapi({
+      description:
+        "Earnings snapshot forwarded from Core GET /guide/earnings (best-effort — null if the Core read fails).",
     }),
     createdAt: z
       .string()
@@ -999,6 +1036,8 @@ export const guideDashboardExample = envelope({
     bio: "Sophomore who loves showing off the maker space.",
     spokenLanguages: ["en", "es"],
     tourTopics: ["engineering", "campus-life"],
+    avgRating: 4.5,
+    reviewCount: 12,
   },
   guideStatus: "VERIFIED",
   canPublish: true,
@@ -1016,6 +1055,11 @@ export const guideDashboardExample = envelope({
       description: "A 45-minute walk through the parts of campus the official tour skips.",
     },
   ],
+  earnings: {
+    earningsThisMonthCents: 8400,
+    upcomingPayoutCents: 4200,
+    currency: "USD",
+  },
   createdAt: "2025-09-01T12:00:00.000Z",
 });
 
@@ -1789,6 +1833,7 @@ export const GuideDashboardDataSchema = z.object({
   guideStatus: z.string().nullable(), // forwarded from Core — value not constrained here
   canPublish: z.boolean(), // BFF-derived
   offerings: z.array(LooseObject), // BFF owns "it's an array"; items are Core-opaque
+  earnings: LooseObject.nullish(), // forwarded from Core GET /guide/earnings (best-effort — null on failure)
   createdAt: z.string().nullish(), // forwarded from Core (may be null, not just absent)
 });
 

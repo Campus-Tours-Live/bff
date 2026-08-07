@@ -28,7 +28,13 @@ describe("GET /v1/dashboard", () => {
     cookie = mintSessionCookie();
   });
 
-  it("guide-active session → 200 guide dashboard with offerings and canPublish", async () => {
+  const EARNINGS = {
+    earningsThisMonthCents: 8400,
+    upcomingPayoutCents: 4200,
+    currency: "USD",
+  };
+
+  it("guide-active session → 200 guide dashboard with offerings, earnings, and canPublish", async () => {
     cookie = mintSessionCookie({ currentRole: "GUIDE" });
     mockCoreByPath({
       "/users/me": usersMeOk(["GUIDE"]),
@@ -38,6 +44,7 @@ describe("GET /v1/dashboard", () => {
         guideStatus: "VERIFIED",
       }),
       "/guide/offerings": coreOk([{ id: "o1", title: "Campus Walk" }]),
+      "/guide/earnings": coreOk(EARNINGS),
     });
 
     const res = await request(app).get("/v1/dashboard").set("Cookie", cookie);
@@ -52,6 +59,7 @@ describe("GET /v1/dashboard", () => {
       guideStatus: "VERIFIED",
     });
     expect(res.body.data.offerings).toEqual([{ id: "o1", title: "Campus Walk" }]);
+    expect(res.body.data.earnings).toEqual(EARNINGS);
     // Response-shape contract: body ↔ documented envelope schema (loose on Core-forwarded
     // fields, strict on the BFF-owned envelope/kind/canPublish/offerings shape).
     expect(EnvelopedDashboardSchema.safeParse(res.body).success).toBe(true);
@@ -63,6 +71,7 @@ describe("GET /v1/dashboard", () => {
       "/users/me": usersMeOk(["GUIDE"]),
       "/guide/profile": coreOk({ id: "g1", guideStatus: "PENDING" }),
       "/guide/offerings": coreOk([]),
+      "/guide/earnings": coreOk(EARNINGS),
     });
 
     const res = await request(app).get("/v1/dashboard").set("Cookie", cookie);
@@ -130,6 +139,7 @@ describe("GET /v1/dashboard", () => {
       "/users/me": usersMeOk(["GUIDE"]),
       "/guide/profile": coreOk({ id: "g1", guideStatus: "VERIFIED" }),
       "/guide/offerings": coreErr(500),
+      "/guide/earnings": coreOk(EARNINGS),
     });
 
     const res = await request(app).get("/v1/dashboard").set("Cookie", cookie);
@@ -138,6 +148,22 @@ describe("GET /v1/dashboard", () => {
     expect(res.body.data.kind).toBe("guide");
     expect(res.body.data.offerings).toEqual([]);
     expect(res.body.data.canPublish).toBe(true);
+  });
+
+  it("earnings fetch fails for a guide → degrades to earnings:null (still 200)", async () => {
+    cookie = mintSessionCookie({ currentRole: "GUIDE" });
+    mockCoreByPath({
+      "/users/me": usersMeOk(["GUIDE"]),
+      "/guide/profile": coreOk({ id: "g1", guideStatus: "VERIFIED" }),
+      "/guide/offerings": coreOk([]),
+      "/guide/earnings": coreErr(500),
+    });
+
+    const res = await request(app).get("/v1/dashboard").set("Cookie", cookie);
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.kind).toBe("guide");
+    expect(res.body.data.earnings).toBeNull();
   });
 
   it("PENDING (not-yet-provisioned, not expired) session → still 200, defaults to participant (no currentRole to read)", async () => {
@@ -189,6 +215,7 @@ describe("GET /v1/dashboard", () => {
       "/users/me": usersMeOk(["GUIDE"]),
       "/guide/profile": coreErr(503),
       "/guide/offerings": coreOk([]),
+      "/guide/earnings": coreOk(EARNINGS),
     });
 
     const res = await request(app).get("/v1/dashboard").set("Cookie", cookie);
