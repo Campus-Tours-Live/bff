@@ -9,14 +9,16 @@ import type { Request, Response } from "express";
 const resolveBearer = jest.fn<(...args: unknown[]) => Promise<string | null>>();
 const requireReauth = jest.fn<(...args: unknown[]) => void>();
 const authUpstreamUnavailable = jest.fn<(...args: unknown[]) => void>();
-// The REAL TransientAuthError — coreProxy branches on `instanceof`, so a stand-in would
-// silently never match. (N2)
-const { TransientAuthError } = await import("@/api/_shared/errors.js");
+// The REAL TransientAuthError/PendingSessionExpiredError — coreProxy branches on `instanceof`,
+// so a stand-in would silently never match. (N2; PendingSessionExpiredError added for the
+// CTL-97 Task 4 review fix.)
+const { TransientAuthError, PendingSessionExpiredError } = await import("@/api/_shared/errors.js");
 jest.unstable_mockModule("@/api/_shared/index.js", () => ({
   resolveBearer: (...args: unknown[]) => resolveBearer(...args),
   requireReauth: (...args: unknown[]) => requireReauth(...args),
   authUpstreamUnavailable: (...args: unknown[]) => authUpstreamUnavailable(...args),
   TransientAuthError,
+  PendingSessionExpiredError,
 }));
 
 const { coreProxy } = await import("@/proxy/coreProxy.js");
@@ -43,9 +45,9 @@ describe("coreProxy (unit) — transient refresh failure (N2)", () => {
   });
 
   /**
-   * coreProxy is the third resolveBearer call site and the one that serves /v1/userinfo —
-   * i.e. the request the web app makes on every page. If Google being down made THIS route
-   * re-auth, the whole point of preserving the session would be lost.
+   * coreProxy is the third resolveBearer call site — every proxied `/v1/*` read (e.g. a
+   * guide's own profile). If Google being down made THIS route re-auth, the whole point of
+   * preserving the session would be lost.
    */
   it("answers 'temporarily unavailable' and never re-auths when the refresh is transient", async () => {
     resolveBearer.mockRejectedValue(new TransientAuthError());
@@ -54,8 +56,8 @@ describe("coreProxy (unit) — transient refresh failure (N2)", () => {
 
     const req = {
       method: "GET",
-      url: "/v1/userinfo",
-      originalUrl: "/v1/userinfo",
+      url: "/v1/guide/profile",
+      originalUrl: "/v1/guide/profile",
       headers: {},
       header: () => undefined,
     } as unknown as Request;
@@ -75,8 +77,8 @@ describe("coreProxy (unit) — transient refresh failure (N2)", () => {
 
     const req = {
       method: "GET",
-      url: "/v1/userinfo",
-      originalUrl: "/v1/userinfo",
+      url: "/v1/guide/profile",
+      originalUrl: "/v1/guide/profile",
       headers: {},
       header: () => undefined,
     } as unknown as Request;

@@ -1,12 +1,20 @@
 import type { Response } from "express";
-import { type CoreClient, sendData, type Json, type Me } from "../_shared/index.js";
+import {
+  type CoreClient,
+  sendData,
+  type Json,
+  type Me,
+  PUBLISHABLE_STATUS,
+} from "../_shared/index.js";
 import { GuideDashboardDataSchema } from "../../openapi/schemas.js";
 
 /**
  * Guide workspace: profile (required — throws → mapped by withSession) + offerings
- * (best-effort — degrades to empty list) + earnings (best-effort — degrades to null) +
- * `canPublish`, a computed convenience field mirroring the Core's publish gate. All
- * three Core reads are fanned out in parallel to cut latency.
+ * (best-effort — degrades to an empty list) + earnings (best-effort — degrades to null) +
+ * `canPublish`, a computed convenience field mirroring the Core's publish gate: only a
+ * PUBLISHABLE_STATUS guide may publish an offering. The output `guideStatus` is read from
+ * the fetched guide profile's own `guideStatus` field (Profile Contract v2 — /userinfo no
+ * longer carries it). The three Core reads are fanned out in parallel to cut latency.
  */
 export async function guideDashboard(res: Response, core: CoreClient, me: Me): Promise<void> {
   const [guide, offerings, earnings] = await Promise.all([
@@ -14,16 +22,17 @@ export async function guideDashboard(res: Response, core: CoreClient, me: Me): P
     core.getOfferings<Json[]>().catch(() => [] as Json[]),
     core.getGuideEarnings<Json>().catch(() => null),
   ]);
+  const guideStatus = (guide.guideStatus as string | null | undefined) ?? null;
   sendData(
     res,
     {
       kind: "guide",
       guide,
-      guideStatus: me.guideStatus,
-      canPublish: me.guideStatus === "APPROVED",
+      guideStatus,
+      canPublish: guideStatus === PUBLISHABLE_STATUS,
       offerings,
       earnings,
-      createdAt: me.createdAt,
+      createdAt: me.user.createdAt,
     },
     GuideDashboardDataSchema,
   );

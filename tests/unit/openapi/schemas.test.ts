@@ -2,6 +2,8 @@ import { jest } from "@jest/globals";
 import {
   CreateAvailabilityExceptionRequestSchema,
   GuideDashboardDataSchema,
+  GuideProfile,
+  GuideUniversitySchema,
   ParticipantDashboardDataSchema,
   UpdateAvailabilityExceptionRequestSchema,
 } from "@/openapi/schemas.js";
@@ -126,5 +128,76 @@ describe("Dashboard data schemas tolerate a null createdAt (Core sends null, not
       createdAt: null,
     });
     expect(result.success).toBe(true);
+  });
+});
+
+/**
+ * `GuideProfile` (CTL-97 v2 Phase 2 Task 2.7): backend Task 2.3 replaced the flat single-school
+ * fields (`universityId`/`universityName`/`universityShortName`/`major`/`classYear`) with a
+ * per-school `universities[]` array (each entry also carrying `degree` and its own
+ * `verificationStatus`). The dashboard `guide` embed itself stays a runtime `LooseObject`
+ * (Core-opaque passthrough — see `GuideDashboardDataSchema`), so this is a doc-accuracy schema,
+ * not a runtime gate; these tests pin down its documented shape.
+ */
+describe("GuideProfile (CTL-97 universities[])", () => {
+  it("accepts the universities[] shape with per-school degree + entryYear + verificationStatus", () => {
+    const result = GuideProfile.safeParse({
+      guideStatus: "VERIFIED",
+      universities: [
+        {
+          universityId: "uni_mit",
+          universityName: "Massachusetts Institute of Technology",
+          universityShortName: "MIT",
+          major: "Computer Science",
+          degree: "Bachelor's",
+          classYear: "2026",
+          entryYear: 2023,
+          verificationStatus: "VERIFIED",
+        },
+      ],
+      bio: "Sophomore who loves showing off the maker space.",
+      spokenLanguages: ["en", "es"],
+      tourTopics: ["engineering", "campus-life"],
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("no longer has the guide-level basePriceCents/currency fields (dropped from the guide profile)", () => {
+    const shape = GuideProfile.shape;
+    expect(shape).not.toHaveProperty("basePriceCents");
+    expect(shape).not.toHaveProperty("currency");
+  });
+
+  it("no longer has the flat single-school fields at the top level", () => {
+    const shape = GuideProfile.shape;
+    expect(shape).not.toHaveProperty("universityId");
+    expect(shape).not.toHaveProperty("universityName");
+    expect(shape).not.toHaveProperty("universityShortName");
+    expect(shape).not.toHaveProperty("major");
+    expect(shape).not.toHaveProperty("classYear");
+    expect(shape).not.toHaveProperty("verificationStatus");
+    expect(shape).toHaveProperty("universities");
+  });
+
+  it("rejects a leaked schoolEmail on the top-level profile (strict parse)", () => {
+    const result = GuideProfile.strict().safeParse({
+      guideStatus: "VERIFIED",
+      universities: [],
+      schoolEmail: "guide@mit.edu",
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects a leaked schoolEmail on a per-school university entry (strict parse)", () => {
+    const result = GuideUniversitySchema.strict().safeParse({
+      universityId: "uni_mit",
+      universityName: "MIT",
+      // entryYear is this schema's ONLY required field (CTL-97 made it non-null). It must be
+      // supplied or the parse fails on the missing year and this test passes without ever
+      // exercising .strict() — leaving the schoolEmail leak it guards against undetected.
+      entryYear: 2023,
+      schoolEmail: "guide@mit.edu",
+    });
+    expect(result.success).toBe(false);
   });
 });

@@ -1,11 +1,13 @@
 import crypto from "node:crypto";
 import type { Request, Response } from "express";
 import { config } from "../config.js";
+import { clearSession } from "../session.js";
 import { sendProblem } from "../util/problem.js";
 import {
   requireReauth,
   authUpstreamUnavailable,
   resolveBearer,
+  PendingSessionExpiredError,
   TransientAuthError,
 } from "../api/_shared/index.js";
 import { isCrossSiteMutation } from "../util/csrf.js";
@@ -36,7 +38,17 @@ function splitRaw(req: Request): { rawPath: string; rawQuery: string } {
 function isPublicGet(req: Request): boolean {
   if (req.method !== "GET" && req.method !== "HEAD") return false;
   const path = canonicalPath(req);
-  return path === "/tours" || path.startsWith("/tours/") || path.startsWith("/meta/");
+  return (
+    path === "/tours" ||
+    path.startsWith("/tours/") ||
+    path.startsWith("/meta/") ||
+    // The browsable university directory — what an anonymous visitor came to look at, like the
+    // tour catalog. HEAD counts for the same reason it does above: a HEAD that fell through to
+    // the bearer path would 401, and this proxy turns a Core 401 into clearSession, so a
+    // prefetcher's metadata request would log the user out.
+    path === "/universities" ||
+    path.startsWith("/universities/")
+  );
 }
 
 /**
@@ -51,6 +63,31 @@ function isCacheableStaticMeta(req: Request): boolean {
   if (req.method !== "GET") return false;
   if (req.originalUrl.includes("?")) return false;
   return CACHEABLE_STATIC_META.has(canonicalPath(req));
+}
+
+/**
+ * Paths whose upstream `Cache-Control` is relayed UNCHANGED, because Core computes it from
+ * information only Core has. `/meta/enrollment-years` carries a max-age that contracts to expire
+ * exactly when the server's year rolls over — flattening it to a constant here (or dropping it, as
+ * the default path does) would leave clients validating against last year's window.
+ *
+ * Distinct from CACHEABLE_STATIC_META on purpose: that set is one the PROXY owns a policy for;
+ * this one is a set the proxy must not have an opinion about.
+ */
+const UPSTREAM_CACHE_CONTROL_PATHS = new Set([
+  "/meta/enrollment-years",
+  // The university directory. Relayed rather than given a policy here for two reasons: Core
+  // already ties its max-age to how often the underlying IPEDS data is published, and — the part
+  // that matters — Core answers 503 with NO Cache-Control when the directory is unreadable. The
+  // relay is `status === 200` only, so that 503 stays uncached; a policy the proxy owned would
+  // have to remember to make the same exception.
+  "/universities",
+  "/universities/state-summary",
+]);
+
+function relaysUpstreamCacheControl(req: Request): boolean {
+  if (req.method !== "GET") return false;
+  return UPSTREAM_CACHE_CONTROL_PATHS.has(canonicalPath(req));
 }
 
 /**
@@ -89,6 +126,15 @@ export async function coreProxy(req: Request, res: Response): Promise<void> {
       // Google blip can't log the user out irrecoverably (the refresh token survives).
       if (err instanceof TransientAuthError) {
         authUpstreamUnavailable(res);
+        return;
+      }
+      // The pending session's 24h absolute lifetime is up: destroy the cookie (expiring
+      // Set-Cookie) and answer 401 SESSION_EXPIRED WITHOUT ever calling Core (CTL-97 Task 4
+      // review fix — this proxy is a third `resolveBearer` call site and must enforce the
+      // same guard `withSession` does).
+      if (err instanceof PendingSessionExpiredError) {
+        clearSession(res);
+        sendProblem(res, 401, "Session expired", { code: err.code });
         return;
       }
       throw err;
@@ -147,6 +193,9 @@ export async function coreProxy(req: Request, res: Response): Promise<void> {
     // s-maxage/CDN + a BFF in-memory cache are deferred until a shared cache actually exists.
     if (upstream.status === 200 && isCacheableStaticMeta(req)) {
       res.setHeader("Cache-Control", "public, max-age=300");
+    } else if (upstream.status === 200 && relaysUpstreamCacheControl(req)) {
+      const upstreamCacheControl = upstream.headers.get("cache-control");
+      if (upstreamCacheControl) res.setHeader("Cache-Control", upstreamCacheControl);
     }
     res.send(text);
   } catch {

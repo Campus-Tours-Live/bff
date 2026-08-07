@@ -25,8 +25,21 @@ export interface CoreWriteEnvelope<T, A> {
 export class CoreClient {
   constructor(private readonly bearer: string) {}
 
-  getUserinfo<T>(): Promise<T> {
-    return this.get<T>("/userinfo");
+  /**
+   * Core `GET /users/me` (Profile Contract v2 — replaces the old Core `/userinfo`): pure
+   * account identity + held roles, no `currentRole` (that's bff session state; composed on top
+   * by the bff-owned `GET /userinfo`, see src/api/userinfo).
+   */
+  getCurrentUser<T>(): Promise<T> {
+    return this.get<T>("/users/me");
+  }
+  /**
+   * Core `GET /users/me/role-eligibility?role=` — authoritative "can this account acquire
+   * this role" check (e.g. a PARENT participant is never GUIDE-eligible). Not yet called by
+   * any handler (wired up by CTL-97 Task 1.5-BFF2's login callback / role-switch endpoint).
+   */
+  getRoleEligibility<T>(role: string): Promise<T> {
+    return this.get<T>(`/users/me/role-eligibility?role=${encodeURIComponent(role)}`);
   }
   getGuideProfile<T>(): Promise<T> {
     return this.get<T>("/guide/profile");
@@ -77,8 +90,10 @@ export class CoreClient {
       // Capture the raw body + content-type so a `withMutation`-wrapped read (e.g. the override
       // preview, CTL-56 B3) can relay Core's 4xx status AND message verbatim. `withSession`
       // consumers ignore these fields, so this is a safe, additive change to the read path.
+      // `fromResponse` additionally parses the RFC7807 body ONCE here (CTL-97) so handlers can
+      // read `err.code` instead of re-parsing `err.body` themselves.
       const raw = await r.text().catch(() => "");
-      throw new CoreError(r.status, raw, r.headers.get("content-type") ?? undefined);
+      throw CoreError.fromResponse(r.status, raw, r.headers.get("content-type") ?? undefined);
     }
     const body = (await r.json().catch(() => null)) as { data?: T } | null;
     return CoreClient.unwrap<T>(body);
@@ -141,8 +156,9 @@ export class CoreClient {
     }
     if (r.status === 401) throw new CoreAuthError();
     if (!r.ok) {
+      // Same shared construction site as the read path above — see `fromResponse`.
       const raw = await r.text().catch(() => "");
-      throw new CoreError(r.status, raw, r.headers.get("content-type") ?? undefined);
+      throw CoreError.fromResponse(r.status, raw, r.headers.get("content-type") ?? undefined);
     }
     return JSON.parse((await r.text().catch(() => "")) || "null") as T;
   }

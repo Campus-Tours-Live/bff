@@ -1,31 +1,46 @@
 import { jest } from "@jest/globals";
-import { writeSession } from "@/session.js";
+import { writeSession, type SessionData } from "@/session.js";
 
 /**
  * Mint a real session cookie via the production `writeSession`, then extract the
  * `ctl_sess=...` pair for supertest's `.set("Cookie", ...)`. The idToken value is
- * irrelevant in these tests because the Core network is mocked.
+ * irrelevant in these tests because the Core network is mocked. `overrides` lets a test set
+ * session-only fields like `currentRole` (Profile Contract v2) or flip the whole session to
+ * PENDING (`provisioningStatus`, `pendingSince`, `pendingExpiresAt` — CTL-97 Task 4) — passed
+ * through as-is (untyped-cast-friendly, hence `Record<string, unknown>` rather than
+ * `Partial<SessionData>`) so a test can also mint a deliberately GARBAGE `currentRole` to
+ * exercise the `isRole` guard, or a deliberately-malformed pending shape.
  */
-export function mintSessionCookie(): string {
+export function mintSessionCookie(overrides: Record<string, unknown> = {}): string {
   const cookies: string[] = [];
   const res = { append: (_k: string, v: string) => cookies.push(v) };
-  writeSession(res as never, {
-    idToken: "fake-id-token",
-    accessToken: "a",
-    refreshToken: "r",
-    expiresAt: Date.now() + 3_600_000,
-  });
+  writeSession(
+    res as never,
+    {
+      provisioningStatus: "PROVISIONED",
+      idToken: "fake-id-token",
+      accessToken: "a",
+      refreshToken: "r",
+      expiresAt: Date.now() + 3_600_000,
+      ...overrides,
+    } as SessionData,
+  );
   const cookie = cookies.find((c) => c.startsWith("ctl_sess="));
   if (!cookie) throw new Error("writeSession did not append a ctl_sess cookie");
   return cookie.split(";")[0]!;
 }
 
-/** A successful Core response wrapping `payload` in the `{ data }` envelope the BFF unwraps. */
-export function coreOk(payload: unknown): Response {
+/**
+ * A successful Core response wrapping `payload` in the `{ data }` envelope the BFF unwraps.
+ * `headers` lets a test layer extra upstream response headers (e.g. `cache-control`) on top of
+ * the default `content-type`, for tests asserting header-fidelity through the proxy — without a
+ * second, parallel mocking style for the same upstream stub.
+ */
+export function coreOk(payload: unknown, headers: Record<string, string> = {}): Response {
   return {
     ok: true,
     status: 200,
-    headers: new Headers({ "content-type": "application/json" }),
+    headers: new Headers({ "content-type": "application/json", ...headers }),
     json: async () => ({ data: payload }),
     text: async () => JSON.stringify({ data: payload }),
   } as unknown as Response;
