@@ -41,7 +41,7 @@ function makeMe(over: Partial<Me> = {}): Me {
   } as Me;
 }
 
-function makeCore(over: Partial<CoreClient> = {}): CoreClient {
+function makeCore(over: Partial<Record<keyof CoreClient, jest.Mock>> = {}): CoreClient {
   return {
     getGuideProfile: jest.fn<() => Promise<unknown>>().mockResolvedValue({ id: "g1" }),
     getOfferings: jest.fn<() => Promise<unknown>>().mockResolvedValue([]),
