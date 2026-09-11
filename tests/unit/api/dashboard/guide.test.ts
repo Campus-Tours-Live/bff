@@ -41,14 +41,28 @@ function makeMe(over: Partial<Me> = {}): Me {
   } as Me;
 }
 
+function makeCore(over: Partial<CoreClient> = {}): CoreClient {
+  return {
+    getGuideProfile: jest.fn<() => Promise<unknown>>().mockResolvedValue({ id: "g1" }),
+    getOfferings: jest.fn<() => Promise<unknown>>().mockResolvedValue([]),
+    getGuidePendingActions: jest
+      .fn<() => Promise<unknown>>()
+      .mockResolvedValue({ pendingAcceptance: 0 }),
+    ...over,
+  } as unknown as CoreClient;
+}
+
 describe("guideDashboard", () => {
-  it("sends a guide envelope with profile, status (from the profile's guideStatus), canPublish and offerings", async () => {
+  it("sends a guide envelope with profile, status, canPublish, offerings, and pending count", async () => {
     const guide: Json = { id: "g1", displayName: "Ana", guideStatus: "VERIFIED" };
     const offerings: Json[] = [{ id: "o1" }, { id: "o2" }];
-    const core = {
+    const core = makeCore({
       getGuideProfile: jest.fn<() => Promise<unknown>>().mockResolvedValue(guide),
       getOfferings: jest.fn<() => Promise<unknown>>().mockResolvedValue(offerings),
-    } as unknown as CoreClient;
+      getGuidePendingActions: jest
+        .fn<() => Promise<unknown>>()
+        .mockResolvedValue({ pendingAcceptance: 3 }),
+    });
     const me = makeMe();
 
     const res = mockRes();
@@ -60,17 +74,17 @@ describe("guideDashboard", () => {
       guideStatus: "VERIFIED",
       canPublish: true,
       offerings,
+      pendingBookingRequests: 3,
       createdAt: "2025-03-15T00:00:00Z",
     });
   });
 
   it("canPublish is false when the profile's guideStatus is not VERIFIED", async () => {
-    const core = {
+    const core = makeCore({
       getGuideProfile: jest
         .fn<() => Promise<unknown>>()
         .mockResolvedValue({ id: "g1", guideStatus: "PENDING" }),
-      getOfferings: jest.fn<() => Promise<unknown>>().mockResolvedValue([]),
-    } as unknown as CoreClient;
+    });
 
     const res = mockRes();
     await guideDashboard(res as unknown as Response, core, makeMe());
@@ -79,10 +93,9 @@ describe("guideDashboard", () => {
   });
 
   it("guideStatus is null when the profile has no guideStatus", async () => {
-    const core = {
+    const core = makeCore({
       getGuideProfile: jest.fn<() => Promise<unknown>>().mockResolvedValue({ id: "g1" }),
-      getOfferings: jest.fn<() => Promise<unknown>>().mockResolvedValue([]),
-    } as unknown as CoreClient;
+    });
 
     const res = mockRes();
     await guideDashboard(res as unknown as Response, core, makeMe());
@@ -92,14 +105,27 @@ describe("guideDashboard", () => {
 
   it("degrades offerings to an empty array when getOfferings rejects", async () => {
     const guide: Json = { id: "g1" };
-    const core = {
+    const core = makeCore({
       getGuideProfile: jest.fn<() => Promise<unknown>>().mockResolvedValue(guide),
       getOfferings: jest.fn<() => Promise<unknown>>().mockRejectedValue(new Error("core down")),
-    } as unknown as CoreClient;
+    });
 
     const res = mockRes();
     await guideDashboard(res as unknown as Response, core, makeMe());
 
-    expect(sentData(res)).toMatchObject({ guide, offerings: [] });
+    expect(sentData(res)).toMatchObject({ guide, offerings: [], pendingBookingRequests: 0 });
+  });
+
+  it("degrades pendingBookingRequests to 0 when pending-actions rejects", async () => {
+    const core = makeCore({
+      getGuidePendingActions: jest
+        .fn<() => Promise<unknown>>()
+        .mockRejectedValue(new Error("core down")),
+    });
+
+    const res = mockRes();
+    await guideDashboard(res as unknown as Response, core, makeMe());
+
+    expect(sentData(res)).toMatchObject({ pendingBookingRequests: 0 });
   });
 });

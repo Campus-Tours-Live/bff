@@ -1016,6 +1016,7 @@ export const guideDashboardExample = envelope({
       description: "A 45-minute walk through the parts of campus the official tour skips.",
     },
   ],
+  pendingBookingRequests: 2,
   createdAt: "2025-09-01T12:00:00.000Z",
 });
 
@@ -1789,6 +1790,7 @@ export const GuideDashboardDataSchema = z.object({
   guideStatus: z.string().nullable(), // forwarded from Core — value not constrained here
   canPublish: z.boolean(), // BFF-derived
   offerings: z.array(LooseObject), // BFF owns "it's an array"; items are Core-opaque
+  pendingBookingRequests: z.number().int().nonnegative(), // BFF-derived from Core pending-actions
   createdAt: z.string().nullish(), // forwarded from Core (may be null, not just absent)
 });
 
