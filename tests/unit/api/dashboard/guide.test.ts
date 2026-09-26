@@ -75,6 +75,7 @@ describe("guideDashboard", () => {
       canPublish: true,
       offerings,
       pendingBookingRequests: 3,
+      dataAvailability: { offerings: true, pendingBookingRequests: true },
       createdAt: "2025-03-15T00:00:00Z",
     });
   });
@@ -113,10 +114,15 @@ describe("guideDashboard", () => {
     const res = mockRes();
     await guideDashboard(res as unknown as Response, core, makeMe());
 
-    expect(sentData(res)).toMatchObject({ guide, offerings: [], pendingBookingRequests: 0 });
+    expect(sentData(res)).toMatchObject({
+      guide,
+      offerings: [],
+      pendingBookingRequests: 0,
+      dataAvailability: { offerings: false, pendingBookingRequests: true },
+    });
   });
 
-  it("degrades pendingBookingRequests to 0 when pending-actions rejects", async () => {
+  it("marks the fallback pending count unavailable when pending-actions rejects", async () => {
     const core = makeCore({
       getGuidePendingActions: jest
         .fn<() => Promise<unknown>>()
@@ -126,6 +132,68 @@ describe("guideDashboard", () => {
     const res = mockRes();
     await guideDashboard(res as unknown as Response, core, makeMe());
 
-    expect(sentData(res)).toMatchObject({ pendingBookingRequests: 0 });
+    expect(sentData(res)).toMatchObject({
+      pendingBookingRequests: 0,
+      dataAvailability: { offerings: true, pendingBookingRequests: false },
+    });
+  });
+
+  it.each([undefined, null, -1, 1.5, NaN, Infinity, "3", Number.MAX_SAFE_INTEGER + 1])(
+    "marks invalid pending count %s unavailable",
+    async (pendingAcceptance) => {
+      const res = mockRes();
+      await guideDashboard(
+        res as unknown as Response,
+        makeCore({
+          getGuidePendingActions: jest
+            .fn<() => Promise<unknown>>()
+            .mockResolvedValue({ pendingAcceptance }),
+        }),
+        makeMe(),
+      );
+      expect(sentData(res)).toMatchObject({
+        pendingBookingRequests: 0,
+        dataAvailability: { pendingBookingRequests: false },
+      });
+    },
+  );
+
+  it("distinguishes confirmed empty results from unavailable data", async () => {
+    const res = mockRes();
+    await guideDashboard(res as unknown as Response, makeCore(), makeMe());
+    expect(sentData(res)).toMatchObject({
+      offerings: [],
+      pendingBookingRequests: 0,
+      dataAvailability: { offerings: true, pendingBookingRequests: true },
+    });
+  });
+
+  it("handles both optional reads failing without hiding the guide profile", async () => {
+    const res = mockRes();
+    await guideDashboard(
+      res as unknown as Response,
+      makeCore({
+        getOfferings: jest.fn<() => Promise<unknown>>().mockResolvedValue(null),
+        getGuidePendingActions: jest.fn<() => Promise<unknown>>().mockResolvedValue(null),
+      }),
+      makeMe(),
+    );
+    expect(sentData(res)).toMatchObject({
+      guide: { id: "g1" },
+      dataAvailability: { offerings: false, pendingBookingRequests: false },
+    });
+  });
+
+  it("propagates failure of the required guide profile", async () => {
+    const error = new Error("profile unavailable");
+    await expect(
+      guideDashboard(
+        mockRes() as unknown as Response,
+        makeCore({
+          getGuideProfile: jest.fn<() => Promise<unknown>>().mockRejectedValue(error),
+        }),
+        makeMe(),
+      ),
+    ).rejects.toThrow(error);
   });
 });
