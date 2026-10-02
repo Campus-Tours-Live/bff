@@ -1,0 +1,22 @@
+//config.tx
+
+package com.campustourslive.bff.config;
+
+import org.springframework.boot.context.properties.ConfigurationProperties;
+
+@ConfigurationProperties(prefix = "app")
+public record AppProperties(
+        String webOrigin,
+        String webBaseUrl,
+        String coreApiBaseUrl,
+        String sessionSecret,
+        Google google
+) {
+
+    public record Google(
+            String clientId,
+            String clientSecret,
+            String redirectUri
+    ) {}
+}
+
