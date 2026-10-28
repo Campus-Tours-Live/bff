@@ -111,6 +111,39 @@ const CoreTourDetailSchema = CoreTourSummarySchema.extend({
   guideBio: z.string().nullable().openapi({ description: "Guide's public biography." }),
 });
 
+const CoreAvailabilityPreviewSlotSchema = z.object({
+  startAt: z.string().datetime().openapi({
+    description: "Bookable-slot start as an absolute UTC instant.",
+    example: "2026-10-01T17:00:00Z",
+  }),
+  endAt: z.string().datetime().openapi({
+    description: "Bookable-slot end as an absolute UTC instant.",
+    example: "2026-10-01T18:00:00Z",
+  }),
+});
+
+const CoreAvailabilityPreviewSchema = z.object({
+  hasAvailability: z.boolean().openapi({
+    description: "Whether the requested window has at least one currently bookable slot.",
+    example: true,
+  }),
+  totalSlots: z.number().int().nonnegative().openapi({
+    description: "Total number of currently bookable slots in the requested window.",
+    example: 6,
+  }),
+  nextStartAt: z.string().datetime().nullable().openapi({
+    description: "Earliest currently bookable start as a UTC instant, or null when unavailable.",
+    example: "2026-10-01T17:00:00Z",
+  }),
+  nextEndAt: z.string().datetime().nullable().openapi({
+    description: "Earliest currently bookable end as a UTC instant, or null when unavailable.",
+    example: "2026-10-01T18:00:00Z",
+  }),
+  sampleSlots: z.array(CoreAvailabilityPreviewSlotSchema).openapi({
+    description: "Small bounded sample of bookable slots, each expressed as UTC instants.",
+  }),
+});
+
 const CoreTourMetaSchema = z.object({
   requestId: z.string().openapi({ description: "Core response correlation id." }),
   timestamp: z.string().openapi({ description: "Core response timestamp in UTC." }),
@@ -159,6 +192,17 @@ const tourDetailExample = {
   guideBio: "Computer science student and campus ambassador.",
 };
 
+const availabilityPreviewExample = {
+  hasAvailability: true,
+  totalSlots: 6,
+  nextStartAt: "2026-10-01T17:00:00Z",
+  nextEndAt: "2026-10-01T18:00:00Z",
+  sampleSlots: [
+    { startAt: "2026-10-01T17:00:00Z", endAt: "2026-10-01T18:00:00Z" },
+    { startAt: "2026-10-02T17:00:00Z", endAt: "2026-10-02T18:00:00Z" },
+  ],
+};
+
 // Public tour reads relay Core validation problems verbatim; unlike BFF-generated problems,
 // these do not carry a BFF `code` or `requestId` field.
 const invalidTourQueryExample = {
@@ -179,6 +223,57 @@ const tourNotFoundExample = {
   title: "Tour not found",
   status: 404,
 };
+
+apiRoute({
+  method: "get",
+  path: "/v1/tours/{tourId}/availability-preview",
+  protected: false,
+  tags: ["Tours"],
+  summary: "Preview public tour availability",
+  description:
+    "Anonymous, bounded availability summary for marketplace UI before sign-in. It relays Core " +
+    "without reading or forwarding a BFF session and returns UTC instants only; clients render " +
+    "them in the viewer's local timezone. This response is intentionally no-store because " +
+    "availability can change between reads.",
+  request: {
+    params: z.object({
+      tourId: z.string().uuid().openapi({ description: "Tour offering UUID." }),
+    }),
+    query: z.object({
+      from: z.string().date().optional().openapi({
+        description: "Inclusive preview-window calendar-date lower bound (YYYY-MM-DD).",
+      }),
+      to: z.string().date().optional().openapi({
+        description: "Exclusive preview-window calendar-date upper bound (YYYY-MM-DD).",
+      }),
+      limit: z.coerce.number().int().optional().openapi({
+        description:
+          "Requested maximum sample slots; Core clamps integer values to the range 0-10.",
+      }),
+    }),
+  },
+  responses: {
+    200: {
+      description: "Core's bounded availability-preview envelope, relayed verbatim.",
+      headers: {
+        "Cache-Control": {
+          description: "Always no-store because live availability can change between requests.",
+          schema: { type: "string" },
+          example: "no-store",
+        },
+      },
+      content: {
+        "application/json": {
+          schema: coreEnvelope(CoreAvailabilityPreviewSchema),
+          example: coreEnvelopeExample(availabilityPreviewExample),
+        },
+      },
+    },
+    404: problemResponse("No discoverable tour has this id.", tourNotFoundExample),
+    422: problemResponse("Core rejected the tour id or preview query.", invalidTourIdExample),
+    502: problem502("The Core API was unreachable."),
+  },
+});
 
 apiRoute({
   method: "get",

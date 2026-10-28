@@ -77,7 +77,10 @@ type Operation = {
   security?: Record<string, unknown>[];
   responses: Record<
     string,
-    { content?: Record<string, { schema?: unknown; example?: unknown; examples?: unknown }> }
+    {
+      headers?: Record<string, { example?: unknown }>;
+      content?: Record<string, { schema?: unknown; example?: unknown; examples?: unknown }>;
+    }
   >;
 };
 
@@ -113,6 +116,7 @@ describe("OpenAPI contract — drift guard (Express routes ↔ spec)", () => {
         "get /v1/dashboard",
         "get /v1/tours",
         "get /v1/tours/{tourId}",
+        "get /v1/tours/{tourId}/availability-preview",
         "post /auth/logout",
         "post /v1/bookings",
         "post /v1/bookings/{id}/cancel",
@@ -151,7 +155,12 @@ describe("OpenAPI contract — drift guard (Express routes ↔ spec)", () => {
 
 describe("OpenAPI contract — public /v1 discovery operations", () => {
   const publicOps = () =>
-    operations().filter((o) => o.path === "/v1/tours" || o.path === "/v1/tours/{tourId}");
+    operations().filter(
+      (o) =>
+        o.path === "/v1/tours" ||
+        o.path === "/v1/tours/{tourId}" ||
+        o.path === "/v1/tours/{tourId}/availability-preview",
+    );
 
   it("declare no session security requirement", () => {
     for (const { path, op } of publicOps()) {
@@ -203,6 +212,34 @@ describe("OpenAPI contract — public /v1 discovery operations", () => {
       expect.arrayContaining(["requestId", "timestamp"]),
     );
   });
+
+  it("documents the anonymous no-store UTC availability preview", () => {
+    type Schema = {
+      properties?: Record<string, Schema>;
+      items?: Schema;
+    };
+    const preview = paths["/v1/tours/{tourId}/availability-preview"]?.get as Operation;
+    const json = preview.responses["200"]?.content?.["application/json"];
+    const schema = json?.schema as Schema;
+    const data = schema.properties?.data;
+
+    expect(preview.responses["200"]?.headers?.["Cache-Control"]?.example).toBe("no-store");
+    expect(Object.keys(data?.properties ?? {})).toEqual(
+      expect.arrayContaining([
+        "hasAvailability",
+        "totalSlots",
+        "nextStartAt",
+        "nextEndAt",
+        "sampleSlots",
+      ]),
+    );
+    expect(Object.keys(data?.properties?.sampleSlots?.items?.properties ?? {})).toEqual(
+      expect.arrayContaining(["startAt", "endAt"]),
+    );
+    expect(json?.example).toMatchObject({
+      data: { nextStartAt: "2026-10-01T17:00:00Z", sampleSlots: expect.any(Array) },
+    });
+  });
 });
 
 describe("OpenAPI contract — every operation is self-describing", () => {
@@ -220,7 +257,12 @@ describe("OpenAPI contract — every operation is self-describing", () => {
 });
 
 describe("OpenAPI contract — protected /v1 operations", () => {
-  const publicV1Paths = new Set(["/v1/tours", "/v1/tours/{tourId}", "/v1/meta/enrollment-years"]);
+  const publicV1Paths = new Set([
+    "/v1/tours",
+    "/v1/tours/{tourId}",
+    "/v1/tours/{tourId}/availability-preview",
+    "/v1/meta/enrollment-years",
+  ]);
   const protectedOps = () =>
     operations().filter((o) => o.path.startsWith("/v1/") && !publicV1Paths.has(o.path));
 
