@@ -75,6 +75,7 @@ describe("guideDashboard", () => {
       canPublish: true,
       offerings,
       pendingBookingRequests: 3,
+      dataAvailability: { offerings: true, pendingBookingRequests: true },
       createdAt: "2025-03-15T00:00:00Z",
     });
   });
@@ -116,7 +117,7 @@ describe("guideDashboard", () => {
     expect(sentData(res)).toMatchObject({ guide, offerings: [], pendingBookingRequests: 0 });
   });
 
-  it("degrades pendingBookingRequests to 0 when pending-actions rejects", async () => {
+  it("marks pendingBookingRequests unavailable when pending-actions rejects", async () => {
     const core = makeCore({
       getGuidePendingActions: jest
         .fn<() => Promise<unknown>>()
@@ -126,6 +127,35 @@ describe("guideDashboard", () => {
     const res = mockRes();
     await guideDashboard(res as unknown as Response, core, makeMe());
 
-    expect(sentData(res)).toMatchObject({ pendingBookingRequests: 0 });
+    expect(sentData(res)).toMatchObject({
+      pendingBookingRequests: 0,
+      dataAvailability: { pendingBookingRequests: false },
+    });
   });
+
+  it("marks a successful zero count available", async () => {
+    const res = mockRes();
+    await guideDashboard(res as unknown as Response, makeCore(), makeMe());
+    expect(sentData(res)).toMatchObject({
+      pendingBookingRequests: 0,
+      dataAvailability: { offerings: true, pendingBookingRequests: true },
+    });
+  });
+
+  it.each([-1, 1.5, NaN, Infinity, Number.MAX_SAFE_INTEGER + 1])(
+    "does not expose invalid pending count %s as available",
+    async (pendingAcceptance) => {
+      const res = mockRes();
+      const core = makeCore({
+        getGuidePendingActions: jest
+          .fn<() => Promise<unknown>>()
+          .mockResolvedValue({ pendingAcceptance }),
+      });
+      await guideDashboard(res as unknown as Response, core, makeMe());
+      expect(sentData(res)).toMatchObject({
+        pendingBookingRequests: 0,
+        dataAvailability: { pendingBookingRequests: false },
+      });
+    },
+  );
 });
