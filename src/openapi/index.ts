@@ -357,8 +357,10 @@ apiRoute({
     "(`guide` | `participant`). The current role is read from THIS bff session (Profile " +
     "Contract v2 — `currentRole` is per-session state, never a Core value or an id_token " +
     "claim); guide and participant share this one endpoint. The " +
-    "guide variant fans out profile + offerings and adds a computed `canPublish` gate " +
-    "(true only when VERIFIED); the participant variant fans out profile + next tour + " +
+    "guide variant fans out profile + offerings + pending booking actions and adds a computed `canPublish` gate " +
+    "(true only when VERIFIED) and `dataAvailability` flags. When an optional read fails, its flag is false; " +
+    "the empty offerings list or zero pending count is a compatibility fallback, not confirmed data. " +
+    "The participant variant fans out profile + next tour + " +
     "upcoming bookings + pending actions (each best-effort). The frontend calls this to render " +
     "`/dashboard`.\n\n" +
     "**Auth:** requires the `ctl_sess` session cookie. Swagger UI can only exercise it if the " +
@@ -368,6 +370,18 @@ apiRoute({
       description: "Dashboard payload, wrapped in the standard success envelope.",
       examples: {
         guide: { summary: "Guide dashboard", value: guideDashboardExample },
+        guidePartial: {
+          summary: "Guide dashboard with unavailable counts",
+          value: {
+            ...guideDashboardExample,
+            data: {
+              ...guideDashboardExample.data,
+              offerings: [],
+              pendingBookingRequests: 0,
+              dataAvailability: { offerings: false, pendingBookingRequests: false },
+            },
+          },
+        },
         participant: { summary: "Participant dashboard", value: participantDashboardExample },
       },
     }),
