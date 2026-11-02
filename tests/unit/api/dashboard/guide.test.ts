@@ -114,7 +114,12 @@ describe("guideDashboard", () => {
     const res = mockRes();
     await guideDashboard(res as unknown as Response, core, makeMe());
 
-    expect(sentData(res)).toMatchObject({ guide, offerings: [], pendingBookingRequests: 0 });
+    expect(sentData(res)).toMatchObject({
+      guide,
+      offerings: [],
+      pendingBookingRequests: 0,
+      dataAvailability: { offerings: false, pendingBookingRequests: true },
+    });
   });
 
   it("marks pendingBookingRequests unavailable when pending-actions rejects", async () => {
