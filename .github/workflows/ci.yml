@@ -6,7 +6,7 @@ on:
     # can't be skipped by targeting a differently-named branch (stacked PRs, wip/*, etc.).
     # Merge enforcement still lives in the protect-main ruleset.
   push:
-    branches: [main]
+    branches: [main, develop]
 
 concurrency:
   group: ci-${{ github.ref }}
