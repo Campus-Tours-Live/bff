@@ -16,6 +16,7 @@
  */
 import { z } from "zod";
 import { extendZodWithOpenApi, OpenAPIRegistry } from "@asteasolutions/zod-to-openapi";
+import { CART_ITEM_STATUSES } from "../api/_shared/reshape.js";
 
 // Adds the `.openapi()` metadata method onto Zod schemas. Must run before any schema
 // below uses it / is registered.
@@ -823,6 +824,32 @@ export const BookingResponseSchema = z.object({
 
 /** Array of booking responses. */
 export const BookingListSchema = z.array(BookingResponseSchema);
+
+/** Core's display-only cart availability hint (CTL-83). Built from the reshaper's list so the
+ *  runtime type and the published enum can't drift. */
+export const CartItemStatusEnum = z.enum(CART_ITEM_STATUSES);
+
+/** A cart item (a DRAFT booking): every `BookingResponse` field plus the cart-only display
+ *  fields Core computes on each read (CTL-83). */
+export const CartItemResponseSchema = BookingResponseSchema.extend({
+  cartStatus: CartItemStatusEnum.nullable().openapi({
+    description:
+      "Display-only availability hint, recomputed on every read — NOT a reservation. First " +
+      "match wins: EXPIRED, TOUR_UNAVAILABLE, GUIDE_UNAVAILABLE, TIME_UNAVAILABLE, " +
+      "PRICE_CHANGED, AVAILABLE. Null only when Core does not report it.",
+    example: "AVAILABLE",
+  }),
+  currentPrice: MoneySchema.nullable().openapi({
+    description:
+      "The offering's live price. `price` is the snapshot taken at add-to-cart; they differ " +
+      "when the guide changed the price since (cartStatus PRICE_CHANGED). Null only when Core " +
+      "does not report it.",
+    example: { amount: 4200, currency: "USD" },
+  }),
+});
+
+/** Array of cart items. */
+export const CartItemListSchema = z.array(CartItemResponseSchema);
 
 // --- Dashboard payloads (GET /v1/dashboard, discriminated by `kind`) ---
 
