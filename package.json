@@ -1,6 +1,6 @@
 {
   "name": "campustourslive-bff",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "description": "Backend-for-frontend (Express + TypeScript) between the Next.js web app and the Spring Boot Core API.",
   "type": "module",
