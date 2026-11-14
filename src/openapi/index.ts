@@ -105,6 +105,7 @@ const CoreTourSummarySchema = z.object({
 const CoreTourDetailSchema = CoreTourSummarySchema.extend({
   description: z.string().nullable().openapi({ description: "Public tour description." }),
   languages: z.array(z.string()).openapi({ description: "BCP-47 tour language tags." }),
+  features: z.array(z.string()).openapi({ description: "Selected tour feature codes." }),
   universitySlug: z.string().openapi({ description: "University URL-safe slug." }),
   universityCity: z.string().nullable().openapi({ description: "University city." }),
   universityRegion: z.string().nullable().openapi({ description: "University region or state." }),
@@ -186,6 +187,7 @@ const tourDetailExample = {
   ...tourSummaryExample,
   description: "A student-led walk through North Coast University's most popular landmarks.",
   languages: ["en-US"],
+  features: ["Q_AND_A"],
   universitySlug: "north-coast",
   universityCity: "Arcata",
   universityRegion: "CA",
