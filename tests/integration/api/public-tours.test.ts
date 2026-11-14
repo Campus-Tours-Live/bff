@@ -24,6 +24,17 @@ const coreMeta = {
   timestamp: "2026-07-18T21:00:00Z",
 };
 
+const availabilityPreview = {
+  hasAvailability: true,
+  totalSlots: 2,
+  nextStartAt: "2026-10-01T17:00:00Z",
+  nextEndAt: "2026-10-01T18:00:00Z",
+  sampleSlots: [
+    { startAt: "2026-10-01T17:00:00Z", endAt: "2026-10-01T18:00:00Z" },
+    { startAt: "2026-10-02T17:00:00Z", endAt: "2026-10-02T18:00:00Z" },
+  ],
+};
+
 function coreTourOk(data: unknown): Response {
   const body = { data, meta: coreMeta };
   return {
@@ -71,6 +82,41 @@ describe("public tour discovery", () => {
     const [, init] = mock.mock.calls[0]!;
     const headers = (init as RequestInit).headers as Record<string, string>;
     expect(headers.Authorization).toBeUndefined();
+  });
+
+  it("relays an anonymous bounded availability preview with UTC instants and no-store", async () => {
+    const tourId = tourSummary.id;
+    const mock = mockCoreByPath({
+      [`/tours/${tourId}/availability-preview`]: coreTourOk(availabilityPreview),
+    });
+
+    const res = await request(app)
+      .get(`/v1/tours/${tourId}/availability-preview?from=2026-10-01&to=2026-10-08&limit=2`)
+      .set("Authorization", "Bearer must-not-reach-core");
+
+    expect(res.status).toBe(200);
+    expect(res.headers["cache-control"]).toBe("no-store");
+    expect(res.body).toEqual({ data: availabilityPreview, meta: coreMeta });
+    const [url, init] = mock.mock.calls[0]!;
+    expect(String(url)).toBe(
+      `http://core.test/tours/${tourId}/availability-preview?from=2026-10-01&to=2026-10-08&limit=2`,
+    );
+    const headers = (init as RequestInit).headers as Record<string, string>;
+    expect(headers.Authorization).toBeUndefined();
+  });
+
+  it("passes a Core availability-preview validation problem through while retaining no-store", async () => {
+    const tourId = tourSummary.id;
+    const problem = { type: "about:blank", title: "Invalid preview range", status: 422 };
+    mockCoreByPath({ [`/tours/${tourId}/availability-preview`]: coreErr(422, problem) });
+
+    const res = await request(app).get(
+      `/v1/tours/${tourId}/availability-preview?from=2026-10-08&to=2026-10-01`,
+    );
+
+    expect(res.status).toBe(422);
+    expect(res.headers["cache-control"]).toBe("no-store");
+    expect(res.body).toEqual(problem);
   });
 
   it("passes a Core discovery error through verbatim", async () => {

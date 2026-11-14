@@ -40,3 +40,16 @@ export async function getPublicTourCatalog(req: Request, res: Response): Promise
 export async function getPublicTourDetail(req: Request, res: Response): Promise<void> {
   await relayPublicTourRead(req, res, `/tours/${encodeURIComponent(req.params.tourId ?? "")}`);
 }
+
+/**
+ * Public summary for pre-sign-in marketplace UI. Availability changes frequently, so browsers
+ * must not reuse a stale preview; signed-in users fetch the complete slots resource separately.
+ */
+export async function getPublicTourAvailabilityPreview(req: Request, res: Response): Promise<void> {
+  res.setHeader("Cache-Control", "no-store");
+  await relayPublicTourRead(
+    req,
+    res,
+    `/tours/${encodeURIComponent(req.params.tourId ?? "")}/availability-preview`,
+  );
+}
