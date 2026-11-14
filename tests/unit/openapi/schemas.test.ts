@@ -113,6 +113,7 @@ describe("Dashboard data schemas tolerate a null createdAt (Core sends null, not
       guideStatus: null,
       canPublish: false,
       offerings: [],
+      pendingBookingRequests: 0,
       createdAt: null,
     });
     expect(result.success).toBe(true);

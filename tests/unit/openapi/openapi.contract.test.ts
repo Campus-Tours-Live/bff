@@ -87,6 +87,25 @@ type Operation = {
 const HTTP_METHODS = ["get", "post", "put", "delete", "patch", "head", "options", "trace"];
 const paths = openapiSpec.paths ?? {};
 
+describe("Guide dashboard availability contract", () => {
+  it("publishes the pending count and its availability metadata", () => {
+    const schemas = openapiSpec.components?.schemas;
+    expect(schemas?.GuideDashboard).toMatchObject({
+      properties: {
+        pendingBookingRequests: { type: "integer", minimum: 0 },
+        dataAvailability: { $ref: "#/components/schemas/GuideDashboardAvailability" },
+      },
+    });
+    expect(schemas?.GuideDashboardAvailability).toMatchObject({
+      required: expect.arrayContaining(["offerings", "pendingBookingRequests"]),
+      properties: {
+        offerings: { type: "boolean" },
+        pendingBookingRequests: { type: "boolean" },
+      },
+    });
+  });
+});
+
 /** Enumerate every documented operation as (method, path, operation). */
 function operations(): { method: string; path: string; op: Operation }[] {
   const out: { method: string; path: string; op: Operation }[] = [];
