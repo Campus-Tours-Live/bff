@@ -1,5 +1,6 @@
 import {
   reshapeBooking,
+  reshapeCartItem,
   reshapeOccurrence,
   reshapeSlot,
   reshapeAffectedBooking,
@@ -18,6 +19,46 @@ const core = {
   priceCents: 4200,
   currency: "USD",
 };
+
+describe("reshapeCartItem", () => {
+  it("is the booking reshape plus cartStatus and currentPrice as a money object", () => {
+    expect(
+      reshapeCartItem({
+        ...core,
+        status: "DRAFT",
+        cartStatus: "PRICE_CHANGED",
+        currentPriceCents: 5000,
+      }),
+    ).toEqual({
+      ...reshapeBooking({ ...core, status: "DRAFT" }),
+      cartStatus: "PRICE_CHANGED",
+      currentPrice: { amount: 5000, currency: "USD" },
+    });
+  });
+
+  it("keeps price as the add-time snapshot, separate from the live currentPrice", () => {
+    const out = reshapeCartItem({ ...core, cartStatus: "PRICE_CHANGED", currentPriceCents: 5000 });
+    expect(out.price).toEqual({ amount: 4200, currency: "USD" });
+    expect(out.currentPrice).toEqual({ amount: 5000, currency: "USD" });
+  });
+
+  it("maps a Core that predates the cart fields (or sends null) to null extras", () => {
+    expect(reshapeCartItem(core)).toMatchObject({ cartStatus: null, currentPrice: null });
+    expect(reshapeCartItem({ ...core, cartStatus: null, currentPriceCents: null })).toMatchObject({
+      cartStatus: null,
+      currentPrice: null,
+    });
+  });
+
+  it("keeps a zero live price (free tour) instead of treating it as missing", () => {
+    expect(
+      reshapeCartItem({ ...core, cartStatus: "AVAILABLE", currentPriceCents: 0 }).currentPrice,
+    ).toEqual({
+      amount: 0,
+      currency: "USD",
+    });
+  });
+});
 
 describe("reshapeBooking", () => {
   it("renames, computes scheduledEndAt, and builds price{amount,currency}", () => {
