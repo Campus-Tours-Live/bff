@@ -35,6 +35,11 @@ function splitRaw(req: Request): { rawPath: string; rawQuery: string } {
     : { rawPath: req.originalUrl.slice(0, q), rawQuery: req.originalUrl.slice(q) };
 }
 
+/** A public guide's profile (`/guides/{id}`, CTL-124) and their tours (`/guides/{id}/tours`,
+ *  CTL-133), matched exactly: one id segment and nothing else, so the private guide workspace
+ *  (`/guide/**`) and any other `/guides/{id}/…` subresource still need a session (CTL-137). */
+const PUBLIC_GUIDE_PATH = /^\/guides\/[^/]+(?:\/tours)?$/;
+
 function isPublicGet(req: Request): boolean {
   if (req.method !== "GET" && req.method !== "HEAD") return false;
   const path = canonicalPath(req);
@@ -47,7 +52,8 @@ function isPublicGet(req: Request): boolean {
     // the bearer path would 401, and this proxy turns a Core 401 into clearSession, so a
     // prefetcher's metadata request would log the user out.
     path === "/universities" ||
-    path.startsWith("/universities/")
+    path.startsWith("/universities/") ||
+    PUBLIC_GUIDE_PATH.test(path)
   );
 }
 
@@ -179,7 +185,10 @@ export async function coreProxy(req: Request, res: Response): Promise<void> {
 
     // Core rejected the token (expired/invalid/revoked) → re-auth required.
     // (403 from Core = authorization failure; leave it to pass through.)
-    if (upstream.status === 401) {
+    // A public read is forwarded WITHOUT a token, so a Core 401 there says nothing about this
+    // session (e.g. Core not yet permitting a route the BFF already lists as public). Relay it
+    // instead of clearing the session, or opening a public page would log a signed-in user out.
+    if (upstream.status === 401 && !publicGet) {
       requireReauth(res);
       return;
     }
