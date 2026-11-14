@@ -68,6 +68,7 @@ describe("public tour discovery", () => {
       ...tourSummary,
       description: "A student-led walk through North Coast University's most popular landmarks.",
       languages: ["en-US"],
+      features: ["Q_AND_A"],
       universitySlug: "north-coast",
       universityCity: "Arcata",
       universityRegion: "CA",

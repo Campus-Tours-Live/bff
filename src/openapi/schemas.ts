@@ -789,6 +789,20 @@ export const Offering = registry.register(
         description: "Long-form description (nullable/optional).",
         example: "A 45-minute walk through the parts of campus the official tour skips.",
       }),
+      languages: z
+        .array(z.string())
+        .optional()
+        .openapi({
+          description: "BCP-47 tour language tags; omitted only by older Core versions.",
+          example: ["en-US"],
+        }),
+      features: z
+        .array(z.string())
+        .optional()
+        .openapi({
+          description: "Selected tour feature codes; omitted only by older Core versions.",
+          example: ["Q_AND_A"],
+        }),
     })
     .openapi("Offering", { description: "A guide's sellable tour offering." }),
 );
@@ -1040,6 +1054,8 @@ export const guideDashboardExample = envelope({
       priceCents: 2500,
       currency: "USD",
       description: "A 45-minute walk through the parts of campus the official tour skips.",
+      languages: ["en-US"],
+      features: ["Q_AND_A"],
     },
   ],
   pendingBookingRequests: 2,
