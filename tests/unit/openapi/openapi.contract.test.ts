@@ -221,6 +221,7 @@ describe("OpenAPI contract — public /v1 discovery operations", () => {
       expect.arrayContaining([
         "description",
         "languages",
+        "features",
         "universitySlug",
         "universityCity",
         "universityRegion",
@@ -230,6 +231,28 @@ describe("OpenAPI contract — public /v1 discovery operations", () => {
     expect(Object.keys(catalogSchema.properties?.meta?.properties ?? {})).toEqual(
       expect.arrayContaining(["requestId", "timestamp"]),
     );
+    expect(detail.responses["200"]?.content?.["application/json"]?.example).toMatchObject({
+      data: { languages: ["en-US"], features: ["Q_AND_A"] },
+    });
+  });
+
+  it("documents guide offering languages and features with populated examples", () => {
+    expect(openapiSpec.components?.schemas?.Offering).toMatchObject({
+      properties: {
+        languages: { type: "array", items: { type: "string" }, example: ["en-US"] },
+        features: { type: "array", items: { type: "string" }, example: ["Q_AND_A"] },
+      },
+    });
+    const dashboard = paths["/v1/dashboard"]?.get as Operation;
+    expect(dashboard.responses["200"]?.content?.["application/json"]?.examples).toMatchObject({
+      guide: {
+        value: {
+          data: {
+            offerings: [expect.objectContaining({ languages: ["en-US"], features: ["Q_AND_A"] })],
+          },
+        },
+      },
+    });
   });
 
   it("documents the anonymous no-store UTC availability preview", () => {
