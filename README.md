@@ -415,8 +415,11 @@ The BFF talks to exactly one downstream — the Core — and exposes three patte
   Not every proxied request carries a `Bearer`. The tours catalog (`/v1/tours`) and a single tour
   (`/v1/tours/:tourId`) are now **BFF-owned** endpoints — a public-tours handler intercepts them
   ahead of the proxy, so they no longer reach `coreProxy`. The proxy's own anonymous **public read**
-  (`GET`/`HEAD`, no session) covers the rest — the deeper `/tours/*` and `/meta/*` paths; everything
-  else requires a session.
+  (`GET`/`HEAD`, no session) covers the rest — the deeper `/tours/*` and `/meta/*` paths, the
+  `/universities` directory, and a guide's public profile and tours (exactly `/guides/{id}` and
+  `/guides/{id}/tours`); everything else requires a session. A public read is forwarded **without**
+  the caller's token even when they are signed in, so a Core `401` on one is relayed as-is rather
+  than treated as an expired session (it must not log the user out).
 
   The path is **canonicalised before** that public/private decision is made, so a traversal cannot
   dress a private path up as a public one — and the same canonical path is what gets forwarded, so

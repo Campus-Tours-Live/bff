@@ -640,4 +640,91 @@ describe("coreProxy (/v1/* passthrough)", () => {
       expect(res.headers["cache-control"]).toBeUndefined();
     });
   });
+
+  /**
+   * CTL-137 — Core serves a guide's public profile (CTL-124) and tours (CTL-133) anonymously, so
+   * the BFF must too. Matched narrowly: exactly `/guides/{id}` and `/guides/{id}/tours`; every
+   * other guide route (the private `/guide/**` workspace, other `/guides/{id}/…` subresources)
+   * still requires a session.
+   */
+  describe("public guide routes — /v1/guides/{id} and /v1/guides/{id}/tours", () => {
+    const GUIDE = { id: "g1", displayName: "Maya Chen" };
+    const TOURS = { items: [], page: 0, size: 12, totalElements: 0, totalPages: 0 };
+
+    it.each([
+      ["/v1/guides/g1", "/guides/g1", GUIDE],
+      ["/v1/guides/g1/tours?page=1&limit=12", "/guides/g1/tours?page=1&limit=12", TOURS],
+    ])("GET %s is forwarded anonymously (no session, no bearer)", async (path, corePath, body) => {
+      const mock = mockCoreByPath({ [corePath.split("?")[0]!]: coreOk(body) });
+
+      const res = await request(app).get(path);
+
+      expect(res.status).toBe(200);
+      expect(res.body).toEqual({ data: body });
+      const [url, init] = mock.mock.calls[0]!;
+      expect(String(url)).toBe(`http://core.test${corePath}`);
+      expect(
+        ((init as RequestInit).headers as Record<string, string>).Authorization,
+      ).toBeUndefined();
+    });
+
+    it.each(["/v1/guides/g1", "/v1/guides/g1/tours"])(
+      "HEAD %s is public too, so a prefetch cannot log anyone out",
+      async (path) => {
+        mockCoreByPath({ "/guides/g1": coreOk(GUIDE), "/guides/g1/tours": coreOk(TOURS) });
+
+        const res = await request(app).head(path);
+
+        expect(res.status).toBe(200);
+        expect(res.headers["auth-required"]).toBeUndefined();
+      },
+    );
+
+    it("a signed-in visitor is still forwarded without their token (public read)", async () => {
+      const mock = mockCoreByPath({ "/guides/g1": coreOk(GUIDE) });
+
+      const res = await request(app).get("/v1/guides/g1").set("Cookie", cookie);
+
+      expect(res.status).toBe(200);
+      const headers = (mock.mock.calls[0]![1] as RequestInit).headers as Record<string, string>;
+      expect(headers.Authorization).toBeUndefined();
+    });
+
+    it.each([
+      ["GET", "/v1/guides"],
+      ["GET", "/v1/guides/g1/reviews"],
+      ["GET", "/v1/guides/g1/tours/extra"],
+      ["GET", "/v1/guide/profile"],
+      ["POST", "/v1/guides/g1"],
+    ])(
+      "%s %s still requires a session (401 + Auth-Required, no Core call)",
+      async (method, path) => {
+        const fetchMock = mockCoreByPath({});
+
+        const res =
+          method === "POST"
+            ? await request(app).post(path).set("Origin", WEB_ORIGIN).send({})
+            : await request(app).get(path);
+
+        expect(res.status).toBe(401);
+        expect(res.headers["auth-required"]).toBe("reauthenticate");
+        expect(fetchMock).not.toHaveBeenCalled();
+      },
+    );
+
+    it("a Core 401 on a public read is relayed — the signed-in user's session is NOT cleared", async () => {
+      // e.g. the BFF lists /guides/{id}/tours as public before Core's permitAll for it ships:
+      // the request carried no token, so Core's 401 says nothing about this session.
+      mockCoreByPath({ "/guides/g1/tours": coreErr(401, { title: "Unauthorized" }) });
+
+      const res = await request(app).get("/v1/guides/g1/tours").set("Cookie", cookie);
+
+      expect(res.status).toBe(401);
+      expect(res.headers["auth-required"]).toBeUndefined();
+      const setCookie = (res.headers["set-cookie"] as unknown as string[] | undefined)?.find((c) =>
+        c.startsWith("ctl_sess="),
+      );
+      expect(setCookie ?? "").not.toMatch(/Max-Age=0/i);
+    });
+  });
 });
