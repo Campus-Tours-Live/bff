@@ -61,6 +61,7 @@ import {
   OverrideMultiPreviewRequestSchema,
   OverrideReplaceRequestSchema,
   RulesReplaceRequestSchema,
+  RulesActiveRequestSchema,
   EnrollmentYearRulesSchema,
 } from "./schemas.js";
 import {
@@ -996,6 +997,47 @@ apiRoute({
         "invalid (including a window crossing midnight). Overlapping or touching windows are " +
         "NOT a 422 — they are coalesced (merged) into disjoint rules and the replace succeeds " +
         "(200). Rejected before any mutation, so prior rules are left intact.",
+    ),
+  },
+});
+
+// POST /v1/availability/rules/active
+apiRoute({
+  method: "post",
+  path: "/v1/availability/rules/active",
+  tags: ["Availability"],
+  summary: "Turn one weekday's availability on or off",
+  description:
+    "Sets EVERY one of the guide's recurring rules for a single `dayOfWeek` to `active` in one " +
+    "Core transaction: all of them change or none do, so the weekly editor's Available / " +
+    "Unavailable toggle can never leave a multi-rule day half-flipped. Rules are never deleted, " +
+    "so turning the day back on restores the same ranges. Activating merges ranges with the " +
+    "same effective dates; overlapping ranges with different, overlapping effective dates are a " +
+    "422 raised before any change. A day already in the requested state, or with no rules, is a " +
+    "no-op. `data` is all of the day's rules afterwards (active and inactive); bookings left " +
+    "outside the guide's availability are reported in `affectedBookings` (a warning list, not an " +
+    "error). A Core 4xx relays VERBATIM.",
+  request: {
+    body: {
+      content: {
+        "application/json": {
+          schema: RulesActiveRequestSchema,
+          example: { dayOfWeek: 1, active: false },
+        },
+      },
+    },
+  },
+  responses: {
+    200: envelopedWrite(z.array(AvailabilityRuleResponseSchema), {
+      description: "All of the weekday's rules after the toggle, plus any bookings affected.",
+      example: writeEnvelope([{ ...ruleExample, active: false }], [affectedBookingExample]),
+    }),
+    422: problem422(
+      "AVAILABILITY_RULE_VALIDATION",
+      "Validation failed",
+      "dayOfWeek missing or out of range (0-6), active missing, or turning the day on would " +
+        "overlap two of its ranges that cover different, overlapping dates. Rejected before any " +
+        "change, so the day is left exactly as it was.",
     ),
   },
 });

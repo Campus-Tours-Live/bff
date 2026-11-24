@@ -1353,6 +1353,25 @@ export const RulesReplaceRequestSchema = z.object({
   }),
 });
 
+/**
+ * Request body for `POST /v1/availability/rules/active` — the atomic day on/off toggle (Core
+ * `RulesActiveRequest`, CTL-60). Every one of the guide's rules for `dayOfWeek` is set to
+ * `active` in one transaction; rules are never deleted, so turning the day back on restores the
+ * same ranges. `guideId` is server-resolved from the session; never in the body.
+ */
+export const RulesActiveRequestSchema = z.object({
+  dayOfWeek: z.number().int().min(0).max(6).openapi({
+    description: "Day of week to toggle (0=Sunday .. 6=Saturday).",
+    example: 1,
+  }),
+  active: z.boolean().openapi({
+    description:
+      "true makes the day available (activates all of its rules); false makes it unavailable " +
+      "(deactivates them, keeping their ranges).",
+    example: false,
+  }),
+});
+
 /** A one-off date override to a guide's recurring rules (Core `AvailabilityExceptionResponse`). */
 export const AvailabilityExceptionResponseSchema = registry.register(
   "AvailabilityExceptionResponse",

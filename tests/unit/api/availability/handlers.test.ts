@@ -7,6 +7,7 @@ import {
   updateRule,
   deleteRule,
   replaceRules,
+  setDayActive,
   getExceptions,
   createException,
   updateException,
@@ -219,6 +220,25 @@ describe("availability handlers", () => {
         expect.any(Object),
       );
       expect(sentData(res)).toEqual([rule]);
+    });
+  });
+
+  describe("setDayActive", () => {
+    it("POSTs /availability/rules/active with the body", async () => {
+      const off = { ...rule, active: false };
+      const postFull = jest
+        .fn<(...args: unknown[]) => Promise<unknown>>()
+        .mockResolvedValue({ data: [off], affectedBookings: [] });
+      const core = coreMock({ postFull });
+      const res = mockRes();
+      const req = mockReq({ body: { dayOfWeek: 1, active: false } });
+      await setDayActive(req, res as unknown as Response, core);
+      expect(postFull).toHaveBeenCalledWith(
+        "/availability/rules/active",
+        { dayOfWeek: 1, active: false },
+        expect.any(Object),
+      );
+      expect(sentData(res)).toEqual([off]);
     });
   });
 
