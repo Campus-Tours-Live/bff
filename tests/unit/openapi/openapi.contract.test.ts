@@ -123,6 +123,7 @@ describe("OpenAPI contract — drift guard (Express routes ↔ spec)", () => {
         "get /v1/cart",
         "post /v1/cart/items",
         "delete /v1/cart/items/{id}",
+        "delete /v1/cart",
         "post /v1/cart/checkout",
         "get /v1/availability/rules",
         "post /v1/availability/rules",

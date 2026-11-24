@@ -32,6 +32,13 @@ export async function removeCartItem(req: Request, res: Response, core: CoreClie
   sendData(res, (raw ?? []).map(reshapeCartItem), CartItemListSchema);
 }
 
+/** Clear the whole cart (CTL-102 / backend CTL-91): Core deletes every DRAFT item and returns the
+ *  now-empty cart, reshaped like the other cart reads so the client always gets Contract A. */
+export async function clearCart(req: Request, res: Response, core: CoreClient): Promise<void> {
+  const raw = await core.del<CoreCartItem[] | null>("/cart", writeOpts(req, res));
+  sendData(res, (raw ?? []).map(reshapeCartItem), CartItemListSchema);
+}
+
 export async function checkout(req: Request, res: Response, core: CoreClient): Promise<void> {
   const raw = await core.post<CoreBookingDetail[] | null>(
     "/cart/checkout",
