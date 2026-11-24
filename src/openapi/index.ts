@@ -768,6 +768,23 @@ apiRoute({
   },
 });
 
+// DELETE /v1/cart
+apiRoute({
+  method: "delete",
+  path: "/v1/cart",
+  tags: ["Booking"],
+  summary: "Clear the cart",
+  description:
+    "Removes every item in the caller's cart and returns the now-empty cart. Cart items are " +
+    "DRAFT bookings that never reserved a slot, so clearing releases nothing.",
+  responses: {
+    200: enveloped(CartItemListSchema, {
+      description: "The now-empty cart.",
+      example: envelope([]),
+    }),
+  },
+});
+
 // POST /v1/cart/checkout
 apiRoute({
   method: "post",

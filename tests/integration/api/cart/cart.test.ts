@@ -126,6 +126,46 @@ describe("bff cart module", () => {
     ]);
   });
 
+  it("DELETE /v1/cart clears the cart via Core and returns the reshaped (empty) cart (CTL-102)", async () => {
+    const mock = mockCoreByPath({ "/cart": coreOk([]) });
+    const res = await request(app).delete("/v1/cart").set("Cookie", cookie);
+    expect(res.status).toBe(200);
+    expect(res.body.data).toEqual([]);
+    const [url, init] = mock.mock.calls[0] as [string, RequestInit];
+    expect(new URL(String(url)).pathname).toBe("/cart");
+    expect(init.method).toBe("DELETE");
+  });
+
+  it("DELETE /v1/cart reshapes any items Core returns, and a null body → []", async () => {
+    mockCoreByPath({ "/cart": coreOk([coreCartItem]) });
+    const res = await request(app).delete("/v1/cart").set("Cookie", cookie);
+    expect(res.status).toBe(200);
+    expect(res.body.data).toEqual([
+      expect.objectContaining({
+        id: "b1",
+        cartStatus: "AVAILABLE",
+        currentPrice: { amount: 4200, currency: "USD" },
+      }),
+    ]);
+    expect(res.body.data[0]).not.toHaveProperty("priceCents");
+
+    mockCoreByPath({ "/cart": coreOk(null) });
+    const empty = await request(app).delete("/v1/cart").set("Cookie", cookie);
+    expect(empty.body.data).toEqual([]);
+  });
+
+  it("DELETE /v1/cart is CSRF-guarded and needs a session", async () => {
+    const crossSite = await request(app)
+      .delete("/v1/cart")
+      .set("Cookie", cookie)
+      .set("Origin", "https://evil.test");
+    expect(crossSite.status).toBe(403);
+    expect(crossSite.body.code).toBe("CSRF_BLOCKED");
+
+    const anon = await request(app).delete("/v1/cart");
+    expect(anon.status).toBe(401);
+  });
+
   it("POST /v1/cart/checkout reshapes the committed bookings (array)", async () => {
     mockCoreByPath({ "/cart/checkout": coreOk([coreBooking, { ...coreBooking, id: "b2" }]) });
     const res = await request(app).post("/v1/cart/checkout").set("Cookie", cookie).send({});
