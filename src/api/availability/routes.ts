@@ -17,6 +17,7 @@ import {
   getOverrideMultiPreview,
   replaceOverrides,
   replaceRules,
+  setDayActive,
 } from "./handlers.js";
 import { getSlots } from "./participant.js";
 
@@ -68,6 +69,12 @@ availabilityRoutes.delete("/availability/rules/:id", csrfGuard, withMutation(del
 // protection a mutating POST requires, `withMutation` relays a Core 4xx VERBATIM (status +
 // message). The weekly counterpart to `/availability/overrides/replace` below.
 availabilityRoutes.post("/availability/rules/replace", csrfGuard, withMutation(replaceRules));
+
+// The atomic day on/off toggle (CTL-60): a STATE-MUTATING POST — every one of the guide's rules
+// for one `dayOfWeek` is set to `active` in one Core transaction, so the weekly editor's toggle
+// can't leave a multi-rule day half-flipped. Slash-action path like `/rules/replace` above (never
+// shadowed by `/availability/rules/:id`); `csrfGuard` + `withMutation` like every other write.
+availabilityRoutes.post("/availability/rules/active", csrfGuard, withMutation(setDayActive));
 
 // The atomic single-day override replace (CTL-56 v2.1 B2): a STATE-MUTATING POST — the guide's
 // same-kind exceptions for the date are replaced by exactly the supplied windows in one Core

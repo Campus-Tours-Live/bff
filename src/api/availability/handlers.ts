@@ -168,6 +168,23 @@ export async function replaceRules(req: Request, res: Response, core: CoreClient
   sendWrite(res, data, affectedBookings, z.array(AvailabilityRuleResponseSchema));
 }
 
+/**
+ * Atomic day on/off toggle (`POST /v1/availability/rules/active`) — CTL-60. Forwards the body
+ * `{dayOfWeek, active}` to Core, which sets EVERY one of the guide's rules for that weekday to
+ * `active` in one transaction (all change or none do; rules are never deleted). Same Contract-A
+ * reshape as {@link replaceRules}: `data` (all of the day's rules after the toggle, active and
+ * inactive) passes through, `affectedBookings` is normalized to UTC `Z` by {@link sendWrite}. A
+ * Core 422 (bad `dayOfWeek`/`active`, or an activation that would overlap two ranges with
+ * different effective dates) relays VERBATIM via `withMutation`; CSRF-guarded like every write.
+ */
+export async function setDayActive(req: Request, res: Response, core: CoreClient): Promise<void> {
+  const { data, affectedBookings } = await core.postFull<
+    CoreAvailabilityRule[],
+    CoreAffectedBooking
+  >("/availability/rules/active", req.body, writeOpts(req, res));
+  sendWrite(res, data, affectedBookings, z.array(AvailabilityRuleResponseSchema));
+}
+
 // ---- Exceptions -----------------------------------------------------------------------------
 
 export async function getExceptions(_req: Request, res: Response, core: CoreClient): Promise<void> {
