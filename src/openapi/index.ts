@@ -44,6 +44,8 @@ import {
   writeEnvelope,
   BookingResponseSchema,
   BookingListSchema,
+  CartItemResponseSchema,
+  CartItemListSchema,
   CreateBookingRequestSchema,
   CancelBookingRequestSchema,
   CreateAvailabilityRuleRequestSchema,
@@ -105,6 +107,7 @@ const CoreTourSummarySchema = z.object({
 const CoreTourDetailSchema = CoreTourSummarySchema.extend({
   description: z.string().nullable().openapi({ description: "Public tour description." }),
   languages: z.array(z.string()).openapi({ description: "BCP-47 tour language tags." }),
+  features: z.array(z.string()).openapi({ description: "Selected tour feature codes." }),
   universitySlug: z.string().openapi({ description: "University URL-safe slug." }),
   universityCity: z.string().nullable().openapi({ description: "University city." }),
   universityRegion: z.string().nullable().openapi({ description: "University region or state." }),
@@ -186,6 +189,7 @@ const tourDetailExample = {
   ...tourSummaryExample,
   description: "A student-led walk through North Coast University's most popular landmarks.",
   languages: ["en-US"],
+  features: ["Q_AND_A"],
   universitySlug: "north-coast",
   universityCity: "Arcata",
   universityRegion: "CA",
@@ -639,7 +643,13 @@ const bookingExample = {
 
 const cancelledBookingExample = { ...bookingExample, status: "CANCELLED" };
 
-const cartItemExample = { ...bookingExample, status: "IN_CART" };
+const cartItemExample = {
+  ...bookingExample,
+  status: "DRAFT",
+  guideResponseDeadline: null,
+  cartStatus: "AVAILABLE",
+  currentPrice: { amount: 4200, currency: "USD" },
+};
 
 // POST /v1/bookings
 apiRoute({
@@ -703,9 +713,11 @@ apiRoute({
   tags: ["Booking"],
   summary: "Get the current cart",
   description:
-    "Returns the caller's current cart — bookings not yet checked out — in Contract-A shape.",
+    "Returns the caller's cart — DRAFT bookings not yet checked out — in Contract-A shape. Each " +
+    "item carries a fresh, display-only `cartStatus` and the offering's live `currentPrice`; " +
+    "a cart item never reserves the guide's time.",
   responses: {
-    200: enveloped(BookingListSchema, {
+    200: enveloped(CartItemListSchema, {
       description: "The caller's cart items.",
       example: envelope([cartItemExample]),
     }),
@@ -721,7 +733,7 @@ apiRoute({
   description: "Adds a bookable offering to the caller's cart and returns the new cart item.",
   request: { body: { content: { "application/json": { schema: CreateBookingRequestSchema } } } },
   responses: {
-    200: enveloped(BookingResponseSchema, {
+    200: enveloped(CartItemResponseSchema, {
       description: "The added cart item.",
       example: envelope(cartItemExample),
     }),
@@ -746,7 +758,7 @@ apiRoute({
     }),
   },
   responses: {
-    200: enveloped(BookingListSchema, {
+    200: enveloped(CartItemListSchema, {
       description: "The remaining cart items.",
       example: envelope([{ ...cartItemExample, id: "b2" }]),
     }),

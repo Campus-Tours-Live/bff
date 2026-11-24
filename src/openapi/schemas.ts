@@ -16,6 +16,7 @@
  */
 import { z } from "zod";
 import { extendZodWithOpenApi, OpenAPIRegistry } from "@asteasolutions/zod-to-openapi";
+import { CART_ITEM_STATUSES } from "../api/_shared/reshape.js";
 
 // Adds the `.openapi()` metadata method onto Zod schemas. Must run before any schema
 // below uses it / is registered.
@@ -789,6 +790,20 @@ export const Offering = registry.register(
         description: "Long-form description (nullable/optional).",
         example: "A 45-minute walk through the parts of campus the official tour skips.",
       }),
+      languages: z
+        .array(z.string())
+        .optional()
+        .openapi({
+          description: "BCP-47 tour language tags; omitted only by older Core versions.",
+          example: ["en-US"],
+        }),
+      features: z
+        .array(z.string())
+        .optional()
+        .openapi({
+          description: "Selected tour feature codes; omitted only by older Core versions.",
+          example: ["Q_AND_A"],
+        }),
     })
     .openapi("Offering", { description: "A guide's sellable tour offering." }),
 );
@@ -824,9 +839,53 @@ export const BookingResponseSchema = z.object({
 /** Array of booking responses. */
 export const BookingListSchema = z.array(BookingResponseSchema);
 
+/** Core's display-only cart availability hint (CTL-83). Built from the reshaper's list so the
+ *  runtime type and the published enum can't drift. */
+export const CartItemStatusEnum = z.enum(CART_ITEM_STATUSES);
+
+/** A cart item (a DRAFT booking): every `BookingResponse` field plus the cart-only display
+ *  fields Core computes on each read (CTL-83). */
+export const CartItemResponseSchema = BookingResponseSchema.extend({
+  cartStatus: CartItemStatusEnum.nullable().openapi({
+    description:
+      "Display-only availability hint, recomputed on every read — NOT a reservation. First " +
+      "match wins: EXPIRED, TOUR_UNAVAILABLE, GUIDE_UNAVAILABLE, TIME_UNAVAILABLE, " +
+      "PRICE_CHANGED, AVAILABLE. Null only when Core does not report it.",
+    example: "AVAILABLE",
+  }),
+  currentPrice: MoneySchema.nullable().openapi({
+    description:
+      "The offering's live price. `price` is the snapshot taken at add-to-cart; they differ " +
+      "when the guide changed the price since (cartStatus PRICE_CHANGED). Null only when Core " +
+      "does not report it.",
+    example: { amount: 4200, currency: "USD" },
+  }),
+});
+
+/** Array of cart items. */
+export const CartItemListSchema = z.array(CartItemResponseSchema);
+
 // --- Dashboard payloads (GET /v1/dashboard, discriminated by `kind`) ---
 
 /** GET /v1/dashboard, guide variant (src/api/dashboard/guide.ts). */
+const GuideDashboardAvailability = z
+  .object({
+    offerings: z.boolean().openapi({
+      description:
+        "True when the offerings read succeeded; false means the empty list is a fallback.",
+      example: true,
+    }),
+    pendingBookingRequests: z.boolean().openapi({
+      description:
+        "True when the pending count is valid; false means zero is a fallback, not a confirmed count.",
+      example: true,
+    }),
+  })
+  .openapi("GuideDashboardAvailability", {
+    description:
+      "Availability of best-effort dashboard reads. Check these flags before displaying counts.",
+  });
+
 const GuideDashboard = z
   .object({
     kind: z
@@ -843,6 +902,14 @@ const GuideDashboard = z
     }),
     offerings: z.array(Offering).openapi({
       description: "The guide's offerings (best-effort — empty list if the Core read fails).",
+    }),
+    pendingBookingRequests: z.number().int().nonnegative().openapi({
+      description:
+        "Pending guide acceptance count. Display only when dataAvailability.pendingBookingRequests is true; otherwise zero is a compatibility fallback.",
+      example: 2,
+    }),
+    dataAvailability: GuideDashboardAvailability.optional().openapi({
+      description: "Best-effort read availability; omitted only by older BFF versions.",
     }),
     createdAt: z
       .string()
@@ -1014,8 +1081,12 @@ export const guideDashboardExample = envelope({
       priceCents: 2500,
       currency: "USD",
       description: "A 45-minute walk through the parts of campus the official tour skips.",
+      languages: ["en-US"],
+      features: ["Q_AND_A"],
     },
   ],
+  pendingBookingRequests: 2,
+  dataAvailability: { offerings: true, pendingBookingRequests: true },
   createdAt: "2025-09-01T12:00:00.000Z",
 });
 
@@ -1789,6 +1860,8 @@ export const GuideDashboardDataSchema = z.object({
   guideStatus: z.string().nullable(), // forwarded from Core — value not constrained here
   canPublish: z.boolean(), // BFF-derived
   offerings: z.array(LooseObject), // BFF owns "it's an array"; items are Core-opaque
+  pendingBookingRequests: z.number().int().nonnegative(), // BFF-derived from Core pending-actions
+  dataAvailability: GuideDashboardAvailability.optional(),
   createdAt: z.string().nullish(), // forwarded from Core (may be null, not just absent)
 });
 
