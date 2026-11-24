@@ -21,6 +21,8 @@ export { PUBLISHABLE_STATUS } from "./constants.js";
 export {
   toZ,
   reshapeBooking,
+  reshapeCartItem,
+  CART_ITEM_STATUSES,
   reshapeOccurrence,
   reshapeSlot,
   reshapeAffectedBooking,
@@ -28,6 +30,9 @@ export {
 export type {
   CoreBookingDetail,
   BookingResponse,
+  CoreCartItem,
+  CartItemResponse,
+  CartItemStatus,
   CoreOccurrence,
   OccurrenceResponse,
   CoreSlot,

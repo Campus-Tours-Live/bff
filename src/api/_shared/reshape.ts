@@ -56,6 +56,43 @@ export function reshapeBooking(c: CoreBookingDetail): BookingResponse {
   };
 }
 
+/** Core's display-only cart availability hint (CTL-83), in Core's first-match order. */
+export const CART_ITEM_STATUSES = [
+  "EXPIRED",
+  "TOUR_UNAVAILABLE",
+  "GUIDE_UNAVAILABLE",
+  "TIME_UNAVAILABLE",
+  "PRICE_CHANGED",
+  "AVAILABLE",
+] as const;
+export type CartItemStatus = (typeof CART_ITEM_STATUSES)[number];
+
+/** The Core `CartItemResponse` shape (Contract B, CTL-83): a superset of
+ *  `BookingDetailResponse` plus a fresh `cartStatus` hint and the offering's live
+ *  `currentPriceCents`. Both extras are optional so the bff keeps working against a Core that
+ *  predates them (it still returns plain `BookingDetailResponse`s for `/cart`). */
+export interface CoreCartItem extends CoreBookingDetail {
+  cartStatus?: CartItemStatus | null;
+  currentPriceCents?: number | null;
+}
+
+/** Contract-A cart item: a `BookingResponse` plus the cart-only display fields. */
+export interface CartItemResponse extends BookingResponse {
+  cartStatus: CartItemStatus | null;
+  currentPrice: { amount: number; currency: string } | null;
+}
+
+/** Reshape one Core cart item into Contract A: the booking reshape, plus `cartStatus` and the
+ *  live price as a money object (`price` stays the add-time snapshot). Missing extras → `null`. */
+export function reshapeCartItem(c: CoreCartItem): CartItemResponse {
+  return {
+    ...reshapeBooking(c),
+    cartStatus: c.cartStatus ?? null,
+    currentPrice:
+      c.currentPriceCents == null ? null : { amount: c.currentPriceCents, currency: c.currency },
+  };
+}
+
 /** The Core `ResolvedOccurrence` / `SlotResponse` shape (Contract B): an absolute UTC instant
  *  interval. Core's DTOs for occurrences and slots are structurally identical (both just
  *  `{ startAt, endAt }` `Instant`s), so the bff shares one Core-side type and one reshaper for
